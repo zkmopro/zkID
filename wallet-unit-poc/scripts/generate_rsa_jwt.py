@@ -6,8 +6,14 @@ Generates fake RS256-signed JWT test data for zero-knowledge circuit testing.
 The output format is compatible with circom circuits that verify RSA signatures.
 
 Usage:
+    # Generate raw test data
     python generate_rsa_jwt.py --output ../test_data/rsa_jwt_test.json
-    python generate_rsa_jwt.py --birthday "1040605"
+
+    # Generate circuit-compatible inputs directly
+    python generate_rsa_jwt.py --circuit-inputs --output ../circom/inputs/jwt_rs256/default.json
+
+    # Specify birthday (ROC format) and date for age verification
+    python generate_rsa_jwt.py --circuit-inputs --birthday "0750101" --year 2025 --month 1 --day 15
 """
 
 import argparse
@@ -177,6 +183,178 @@ def verify_rs256(message: bytes, signature: bytes, public_key: rsa.RSAPublicKey)
         return False
 
 
+def sha256_pad(message: bytes, max_length: int) -> tuple[list[int], int]:
+    """
+    Pad message according to SHA-256 specification.
+    Returns (padded_bytes, padded_length).
+    """
+    msg_len = len(message)
+    bit_len = msg_len * 8
+
+    # Calculate padding
+    # Message + 1 bit + padding + 64-bit length
+    # Total must be multiple of 512 bits (64 bytes)
+    padding_len = (55 - msg_len) % 64
+    if padding_len < 0:
+        padding_len += 64
+
+    padded_len = msg_len + 1 + padding_len + 8
+
+    # Build padded message
+    padded = bytearray(max_length)
+    padded[:msg_len] = message
+    padded[msg_len] = 0x80  # Append '1' bit
+
+    # Append length in big-endian
+    length_bytes = bit_len.to_bytes(8, 'big')
+    padded[padded_len - 8:padded_len] = length_bytes
+
+    return list(padded), padded_len
+
+
+def string_to_padded_bigint_array(s: str, pad_length: int) -> list[str]:
+    """Convert string to padded array of BigInt strings."""
+    values = [str(ord(c)) for c in s]
+    while len(values) < pad_length:
+        values.append("0")
+    return values
+
+
+def encode_claims_for_circuit(
+    claims: list[str],
+    max_claims: int,
+    max_claim_length: int
+) -> tuple[list[list[str]], list[str]]:
+    """
+    Encode claims for circuit input with SHA-256 padding.
+    Returns (claim_arrays, claim_lengths).
+    """
+    claim_arrays = []
+    claim_lengths = []
+
+    for i in range(max_claims):
+        if i < len(claims):
+            claim = claims[i]
+            claim_bytes = claim.encode('utf-8')
+            padded, _ = sha256_pad(claim_bytes, max_claim_length)
+            claim_arrays.append([str(b) for b in padded])
+            claim_lengths.append(str(len(claim)))
+        else:
+            claim_arrays.append(["0"] * max_claim_length)
+            claim_lengths.append("0")
+
+    return claim_arrays, claim_lengths
+
+
+def generate_circuit_inputs(
+    test_data: dict[str, Any],
+    max_message_length: int = 1920,
+    max_b64_payload_length: int = 1900,
+    max_matches: int = 4,
+    max_substring_length: int = 50,
+    max_claims_length: int = 128,
+    current_year: int = None,
+    current_month: int = None,
+    current_day: int = None
+) -> dict[str, Any]:
+    """
+    Generate complete circuit inputs from test data.
+
+    Args:
+        test_data: Output from generate_rsa_jwt_test_data()
+        max_message_length: Maximum message length (default 1920)
+        max_b64_payload_length: Maximum base64 payload length (default 1900)
+        max_matches: Maximum number of matches (default 4)
+        max_substring_length: Maximum substring length (default 50)
+        max_claims_length: Maximum claim length (default 128)
+        current_year: Current year for age verification (default: current year)
+        current_month: Current month for age verification (default: current month)
+        current_day: Current day for age verification (default: current day)
+
+    Returns:
+        Dictionary of circuit inputs ready for circom.
+    """
+    import datetime
+
+    # Use current date if not specified
+    if current_year is None:
+        now = datetime.datetime.now()
+        current_year = now.year
+        current_month = now.month
+        current_day = now.day
+
+    # Get message bytes with SHA-256 padding
+    message_raw = test_data["message"]["raw"]
+    message_bytes = message_raw.encode('ascii')
+    padded_message, padded_len = sha256_pad(message_bytes, max_message_length)
+
+    # Decode payload for substring matching
+    payload_b64 = test_data["jwt"]["payload"]
+    payload_json = base64url_decode(payload_b64).decode('utf-8')
+
+    # Find hashed claims in the payload
+    claims = test_data["claims"]
+    hashed_claims = test_data["hashedClaims"]
+
+    # Build match arrays for the hashed claims
+    match_substrings = []
+    match_lengths = []
+    match_indices = []
+
+    for hashed in hashed_claims:
+        if len(match_substrings) >= max_matches:
+            break
+        index = payload_json.find(hashed)
+        if index != -1:
+            match_substrings.append(string_to_padded_bigint_array(hashed, max_substring_length))
+            match_lengths.append(str(len(hashed)))
+            match_indices.append(str(index))
+
+    # Pad to max_matches
+    while len(match_substrings) < max_matches:
+        match_substrings.append(["0"] * max_substring_length)
+        match_lengths.append("0")
+        match_indices.append("0")
+
+    # Encode claims for circuit
+    encoded_claims = [c["encoded"] for c in claims]
+    claim_arrays, claim_lengths = encode_claims_for_circuit(
+        encoded_claims, max_matches, max_claims_length
+    )
+
+    # Create decode flags (decode all real claims)
+    decode_flags = ["1"] * len(claims) + ["0"] * (max_matches - len(claims))
+
+    # Find age claim index
+    age_claim_index = 0
+    for i, claim in enumerate(claims):
+        if claim["key"] == "roc_birthday":
+            age_claim_index = i
+            break
+
+    # Build circuit inputs
+    circuit_inputs = {
+        "message": [str(b) for b in padded_message],
+        "messageLength": str(padded_len),
+        "periodIndex": str(message_raw.index(".")),
+        "rsaModulus": test_data["rsaPublicKey"]["nLimbs"],
+        "rsaSignature": test_data["signatureLimbs"],
+        "matchesCount": str(len(hashed_claims)),
+        "matchSubstring": match_substrings,
+        "matchLength": match_lengths,
+        "matchIndex": match_indices,
+        "claims": claim_arrays,
+        "claimLengths": claim_lengths,
+        "decodeFlags": decode_flags,
+        "ageClaimIndex": str(age_claim_index),
+        "currentYear": str(current_year),
+        "currentMonth": str(current_month),
+        "currentDay": str(current_day)
+    }
+
+    return circuit_inputs
+
+
 def generate_rsa_jwt_test_data(birthday: str = "1040605") -> dict[str, Any]:
     """
     Generate complete RS256 JWT test data for circuit testing.
@@ -313,13 +491,36 @@ def main():
     parser.add_argument(
         "--birthday", "-b",
         type=str,
-        default="1040605",
-        help="ROC birthday in YYYMMDD format (default: 1040605)"
+        default="0750101",
+        help="ROC birthday in YYYMMDD format (default: 0750101 = 1986-01-01, age ~39)"
     )
     parser.add_argument(
         "--pretty", "-p",
         action="store_true",
         help="Pretty print JSON output"
+    )
+    parser.add_argument(
+        "--circuit-inputs", "-c",
+        action="store_true",
+        help="Generate circuit-compatible input format directly"
+    )
+    parser.add_argument(
+        "--year",
+        type=int,
+        default=None,
+        help="Current year for age verification (default: current year)"
+    )
+    parser.add_argument(
+        "--month",
+        type=int,
+        default=None,
+        help="Current month for age verification (default: current month)"
+    )
+    parser.add_argument(
+        "--day",
+        type=int,
+        default=None,
+        help="Current day for age verification (default: current day)"
     )
 
     args = parser.parse_args()
@@ -327,9 +528,20 @@ def main():
     # Generate test data
     test_data = generate_rsa_jwt_test_data(birthday=args.birthday)
 
+    # Convert to circuit inputs if requested
+    if args.circuit_inputs:
+        output_data = generate_circuit_inputs(
+            test_data,
+            current_year=args.year,
+            current_month=args.month,
+            current_day=args.day
+        )
+    else:
+        output_data = test_data
+
     # Format output
     indent = 2 if args.pretty else None
-    json_output = json.dumps(test_data, indent=indent)
+    json_output = json.dumps(output_data, indent=indent)
 
     # Write or print
     if args.output:
@@ -343,6 +555,8 @@ def main():
         print(f"  JWT length: {len(test_data['jwt']['token'])} chars")
         print(f"  Message length: {test_data['message']['length']} bytes")
         print(f"  Claims: {len(test_data['claims'])}")
+        if args.circuit_inputs:
+            print(f"  Output format: Circuit inputs")
     else:
         print(json_output)
 
