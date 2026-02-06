@@ -13,6 +13,7 @@
     "compile:jwt": "bash scripts/compile.sh jwt",
     "compile:show": "bash scripts/compile.sh show",
     "compile:ecdsa": "bash scripts/compile.sh ecdsa",
+    "compile:jwt_rs256": "bash scripts/compile.sh jwt_rs256",
     "compile:all": "bash scripts/compile.sh all",
     "setup": "npx circomkit setup jwt",
     "prove": "npx circomkit prove jwt",
