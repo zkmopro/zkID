@@ -143,6 +143,12 @@ pub mod keys {
     pub const SHOW_WITNESS: &str = "show_witness.bin";
     pub const SHOW_INSTANCE: &str = "show_instance.bin";
     pub const SHARED_BLINDS: &str = "shared_blinds.bin";
+    // JWT RS256 circuit keys (single-stage, no device binding)
+    pub const JWT_RS256_PROVING_KEY: &str = "jwt_rs256_proving.key";
+    pub const JWT_RS256_VERIFYING_KEY: &str = "jwt_rs256_verifying.key";
+    pub const JWT_RS256_PROOF: &str = "jwt_rs256_proof.bin";
+    pub const JWT_RS256_WITNESS: &str = "jwt_rs256_witness.bin";
+    pub const JWT_RS256_INSTANCE: &str = "jwt_rs256_instance.bin";
 }
 
 #[cfg(test)]

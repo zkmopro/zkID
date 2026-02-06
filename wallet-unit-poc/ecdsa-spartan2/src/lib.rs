@@ -18,7 +18,10 @@ pub mod setup;
 pub mod utils;
 
 // Re-export commonly used types and functions
-pub use circuits::{prepare_circuit::PrepareCircuit, show_circuit::ShowCircuit};
+pub use circuits::{
+    jwt_rs256_circuit::JwtRs256Circuit, prepare_circuit::PrepareCircuit,
+    show_circuit::ShowCircuit,
+};
 pub use paths::PathConfig;
 pub use prover::{
     generate_prepare_witness, generate_shared_blinds, prove_circuit, prove_circuit_in_memory,
