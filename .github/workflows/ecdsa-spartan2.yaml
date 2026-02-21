@@ -41,24 +41,15 @@ jobs:
       - name: Install dependencies
         run: cd wallet-unit-poc/circom && yarn
 
-      - name: Compile JWT circuit
-        run: cd wallet-unit-poc/circom && yarn compile:jwt
+      - name: Compile JWT-RS256 circuit
+        run: cd wallet-unit-poc/circom && yarn compile:jwt_rs256
 
-      - name: Compile Show circuit
-        run: cd wallet-unit-poc/circom && yarn compile:show
-
-      - name: Run ecdsa-spartan2 end-to-end flow
+      - name: Run jwt_rs256 end-to-end flow
         run: |
           cd wallet-unit-poc/ecdsa-spartan2
-          cargo run --release -- prepare setup --input ../circom/inputs/jwt/default.json
-          cargo run --release -- show setup --input ../circom/inputs/show/default.json
-          cargo run --release -- generate_shared_blinds
-          cargo run --release -- prepare prove --input ../circom/inputs/jwt/default.json
-          RUST_LOG=info cargo run --release -- prepare reblind
-          RUST_LOG=info cargo run --release -- show prove --input ../circom/inputs/show/default.json
-          RUST_LOG=info cargo run --release -- show reblind
-          cargo run --release -- prepare verify
-          cargo run --release -- show verify
+          cargo run --release -- jwt_rs256 setup --input ../circom/inputs/jwt_rs256/default.json
+          cargo run --release -- jwt_rs256 prove --input ../circom/inputs/jwt_rs256/default.json
+          cargo run --release -- jwt_rs256 verify
 
       - name: Run tests
-        run: cd wallet-unit-poc/circom && yarn test
+        run: cd wallet-unit-poc/circom && yarn test tests/circuits/jwt_rs256.test.ts
