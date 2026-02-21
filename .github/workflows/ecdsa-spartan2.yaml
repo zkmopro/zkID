@@ -13,6 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -51,5 +56,5 @@ jobs:
           cargo run --release -- jwt_rs256 prove --input ../circom/inputs/jwt_rs256/default.json
           cargo run --release -- jwt_rs256 verify
 
-      - name: Run tests
+      - name: Run circom tests
         run: cd wallet-unit-poc/circom && yarn test tests/circuits/jwt_rs256.test.ts

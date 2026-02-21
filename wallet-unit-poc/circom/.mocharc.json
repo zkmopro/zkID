@@ -2,8 +2,7 @@
   "extension": [
     "ts"
   ],
-  "require": "ts-node/register",
-  "spec": "tests/**/*.test.ts",
+  "node-option": ["import=tsx"],
   "timeout": 900000,
   "exit": true
 }
