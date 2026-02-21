@@ -8,11 +8,11 @@ fn main() {
         .parent() // Go up from ecdsa-spartan2/ to wallet-unit-poc/
         .expect("Failed to get parent directory")
         .join("circom/build/cpp");
-    let circuits_path = circuits_dir.to_str().unwrap();
+
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
 
     // Check for pre-built witnesscalc cache from build_pod.sh
     if let Ok(witnesscalc_cache) = std::env::var("WITNESSCALC_PREBUILD_CACHE") {
-        let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
         let target = std::env::var("TARGET").unwrap_or_default();
 
         // Only apply for iOS targets
@@ -37,5 +37,30 @@ fn main() {
         }
     }
 
-    witnesscalc_adapter::build_and_link(circuits_path);
+    // Stage only jwt_rs256 circuit files so build_and_link doesn't try to
+    // compile ES256 circuits (jwt.cpp/show.cpp) that may not exist in CI.
+    let staging_dir = Path::new(&out_dir).join("circuit_staging");
+    std::fs::create_dir_all(&staging_dir).expect("Failed to create staging directory");
+
+    for ext in &["cpp", "dat"] {
+        let src = circuits_dir.join(format!("jwt_rs256.{}", ext));
+        let dst = staging_dir.join(format!("jwt_rs256.{}", ext));
+        if src.exists() {
+            std::fs::copy(&src, &dst).unwrap_or_else(|e| {
+                panic!(
+                    "Failed to copy {} to {}: {}",
+                    src.display(),
+                    dst.display(),
+                    e
+                )
+            });
+        } else {
+            panic!(
+                "Required circuit file not found: {}. Run `yarn compile:jwt_rs256` in the circom directory first.",
+                src.display()
+            );
+        }
+    }
+
+    witnesscalc_adapter::build_and_link(staging_dir.to_str().unwrap());
 }

@@ -1,19 +1,13 @@
-use std::{fs::File, path::Path, time::Instant};
+use std::{path::Path, time::Instant};
 
 use crate::{
-    circuits::prepare_circuit::jwt_witness,
-    paths::PathConfig,
     setup::{
         load_instance, load_proof, load_proving_key, load_shared_blinds, load_verifying_key,
-        load_witness, save_instance, save_proof, save_shared_blinds, save_witness,
+        load_witness, save_instance, save_proof, save_witness,
     },
-    utils::{hashmap_to_json_string, parse_jwt_inputs, parse_witness},
     Scalar, E,
 };
 
-use bellpepper_core::SynthesisError;
-use ff::{derive::rand_core::OsRng, Field};
-use serde_json::Value;
 use spartan2::{
     bellpepper::{solver::SatisfyingAssignment, zk_r1cs::SpartanWitness},
     errors::SpartanError,
@@ -60,14 +54,6 @@ pub fn run_circuit<C: SpartanCircuit<E> + Clone + std::fmt::Debug>(circuit: C) {
     );
 
     info!("comm_W_shared: {:?}", proof.comm_W_shared());
-}
-
-pub fn generate_shared_blinds<E: Engine>(shared_blinds_path: impl AsRef<Path>, n: usize) {
-    let blinds: Vec<_> = (0..n).map(|_| E::Scalar::random(OsRng)).collect();
-    if let Err(e) = save_shared_blinds::<E>(shared_blinds_path, &blinds) {
-        eprintln!("Failed to save instance: {}", e);
-        std::process::exit(1);
-    }
 }
 
 /// Only run the proving part of the circuit using ZK-Spartan (prep_prove, prove)
@@ -375,45 +361,4 @@ pub fn verify_circuit_with_loaded_data(
 
     info!("Verification successful! Time: {} ms", verify_ms);
     public_values
-}
-
-/// Generate witness for the Prepare circuit.
-/// Returns the full witness vector, the decoded age-claim bytes, and the extracted KeyBindingX/Y values.
-///
-/// # Arguments
-/// * `config` - Path configuration for resolving file paths
-/// * `input_json_path` - Optional override for input JSON path (absolute or relative to config.base_dir)
-pub fn generate_prepare_witness(
-    config: &PathConfig,
-    input_json_path: Option<&Path>,
-) -> Result<Vec<Scalar>, SynthesisError> {
-    let json_path = input_json_path
-        .map(|p| config.resolve(p))
-        .unwrap_or_else(|| config.input_json("jwt"));
-
-    info!("Loading prepare inputs from {}", json_path.display());
-
-    let json_file = File::open(&json_path).map_err(|_| SynthesisError::AssignmentMissing)?;
-
-    let json_value: Value =
-        serde_json::from_reader(json_file).map_err(|_| SynthesisError::AssignmentMissing)?;
-
-    // Parse inputs using declarative field definitions
-    let inputs = parse_jwt_inputs(&json_value)?;
-
-    // Generate witness using witnesscalc
-    info!("Generating witness using witnesscalc...");
-    let t0 = Instant::now();
-
-    let inputs_json = hashmap_to_json_string(&inputs)?;
-
-    // Generate raw witness bytes
-    let witness_bytes = jwt_witness(&inputs_json).map_err(|_| SynthesisError::Unsatisfiable)?;
-
-    info!("witnesscalc time: {} ms", t0.elapsed().as_millis());
-
-    // Parse witness bytes directly to Scalar
-    let witness = parse_witness(&witness_bytes)?;
-
-    Ok(witness)
 }

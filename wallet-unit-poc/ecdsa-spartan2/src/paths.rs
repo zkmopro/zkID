@@ -32,10 +32,9 @@ impl PathConfig {
     /// Create config for mobile environment.
     ///
     /// Mobile apps typically extract assets to a Documents directory with a flat structure:
-    /// - `{documents}/jwt_input.json`
-    /// - `{documents}/show_input.json`
+    /// - `{documents}/jwt_rs256_input.json`
     /// - `{documents}/keys/*.key`
-    /// - `{documents}/circom/build/jwt/jwt_js/jwt.r1cs`
+    /// - `{documents}/circom/build/jwt_rs256/jwt_rs256_js/jwt_rs256.r1cs`
     pub fn mobile(documents_path: impl Into<PathBuf>) -> Self {
         Self {
             base_dir: documents_path.into(),
@@ -46,10 +45,9 @@ impl PathConfig {
     /// Create config for development environment.
     ///
     /// Development uses nested paths relative to the current working directory:
-    /// - `../circom/inputs/jwt/default.json`
-    /// - `../circom/inputs/show/default.json`
+    /// - `../circom/inputs/jwt_rs256/default.json`
     /// - `keys/*.key`
-    /// - `../circom/build/jwt/jwt_js/jwt.r1cs`
+    /// - `../circom/build/jwt_rs256/jwt_rs256_js/jwt_rs256.r1cs`
     pub fn development() -> Self {
         Self {
             base_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -60,7 +58,7 @@ impl PathConfig {
     /// Resolve the input JSON path for a circuit.
     ///
     /// # Arguments
-    /// * `circuit` - Circuit name: "jwt" for Prepare circuit, "show" for Show circuit
+    /// * `circuit` - Circuit name (e.g., "jwt_rs256")
     ///
     /// # Returns
     /// Full path to the input JSON file.
@@ -78,7 +76,7 @@ impl PathConfig {
     /// Resolve the R1CS file path for a circuit.
     ///
     /// # Arguments
-    /// * `circuit` - Circuit name: "jwt" or "show"
+    /// * `circuit` - Circuit name (e.g., "jwt_rs256")
     ///
     /// # Returns
     /// Full path to the R1CS file.
@@ -93,7 +91,7 @@ impl PathConfig {
     /// Resolve a key file path (proving/verifying keys).
     ///
     /// # Arguments
-    /// * `name` - Key filename (e.g., "prepare_proving.key")
+    /// * `name` - Key filename (e.g., "jwt_rs256_proving.key")
     ///
     /// # Returns
     /// Full path to the key file.
@@ -104,17 +102,12 @@ impl PathConfig {
     /// Resolve an artifact file path (proofs, witnesses, instances).
     ///
     /// # Arguments
-    /// * `name` - Artifact filename (e.g., "prepare_proof.bin")
+    /// * `name` - Artifact filename (e.g., "jwt_rs256_proof.bin")
     ///
     /// # Returns
     /// Full path to the artifact file.
     pub fn artifact_path(&self, name: &str) -> PathBuf {
         self.base_dir.join("keys").join(name)
-    }
-
-    /// Resolve the shared blinds file path.
-    pub fn shared_blinds_path(&self) -> PathBuf {
-        self.artifact_path("shared_blinds.bin")
     }
 
     /// Resolve an absolute path, joining relative paths with base_dir.
@@ -132,18 +125,6 @@ impl PathConfig {
 
 // Key file name constants
 pub mod keys {
-    pub const PREPARE_PROVING_KEY: &str = "prepare_proving.key";
-    pub const PREPARE_VERIFYING_KEY: &str = "prepare_verifying.key";
-    pub const SHOW_PROVING_KEY: &str = "show_proving.key";
-    pub const SHOW_VERIFYING_KEY: &str = "show_verifying.key";
-    pub const PREPARE_PROOF: &str = "prepare_proof.bin";
-    pub const PREPARE_WITNESS: &str = "prepare_witness.bin";
-    pub const PREPARE_INSTANCE: &str = "prepare_instance.bin";
-    pub const SHOW_PROOF: &str = "show_proof.bin";
-    pub const SHOW_WITNESS: &str = "show_witness.bin";
-    pub const SHOW_INSTANCE: &str = "show_instance.bin";
-    pub const SHARED_BLINDS: &str = "shared_blinds.bin";
-    // JWT RS256 circuit keys (single-stage, no device binding)
     pub const JWT_RS256_PROVING_KEY: &str = "jwt_rs256_proving.key";
     pub const JWT_RS256_VERIFYING_KEY: &str = "jwt_rs256_verifying.key";
     pub const JWT_RS256_PROOF: &str = "jwt_rs256_proof.bin";
@@ -160,16 +141,12 @@ mod tests {
         let config = PathConfig::mobile("/app/Documents");
 
         assert_eq!(
-            config.input_json("jwt"),
-            PathBuf::from("/app/Documents/jwt_input.json")
+            config.input_json("jwt_rs256"),
+            PathBuf::from("/app/Documents/jwt_rs256_input.json")
         );
         assert_eq!(
-            config.input_json("show"),
-            PathBuf::from("/app/Documents/show_input.json")
-        );
-        assert_eq!(
-            config.key_path("prepare_proving.key"),
-            PathBuf::from("/app/Documents/keys/prepare_proving.key")
+            config.key_path("jwt_rs256_proving.key"),
+            PathBuf::from("/app/Documents/keys/jwt_rs256_proving.key")
         );
     }
 
@@ -178,12 +155,8 @@ mod tests {
         let config = PathConfig::new("/project", false);
 
         assert_eq!(
-            config.input_json("jwt"),
-            PathBuf::from("/project/../circom/inputs/jwt/default.json")
-        );
-        assert_eq!(
-            config.input_json("show"),
-            PathBuf::from("/project/../circom/inputs/show/default.json")
+            config.input_json("jwt_rs256"),
+            PathBuf::from("/project/../circom/inputs/jwt_rs256/default.json")
         );
     }
 
