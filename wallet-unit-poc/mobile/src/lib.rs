@@ -303,24 +303,76 @@ mod tests {
     }
 
     #[test]
-    fn test_setup_keys_creates_circuit() {
-        let config = PathConfig::mobile("/tmp/test_docs");
-        let circuit = JwtRs256Circuit::new(config, None);
-        // Just verify the circuit can be created without panicking
-        let _ = format!("{:?}", circuit);
-    }
+    fn test_complete_benchmark_e2e() {
+        use std::os::unix::fs::symlink;
 
-    #[test]
-    fn test_invalid_documents_path() {
-        let result = verify("/nonexistent/path".to_string());
-        assert!(result.is_err() || result.is_ok());
-        // verify_circuit panics on missing files, so we just ensure it doesn't cause UB
-    }
+        let tempdir = tempfile::tempdir().expect("Failed to create tempdir");
+        let dir = tempdir.path();
 
-    #[test]
-    fn test_prove_without_setup() {
-        let result = prove("/tmp/no_keys_here".to_string(), None);
-        // prove_circuit panics when keys don't exist, so we just verify it doesn't cause UB
-        assert!(result.is_err() || result.is_ok());
+        // Resolve source paths relative to this crate's manifest directory
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let r1cs_src = manifest.join("../circom/build/jwt_rs256/jwt_rs256_js/jwt_rs256.r1cs");
+        let input_src = manifest.join("../circom/inputs/jwt_rs256/default.json");
+
+        assert!(
+            r1cs_src.exists(),
+            "R1CS not found at {}. Run `yarn compile:jwt_rs256` first.",
+            r1cs_src.display()
+        );
+        assert!(
+            input_src.exists(),
+            "Input JSON not found at {}",
+            input_src.display()
+        );
+
+        // Mobile PathConfig expects flat structure: {dir}/jwt_rs256.r1cs, {dir}/jwt_rs256_input.json
+        symlink(&r1cs_src, dir.join("jwt_rs256.r1cs")).expect("Failed to symlink R1CS");
+        symlink(&input_src, dir.join("jwt_rs256_input.json")).expect("Failed to symlink input");
+
+        // Create keys/ subdirectory for output artifacts
+        std::fs::create_dir(dir.join("keys")).expect("Failed to create keys dir");
+
+        let results = run_complete_benchmark(dir.to_string_lossy().to_string(), None)
+            .expect("run_complete_benchmark failed");
+
+        // Verify all timing metrics are positive
+        assert!(results.setup_ms > 0, "setup_ms should be > 0");
+        assert!(results.prove_ms > 0, "prove_ms should be > 0");
+        assert!(results.verify_ms > 0, "verify_ms should be > 0");
+
+        // Verify all size metrics are positive
+        assert!(
+            results.proving_key_bytes > 0,
+            "proving_key_bytes should be > 0"
+        );
+        assert!(
+            results.verifying_key_bytes > 0,
+            "verifying_key_bytes should be > 0"
+        );
+        assert!(results.proof_bytes > 0, "proof_bytes should be > 0");
+        assert!(results.witness_bytes > 0, "witness_bytes should be > 0");
+
+        // Verify all output files exist in keys/
+        let keys_dir = dir.join("keys");
+        assert!(keys_dir.join("jwt_rs256_proving.key").exists());
+        assert!(keys_dir.join("jwt_rs256_verifying.key").exists());
+        assert!(keys_dir.join("jwt_rs256_proof.bin").exists());
+        assert!(keys_dir.join("jwt_rs256_witness.bin").exists());
+        assert!(keys_dir.join("jwt_rs256_instance.bin").exists());
+
+        // Print results for CI visibility
+        eprintln!("\n=== Benchmark Results ===");
+        eprintln!("Setup:  {}ms", results.setup_ms);
+        eprintln!("Prove:  {}ms", results.prove_ms);
+        eprintln!("Verify: {}ms", results.verify_ms);
+        eprintln!(
+            "PK: {}, VK: {}, Proof: {}, Witness: {}",
+            BenchmarkResults::format_size(results.proving_key_bytes),
+            BenchmarkResults::format_size(results.verifying_key_bytes),
+            BenchmarkResults::format_size(results.proof_bytes),
+            BenchmarkResults::format_size(results.witness_bytes),
+        );
+
+        // tempdir auto-cleans on drop
     }
 }

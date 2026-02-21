@@ -56,5 +56,10 @@ jobs:
           cargo run --release -- jwt_rs256 prove --input ../circom/inputs/jwt_rs256/default.json
           cargo run --release -- jwt_rs256 verify
 
+      - name: Run mopro API tests
+        run: |
+          cd wallet-unit-poc/mobile
+          cargo test --release --no-default-features --lib
+
       - name: Run circom tests
         run: cd wallet-unit-poc/circom && yarn test tests/circuits/jwt_rs256.test.ts
