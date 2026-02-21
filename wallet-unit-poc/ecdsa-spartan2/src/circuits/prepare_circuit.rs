@@ -57,14 +57,6 @@ impl PrepareCircuit {
         }
     }
 
-    /// Resolve the input JSON path using PathConfig.
-    fn resolve_input_json(&self) -> PathBuf {
-        self.input_path
-            .as_ref()
-            .map(|p| self.path_config.resolve(p))
-            .unwrap_or_else(|| self.path_config.input_json("jwt"))
-    }
-
     /// Get the R1CS file path.
     fn r1cs_path(&self) -> PathBuf {
         self.path_config.r1cs_path("jwt")

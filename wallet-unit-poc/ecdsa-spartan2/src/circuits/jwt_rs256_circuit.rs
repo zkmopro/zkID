@@ -6,8 +6,16 @@
 use crate::{paths::PathConfig, utils::parse_witness, Scalar, E};
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use circom_scotia::{reader::load_r1cs, synthesize};
+use ff::Field;
 use spartan2::traits::circuit::SpartanCircuit;
-use std::{any::type_name, fs::File, io::Read, path::PathBuf, time::Instant};
+use std::{
+    any::type_name,
+    fs::File,
+    io::Read,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 use tracing::info;
 
 witnesscalc_adapter::witness!(jwt_rs256);
@@ -27,6 +35,8 @@ pub struct JwtRs256Circuit {
     path_config: PathConfig,
     /// Optional override for input JSON path
     input_path: Option<PathBuf>,
+    /// Cached witness for reuse across synthesize and public_values calls
+    cached_witness: Arc<Mutex<Option<Vec<Scalar>>>>,
 }
 
 impl Default for JwtRs256Circuit {
@@ -34,6 +44,7 @@ impl Default for JwtRs256Circuit {
         Self {
             path_config: PathConfig::default(),
             input_path: None,
+            cached_witness: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -44,6 +55,7 @@ impl JwtRs256Circuit {
         Self {
             path_config,
             input_path,
+            cached_witness: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -53,6 +65,7 @@ impl JwtRs256Circuit {
         Self {
             path_config: PathConfig::development(),
             input_path: path.into(),
+            cached_witness: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -94,10 +107,20 @@ impl JwtRs256Circuit {
         info!("witnesscalc time: {} ms", t0.elapsed().as_millis());
 
         let witness = parse_witness(&witness_bytes)?;
-        info!(
-            "witness generation completed: {} elements",
-            witness.len()
-        );
+        info!("witness generation completed: {} elements", witness.len());
+        Ok(witness)
+    }
+
+    /// Get cached witness or generate and cache it.
+    fn get_or_generate_witness(&self) -> Result<Vec<Scalar>, SynthesisError> {
+        let mut cache = self.cached_witness.lock().unwrap();
+
+        if let Some(ref witness) = *cache {
+            return Ok(witness.clone());
+        }
+
+        let witness = self.generate_witness()?;
+        *cache = Some(witness.clone());
         Ok(witness)
     }
 }
@@ -120,15 +143,15 @@ impl SpartanCircuit<E> for JwtRs256Circuit {
         if is_setup_phase {
             let r1cs = load_r1cs(&r1cs_path);
             // Pass None for witness during setup
-            synthesize(cs, r1cs, None)?;
+            synthesize(cs, r1cs.unwrap(), None)?;
             return Ok(());
         }
 
         // Generate witness for prove phase
-        let witness = self.generate_witness()?;
+        let witness = self.get_or_generate_witness()?;
 
         let r1cs = load_r1cs(&r1cs_path);
-        synthesize(cs, r1cs, Some(witness))?;
+        synthesize(cs, r1cs.unwrap(), Some(witness))?;
         Ok(())
     }
 
@@ -141,11 +164,16 @@ impl SpartanCircuit<E> for JwtRs256Circuit {
         Ok(vec![])
     }
 
-    /// RS256 circuit has RSA modulus as public input
+    /// RS256 circuit public inputs
     fn public_values(&self) -> Result<Vec<Scalar>, SynthesisError> {
-        // The RSA modulus is a public input (17 limbs of 121 bits each)
-        // For now, we return empty since public inputs are handled by the circuit itself
-        Ok(vec![])
+        let num_public = 18; // 1 (ageAbove18) + 17 (rsaModulus limbs)
+        let witness = self.get_or_generate_witness().ok();
+
+        let mut values = Vec::with_capacity(num_public);
+        for idx in 1..=num_public {
+            values.push(witness.as_ref().map(|w| w[idx]).unwrap_or(Scalar::ZERO));
+        }
+        Ok(values)
     }
 
     fn precommitted<CS: ConstraintSystem<Scalar>>(
