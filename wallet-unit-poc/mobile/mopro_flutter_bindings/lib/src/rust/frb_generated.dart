@@ -64,7 +64,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1257199256;
+  int get rustContentHash => 2142212675;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -79,35 +79,13 @@ abstract class RustLibApi extends BaseApi {
     required BigInt bytes,
   });
 
-  Future<String> openacMobileAppGenerateSharedBlinds({
-    required String documentsPath,
-  });
-
-  Future<String> openacMobileAppGetCommWShared({
-    required String documentsPath,
-    required String circuitType,
-  });
-
   Future<void> openacMobileAppInitApp();
 
   Future<String> openacMobileAppMoproHelloWorld();
 
-  Future<ProofResult> openacMobileAppProvePrepare({
+  Future<ProofResult> openacMobileAppProve({
     required String documentsPath,
     String? inputPath,
-  });
-
-  Future<ProofResult> openacMobileAppProveShow({
-    required String documentsPath,
-    String? inputPath,
-  });
-
-  Future<ProofResult> openacMobileAppReblindPrepare({
-    required String documentsPath,
-  });
-
-  Future<ProofResult> openacMobileAppReblindShow({
-    required String documentsPath,
   });
 
   Future<BenchmarkResults> openacMobileAppRunCompleteBenchmark({
@@ -115,19 +93,12 @@ abstract class RustLibApi extends BaseApi {
     String? inputPath,
   });
 
-  Future<String> openacMobileAppSetupPrepareKeys({
+  Future<String> openacMobileAppSetupKeys({
     required String documentsPath,
     String? inputPath,
   });
 
-  Future<String> openacMobileAppSetupShowKeys({
-    required String documentsPath,
-    String? inputPath,
-  });
-
-  Future<bool> openacMobileAppVerifyPrepare({required String documentsPath});
-
-  Future<bool> openacMobileAppVerifyShow({required String documentsPath});
+  Future<bool> openacMobileAppVerify({required String documentsPath});
 
   RustArcIncrementStrongCountFnType
   get rust_arc_increment_strong_count_ZkProofError;
@@ -180,76 +151,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> openacMobileAppGenerateSharedBlinds({
-    required String documentsPath,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(documentsPath, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 2,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
-          decodeErrorData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
-        ),
-        constMeta: kOpenacMobileAppGenerateSharedBlindsConstMeta,
-        argValues: [documentsPath],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kOpenacMobileAppGenerateSharedBlindsConstMeta =>
-      const TaskConstMeta(
-        debugName: "generate_shared_blinds",
-        argNames: ["documentsPath"],
-      );
-
-  @override
-  Future<String> openacMobileAppGetCommWShared({
-    required String documentsPath,
-    required String circuitType,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(documentsPath, serializer);
-          sse_encode_String(circuitType, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 3,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
-          decodeErrorData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
-        ),
-        constMeta: kOpenacMobileAppGetCommWSharedConstMeta,
-        argValues: [documentsPath, circuitType],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kOpenacMobileAppGetCommWSharedConstMeta =>
-      const TaskConstMeta(
-        debugName: "get_comm_w_shared",
-        argNames: ["documentsPath", "circuitType"],
-      );
-
-  @override
   Future<void> openacMobileAppInitApp() {
     return handler.executeNormal(
       NormalTask(
@@ -258,7 +159,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 2,
             port: port_,
           );
         },
@@ -285,7 +186,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 3,
             port: port_,
           );
         },
@@ -304,7 +205,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "mopro_hello_world", argNames: []);
 
   @override
-  Future<ProofResult> openacMobileAppProvePrepare({
+  Future<ProofResult> openacMobileAppProve({
     required String documentsPath,
     String? inputPath,
   }) {
@@ -317,7 +218,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 4,
             port: port_,
           );
         },
@@ -326,119 +227,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData:
               sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
         ),
-        constMeta: kOpenacMobileAppProvePrepareConstMeta,
+        constMeta: kOpenacMobileAppProveConstMeta,
         argValues: [documentsPath, inputPath],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kOpenacMobileAppProvePrepareConstMeta =>
-      const TaskConstMeta(
-        debugName: "prove_prepare",
-        argNames: ["documentsPath", "inputPath"],
-      );
-
-  @override
-  Future<ProofResult> openacMobileAppProveShow({
-    required String documentsPath,
-    String? inputPath,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(documentsPath, serializer);
-          sse_encode_opt_String(inputPath, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 7,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_proof_result,
-          decodeErrorData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
-        ),
-        constMeta: kOpenacMobileAppProveShowConstMeta,
-        argValues: [documentsPath, inputPath],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kOpenacMobileAppProveShowConstMeta => const TaskConstMeta(
-    debugName: "prove_show",
+  TaskConstMeta get kOpenacMobileAppProveConstMeta => const TaskConstMeta(
+    debugName: "prove",
     argNames: ["documentsPath", "inputPath"],
-  );
-
-  @override
-  Future<ProofResult> openacMobileAppReblindPrepare({
-    required String documentsPath,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(documentsPath, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 8,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_proof_result,
-          decodeErrorData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
-        ),
-        constMeta: kOpenacMobileAppReblindPrepareConstMeta,
-        argValues: [documentsPath],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kOpenacMobileAppReblindPrepareConstMeta =>
-      const TaskConstMeta(
-        debugName: "reblind_prepare",
-        argNames: ["documentsPath"],
-      );
-
-  @override
-  Future<ProofResult> openacMobileAppReblindShow({
-    required String documentsPath,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(documentsPath, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 9,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_proof_result,
-          decodeErrorData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
-        ),
-        constMeta: kOpenacMobileAppReblindShowConstMeta,
-        argValues: [documentsPath],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kOpenacMobileAppReblindShowConstMeta => const TaskConstMeta(
-    debugName: "reblind_show",
-    argNames: ["documentsPath"],
   );
 
   @override
@@ -455,7 +253,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 5,
             port: port_,
           );
         },
@@ -478,7 +276,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> openacMobileAppSetupPrepareKeys({
+  Future<String> openacMobileAppSetupKeys({
     required String documentsPath,
     String? inputPath,
   }) {
@@ -491,7 +289,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 6,
             port: port_,
           );
         },
@@ -500,117 +298,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData:
               sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
         ),
-        constMeta: kOpenacMobileAppSetupPrepareKeysConstMeta,
+        constMeta: kOpenacMobileAppSetupKeysConstMeta,
         argValues: [documentsPath, inputPath],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kOpenacMobileAppSetupPrepareKeysConstMeta =>
-      const TaskConstMeta(
-        debugName: "setup_prepare_keys",
-        argNames: ["documentsPath", "inputPath"],
-      );
-
-  @override
-  Future<String> openacMobileAppSetupShowKeys({
-    required String documentsPath,
-    String? inputPath,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(documentsPath, serializer);
-          sse_encode_opt_String(inputPath, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 12,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
-          decodeErrorData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
-        ),
-        constMeta: kOpenacMobileAppSetupShowKeysConstMeta,
-        argValues: [documentsPath, inputPath],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kOpenacMobileAppSetupShowKeysConstMeta =>
-      const TaskConstMeta(
-        debugName: "setup_show_keys",
-        argNames: ["documentsPath", "inputPath"],
-      );
-
-  @override
-  Future<bool> openacMobileAppVerifyPrepare({required String documentsPath}) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(documentsPath, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 13,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_bool,
-          decodeErrorData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
-        ),
-        constMeta: kOpenacMobileAppVerifyPrepareConstMeta,
-        argValues: [documentsPath],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kOpenacMobileAppVerifyPrepareConstMeta =>
-      const TaskConstMeta(
-        debugName: "verify_prepare",
-        argNames: ["documentsPath"],
-      );
-
-  @override
-  Future<bool> openacMobileAppVerifyShow({required String documentsPath}) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(documentsPath, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 14,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_bool,
-          decodeErrorData:
-              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
-        ),
-        constMeta: kOpenacMobileAppVerifyShowConstMeta,
-        argValues: [documentsPath],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kOpenacMobileAppVerifyShowConstMeta => const TaskConstMeta(
-    debugName: "verify_show",
-    argNames: ["documentsPath"],
+  TaskConstMeta get kOpenacMobileAppSetupKeysConstMeta => const TaskConstMeta(
+    debugName: "setup_keys",
+    argNames: ["documentsPath", "inputPath"],
   );
+
+  @override
+  Future<bool> openacMobileAppVerify({required String documentsPath}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(documentsPath, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
+        ),
+        constMeta: kOpenacMobileAppVerifyConstMeta,
+        argValues: [documentsPath],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kOpenacMobileAppVerifyConstMeta =>
+      const TaskConstMeta(debugName: "verify", argNames: ["documentsPath"]);
 
   RustArcIncrementStrongCountFnType
   get rust_arc_increment_strong_count_ZkProofError => wire
@@ -648,26 +375,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BenchmarkResults dco_decode_benchmark_results(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 17)
-      throw Exception('unexpected arr length: expect 17 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return BenchmarkResults(
-      prepareSetupMs: dco_decode_u_64(arr[0]),
-      showSetupMs: dco_decode_u_64(arr[1]),
-      generateBlindsMs: dco_decode_u_64(arr[2]),
-      provePrepareMs: dco_decode_u_64(arr[3]),
-      reblindPrepareMs: dco_decode_u_64(arr[4]),
-      proveShowMs: dco_decode_u_64(arr[5]),
-      reblindShowMs: dco_decode_u_64(arr[6]),
-      verifyPrepareMs: dco_decode_u_64(arr[7]),
-      verifyShowMs: dco_decode_u_64(arr[8]),
-      prepareProvingKeyBytes: dco_decode_u_64(arr[9]),
-      prepareVerifyingKeyBytes: dco_decode_u_64(arr[10]),
-      showProvingKeyBytes: dco_decode_u_64(arr[11]),
-      showVerifyingKeyBytes: dco_decode_u_64(arr[12]),
-      prepareProofBytes: dco_decode_u_64(arr[13]),
-      showProofBytes: dco_decode_u_64(arr[14]),
-      prepareWitnessBytes: dco_decode_u_64(arr[15]),
-      showWitnessBytes: dco_decode_u_64(arr[16]),
+      setupMs: dco_decode_u_64(arr[0]),
+      proveMs: dco_decode_u_64(arr[1]),
+      verifyMs: dco_decode_u_64(arr[2]),
+      provingKeyBytes: dco_decode_u_64(arr[3]),
+      verifyingKeyBytes: dco_decode_u_64(arr[4]),
+      proofBytes: dco_decode_u_64(arr[5]),
+      witnessBytes: dco_decode_u_64(arr[6]),
     );
   }
 
@@ -693,14 +410,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ProofResult dco_decode_proof_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
     return ProofResult(
-      prepMs: dco_decode_u_64(arr[0]),
-      proveMs: dco_decode_u_64(arr[1]),
-      totalMs: dco_decode_u_64(arr[2]),
-      proofSizeBytes: dco_decode_u_64(arr[3]),
-      commWShared: dco_decode_String(arr[4]),
+      proveMs: dco_decode_u_64(arr[0]),
+      proofSizeBytes: dco_decode_u_64(arr[1]),
     );
   }
 
@@ -762,41 +476,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   BenchmarkResults sse_decode_benchmark_results(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_prepareSetupMs = sse_decode_u_64(deserializer);
-    var var_showSetupMs = sse_decode_u_64(deserializer);
-    var var_generateBlindsMs = sse_decode_u_64(deserializer);
-    var var_provePrepareMs = sse_decode_u_64(deserializer);
-    var var_reblindPrepareMs = sse_decode_u_64(deserializer);
-    var var_proveShowMs = sse_decode_u_64(deserializer);
-    var var_reblindShowMs = sse_decode_u_64(deserializer);
-    var var_verifyPrepareMs = sse_decode_u_64(deserializer);
-    var var_verifyShowMs = sse_decode_u_64(deserializer);
-    var var_prepareProvingKeyBytes = sse_decode_u_64(deserializer);
-    var var_prepareVerifyingKeyBytes = sse_decode_u_64(deserializer);
-    var var_showProvingKeyBytes = sse_decode_u_64(deserializer);
-    var var_showVerifyingKeyBytes = sse_decode_u_64(deserializer);
-    var var_prepareProofBytes = sse_decode_u_64(deserializer);
-    var var_showProofBytes = sse_decode_u_64(deserializer);
-    var var_prepareWitnessBytes = sse_decode_u_64(deserializer);
-    var var_showWitnessBytes = sse_decode_u_64(deserializer);
+    var var_setupMs = sse_decode_u_64(deserializer);
+    var var_proveMs = sse_decode_u_64(deserializer);
+    var var_verifyMs = sse_decode_u_64(deserializer);
+    var var_provingKeyBytes = sse_decode_u_64(deserializer);
+    var var_verifyingKeyBytes = sse_decode_u_64(deserializer);
+    var var_proofBytes = sse_decode_u_64(deserializer);
+    var var_witnessBytes = sse_decode_u_64(deserializer);
     return BenchmarkResults(
-      prepareSetupMs: var_prepareSetupMs,
-      showSetupMs: var_showSetupMs,
-      generateBlindsMs: var_generateBlindsMs,
-      provePrepareMs: var_provePrepareMs,
-      reblindPrepareMs: var_reblindPrepareMs,
-      proveShowMs: var_proveShowMs,
-      reblindShowMs: var_reblindShowMs,
-      verifyPrepareMs: var_verifyPrepareMs,
-      verifyShowMs: var_verifyShowMs,
-      prepareProvingKeyBytes: var_prepareProvingKeyBytes,
-      prepareVerifyingKeyBytes: var_prepareVerifyingKeyBytes,
-      showProvingKeyBytes: var_showProvingKeyBytes,
-      showVerifyingKeyBytes: var_showVerifyingKeyBytes,
-      prepareProofBytes: var_prepareProofBytes,
-      showProofBytes: var_showProofBytes,
-      prepareWitnessBytes: var_prepareWitnessBytes,
-      showWitnessBytes: var_showWitnessBytes,
+      setupMs: var_setupMs,
+      proveMs: var_proveMs,
+      verifyMs: var_verifyMs,
+      provingKeyBytes: var_provingKeyBytes,
+      verifyingKeyBytes: var_verifyingKeyBytes,
+      proofBytes: var_proofBytes,
+      witnessBytes: var_witnessBytes,
     );
   }
 
@@ -827,17 +521,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   ProofResult sse_decode_proof_result(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_prepMs = sse_decode_u_64(deserializer);
     var var_proveMs = sse_decode_u_64(deserializer);
-    var var_totalMs = sse_decode_u_64(deserializer);
     var var_proofSizeBytes = sse_decode_u_64(deserializer);
-    var var_commWShared = sse_decode_String(deserializer);
     return ProofResult(
-      prepMs: var_prepMs,
       proveMs: var_proveMs,
-      totalMs: var_totalMs,
       proofSizeBytes: var_proofSizeBytes,
-      commWShared: var_commWShared,
     );
   }
 
@@ -908,23 +596,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_u_64(self.prepareSetupMs, serializer);
-    sse_encode_u_64(self.showSetupMs, serializer);
-    sse_encode_u_64(self.generateBlindsMs, serializer);
-    sse_encode_u_64(self.provePrepareMs, serializer);
-    sse_encode_u_64(self.reblindPrepareMs, serializer);
-    sse_encode_u_64(self.proveShowMs, serializer);
-    sse_encode_u_64(self.reblindShowMs, serializer);
-    sse_encode_u_64(self.verifyPrepareMs, serializer);
-    sse_encode_u_64(self.verifyShowMs, serializer);
-    sse_encode_u_64(self.prepareProvingKeyBytes, serializer);
-    sse_encode_u_64(self.prepareVerifyingKeyBytes, serializer);
-    sse_encode_u_64(self.showProvingKeyBytes, serializer);
-    sse_encode_u_64(self.showVerifyingKeyBytes, serializer);
-    sse_encode_u_64(self.prepareProofBytes, serializer);
-    sse_encode_u_64(self.showProofBytes, serializer);
-    sse_encode_u_64(self.prepareWitnessBytes, serializer);
-    sse_encode_u_64(self.showWitnessBytes, serializer);
+    sse_encode_u_64(self.setupMs, serializer);
+    sse_encode_u_64(self.proveMs, serializer);
+    sse_encode_u_64(self.verifyMs, serializer);
+    sse_encode_u_64(self.provingKeyBytes, serializer);
+    sse_encode_u_64(self.verifyingKeyBytes, serializer);
+    sse_encode_u_64(self.proofBytes, serializer);
+    sse_encode_u_64(self.witnessBytes, serializer);
   }
 
   @protected
@@ -956,11 +634,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_proof_result(ProofResult self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_u_64(self.prepMs, serializer);
     sse_encode_u_64(self.proveMs, serializer);
-    sse_encode_u_64(self.totalMs, serializer);
     sse_encode_u_64(self.proofSizeBytes, serializer);
-    sse_encode_String(self.commWShared, serializer);
   }
 
   @protected

@@ -10,98 +10,35 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 Future<void> initApp() => RustLib.instance.api.openacMobileAppInitApp();
 
-/// Setup Prepare (JWT) circuit keys
-/// Generates proving and verifying keys for the Prepare circuit
-Future<String> setupPrepareKeys({
-  required String documentsPath,
-  String? inputPath,
-}) => RustLib.instance.api.openacMobileAppSetupPrepareKeys(
-  documentsPath: documentsPath,
-  inputPath: inputPath,
-);
+/// Setup JWT-RS256 circuit keys
+/// Generates proving and verifying keys for the jwt_rs256 circuit
+Future<String> setupKeys({required String documentsPath, String? inputPath}) =>
+    RustLib.instance.api.openacMobileAppSetupKeys(
+      documentsPath: documentsPath,
+      inputPath: inputPath,
+    );
 
-/// Setup Show circuit keys
-/// Generates proving and verifying keys for the Show circuit
-Future<String> setupShowKeys({
-  required String documentsPath,
-  String? inputPath,
-}) => RustLib.instance.api.openacMobileAppSetupShowKeys(
-  documentsPath: documentsPath,
-  inputPath: inputPath,
-);
+/// Generate JWT-RS256 circuit proof
+/// Runs proving using existing keys
+Future<ProofResult> prove({required String documentsPath, String? inputPath}) =>
+    RustLib.instance.api.openacMobileAppProve(
+      documentsPath: documentsPath,
+      inputPath: inputPath,
+    );
 
-/// Generate shared blinding factors for both circuits
-/// Creates random blinding factors that enable proof reblinding
-Future<String> generateSharedBlinds({required String documentsPath}) => RustLib
-    .instance
-    .api
-    .openacMobileAppGenerateSharedBlinds(documentsPath: documentsPath);
-
-/// Generate Prepare (JWT) circuit proof
-/// Runs prep_prove + prove phases using existing keys
-Future<ProofResult> provePrepare({
-  required String documentsPath,
-  String? inputPath,
-}) => RustLib.instance.api.openacMobileAppProvePrepare(
-  documentsPath: documentsPath,
-  inputPath: inputPath,
-);
-
-/// Generate Show circuit proof
-/// Runs prep_prove + prove phases using existing keys
-Future<ProofResult> proveShow({
-  required String documentsPath,
-  String? inputPath,
-}) => RustLib.instance.api.openacMobileAppProveShow(
-  documentsPath: documentsPath,
-  inputPath: inputPath,
-);
-
-/// Reblind Prepare circuit proof
-/// Generates a new unlinkable proof while preserving comm_W_shared
-Future<ProofResult> reblindPrepare({required String documentsPath}) => RustLib
-    .instance
-    .api
-    .openacMobileAppReblindPrepare(documentsPath: documentsPath);
-
-/// Reblind Show circuit proof
-/// Generates a new unlinkable proof while preserving comm_W_shared
-Future<ProofResult> reblindShow({required String documentsPath}) => RustLib
-    .instance
-    .api
-    .openacMobileAppReblindShow(documentsPath: documentsPath);
-
-/// Verify Prepare circuit proof
+/// Verify JWT-RS256 circuit proof
 /// Verifies the proof using the verifying key
-Future<bool> verifyPrepare({required String documentsPath}) => RustLib
-    .instance
-    .api
-    .openacMobileAppVerifyPrepare(documentsPath: documentsPath);
+Future<bool> verify({required String documentsPath}) =>
+    RustLib.instance.api.openacMobileAppVerify(documentsPath: documentsPath);
 
-/// Verify Show circuit proof
-/// Verifies the proof using the verifying key
-Future<bool> verifyShow({required String documentsPath}) => RustLib.instance.api
-    .openacMobileAppVerifyShow(documentsPath: documentsPath);
-
-/// Run complete benchmark pipeline for both Prepare and Show circuits
-/// Executes all 9 steps: setup, prove, reblind, and verify for both circuits
-/// Returns comprehensive timing and size metrics
+/// Run complete benchmark pipeline for JWT-RS256 circuit
+/// Executes setup, prove, and verify with timing and size metrics
 Future<BenchmarkResults> runCompleteBenchmark({
   required String documentsPath,
   String? inputPath,
 }) => RustLib.instance.api.openacMobileAppRunCompleteBenchmark(
   documentsPath: documentsPath,
   inputPath: inputPath,
-);
-
-/// Get the shared witness commitment for a circuit
-/// Returns hex-encoded commitment that links Prepare and Show proofs
-Future<String> getCommWShared({
-  required String documentsPath,
-  required String circuitType,
-}) => RustLib.instance.api.openacMobileAppGetCommWShared(
-  documentsPath: documentsPath,
-  circuitType: circuitType,
 );
 
 /// Test function for basic UniFFI integration
@@ -113,42 +50,22 @@ abstract class ZkProofError implements RustOpaqueInterface {}
 
 /// Result of a complete benchmark run with timing and size metrics
 class BenchmarkResults {
-  final BigInt prepareSetupMs;
-  final BigInt showSetupMs;
-  final BigInt generateBlindsMs;
-  final BigInt provePrepareMs;
-  final BigInt reblindPrepareMs;
-  final BigInt proveShowMs;
-  final BigInt reblindShowMs;
-  final BigInt verifyPrepareMs;
-  final BigInt verifyShowMs;
-  final BigInt prepareProvingKeyBytes;
-  final BigInt prepareVerifyingKeyBytes;
-  final BigInt showProvingKeyBytes;
-  final BigInt showVerifyingKeyBytes;
-  final BigInt prepareProofBytes;
-  final BigInt showProofBytes;
-  final BigInt prepareWitnessBytes;
-  final BigInt showWitnessBytes;
+  final BigInt setupMs;
+  final BigInt proveMs;
+  final BigInt verifyMs;
+  final BigInt provingKeyBytes;
+  final BigInt verifyingKeyBytes;
+  final BigInt proofBytes;
+  final BigInt witnessBytes;
 
   const BenchmarkResults({
-    required this.prepareSetupMs,
-    required this.showSetupMs,
-    required this.generateBlindsMs,
-    required this.provePrepareMs,
-    required this.reblindPrepareMs,
-    required this.proveShowMs,
-    required this.reblindShowMs,
-    required this.verifyPrepareMs,
-    required this.verifyShowMs,
-    required this.prepareProvingKeyBytes,
-    required this.prepareVerifyingKeyBytes,
-    required this.showProvingKeyBytes,
-    required this.showVerifyingKeyBytes,
-    required this.prepareProofBytes,
-    required this.showProofBytes,
-    required this.prepareWitnessBytes,
-    required this.showWitnessBytes,
+    required this.setupMs,
+    required this.proveMs,
+    required this.verifyMs,
+    required this.provingKeyBytes,
+    required this.verifyingKeyBytes,
+    required this.proofBytes,
+    required this.witnessBytes,
   });
 
   /// Format bytes into human-readable size string
@@ -159,80 +76,43 @@ class BenchmarkResults {
 
   @override
   int get hashCode =>
-      prepareSetupMs.hashCode ^
-      showSetupMs.hashCode ^
-      generateBlindsMs.hashCode ^
-      provePrepareMs.hashCode ^
-      reblindPrepareMs.hashCode ^
-      proveShowMs.hashCode ^
-      reblindShowMs.hashCode ^
-      verifyPrepareMs.hashCode ^
-      verifyShowMs.hashCode ^
-      prepareProvingKeyBytes.hashCode ^
-      prepareVerifyingKeyBytes.hashCode ^
-      showProvingKeyBytes.hashCode ^
-      showVerifyingKeyBytes.hashCode ^
-      prepareProofBytes.hashCode ^
-      showProofBytes.hashCode ^
-      prepareWitnessBytes.hashCode ^
-      showWitnessBytes.hashCode;
+      setupMs.hashCode ^
+      proveMs.hashCode ^
+      verifyMs.hashCode ^
+      provingKeyBytes.hashCode ^
+      verifyingKeyBytes.hashCode ^
+      proofBytes.hashCode ^
+      witnessBytes.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BenchmarkResults &&
           runtimeType == other.runtimeType &&
-          prepareSetupMs == other.prepareSetupMs &&
-          showSetupMs == other.showSetupMs &&
-          generateBlindsMs == other.generateBlindsMs &&
-          provePrepareMs == other.provePrepareMs &&
-          reblindPrepareMs == other.reblindPrepareMs &&
-          proveShowMs == other.proveShowMs &&
-          reblindShowMs == other.reblindShowMs &&
-          verifyPrepareMs == other.verifyPrepareMs &&
-          verifyShowMs == other.verifyShowMs &&
-          prepareProvingKeyBytes == other.prepareProvingKeyBytes &&
-          prepareVerifyingKeyBytes == other.prepareVerifyingKeyBytes &&
-          showProvingKeyBytes == other.showProvingKeyBytes &&
-          showVerifyingKeyBytes == other.showVerifyingKeyBytes &&
-          prepareProofBytes == other.prepareProofBytes &&
-          showProofBytes == other.showProofBytes &&
-          prepareWitnessBytes == other.prepareWitnessBytes &&
-          showWitnessBytes == other.showWitnessBytes;
+          setupMs == other.setupMs &&
+          proveMs == other.proveMs &&
+          verifyMs == other.verifyMs &&
+          provingKeyBytes == other.provingKeyBytes &&
+          verifyingKeyBytes == other.verifyingKeyBytes &&
+          proofBytes == other.proofBytes &&
+          witnessBytes == other.witnessBytes;
 }
 
 /// Result of a proving operation with timing and proof metadata
 class ProofResult {
-  final BigInt prepMs;
   final BigInt proveMs;
-  final BigInt totalMs;
   final BigInt proofSizeBytes;
-  final String commWShared;
 
-  const ProofResult({
-    required this.prepMs,
-    required this.proveMs,
-    required this.totalMs,
-    required this.proofSizeBytes,
-    required this.commWShared,
-  });
+  const ProofResult({required this.proveMs, required this.proofSizeBytes});
 
   @override
-  int get hashCode =>
-      prepMs.hashCode ^
-      proveMs.hashCode ^
-      totalMs.hashCode ^
-      proofSizeBytes.hashCode ^
-      commWShared.hashCode;
+  int get hashCode => proveMs.hashCode ^ proofSizeBytes.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is ProofResult &&
           runtimeType == other.runtimeType &&
-          prepMs == other.prepMs &&
           proveMs == other.proveMs &&
-          totalMs == other.totalMs &&
-          proofSizeBytes == other.proofSizeBytes &&
-          commWShared == other.commWShared;
+          proofSizeBytes == other.proofSizeBytes;
 }
