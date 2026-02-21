@@ -123,6 +123,14 @@ impl JwtRs256Circuit {
         *cache = Some(witness.clone());
         Ok(witness)
     }
+
+    /// Pre-generate and cache the witness.
+    /// Call this before memory-heavy operations (like setup) to avoid
+    /// C++ witnesscalc allocation failures under memory pressure.
+    pub fn warm_witness_cache(&self) -> Result<(), SynthesisError> {
+        self.get_or_generate_witness()?;
+        Ok(())
+    }
 }
 
 impl SpartanCircuit<E> for JwtRs256Circuit {

@@ -597,11 +597,19 @@ fn run_jwt_rs256_benchmark(input_path: Option<PathBuf>) {
     println!("║   JWT-RS256 SINGLE-STAGE BENCHMARK PIPELINE    ║");
     println!("╚════════════════════════════════════════════════╝\n");
 
-    // Step 1: Setup
-    info!("Step 1/3: Setting up JWT-RS256 circuit...");
+    // Step 0: Pre-generate witness while memory is clean
     let circuit = JwtRs256Circuit::new(path_config.clone(), input_path.clone());
+    info!("Pre-generating witness (before setup allocates keys)...");
+    let t_witness = Instant::now();
+    circuit
+        .warm_witness_cache()
+        .expect("witness generation failed");
+    let witness_gen_ms = t_witness.elapsed().as_millis();
+    println!("✓ Witness cached: {} ms\n", witness_gen_ms);
+
+    info!("Step 1/3: Setting up JWT-RS256 circuit...");
     let t0 = Instant::now();
-    let (pk, vk) = setup_circuit_keys_no_save(circuit);
+    let (pk, vk) = setup_circuit_keys_no_save(circuit.clone());
     let setup_ms = t0.elapsed().as_millis();
     println!("✓ Setup completed: {} ms\n", setup_ms);
 
@@ -618,7 +626,6 @@ fn run_jwt_rs256_benchmark(input_path: Option<PathBuf>) {
 
     // Step 2: Prove
     info!("Step 2/3: Proving JWT-RS256 circuit...");
-    let circuit = JwtRs256Circuit::new(path_config.clone(), input_path.clone());
     let t0 = Instant::now();
     prove_circuit_with_pk(
         circuit,
@@ -650,6 +657,7 @@ fn run_jwt_rs256_benchmark(input_path: Option<PathBuf>) {
     println!("╠════════════════════════════════════════════════╣");
     println!("║ TIMING                                         ║");
     println!("╠════════════════════════════════════════════════╣");
+    println!("║ Witness Gen:            {:>10} ms      ║", witness_gen_ms);
     println!("║ Setup:                  {:>10} ms      ║", setup_ms);
     println!("║ Prove:                  {:>10} ms      ║", prove_ms);
     println!("║ Verify:                 {:>10} ms      ║", verify_ms);
