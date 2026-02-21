@@ -34,7 +34,7 @@ impl PathConfig {
     /// Mobile apps typically extract assets to a Documents directory with a flat structure:
     /// - `{documents}/jwt_rs256_input.json`
     /// - `{documents}/keys/*.key`
-    /// - `{documents}/circom/build/jwt_rs256/jwt_rs256_js/jwt_rs256.r1cs`
+    /// - `{documents}/jwt_rs256.r1cs`
     pub fn mobile(documents_path: impl Into<PathBuf>) -> Self {
         Self {
             base_dir: documents_path.into(),
@@ -81,11 +81,17 @@ impl PathConfig {
     /// # Returns
     /// Full path to the R1CS file.
     pub fn r1cs_path(&self, circuit: &str) -> PathBuf {
-        self.base_dir
-            .join("../circom/build")
-            .join(circuit)
-            .join(format!("{}_js", circuit))
-            .join(format!("{}.r1cs", circuit))
+        if self.is_mobile {
+            // Mobile: flat structure in documents directory
+            self.base_dir.join(format!("{}.r1cs", circuit))
+        } else {
+            // Development: nested structure
+            self.base_dir
+                .join("../circom/build")
+                .join(circuit)
+                .join(format!("{}_js", circuit))
+                .join(format!("{}.r1cs", circuit))
+        }
     }
 
     /// Resolve a key file path (proving/verifying keys).
@@ -143,6 +149,10 @@ mod tests {
         assert_eq!(
             config.input_json("jwt_rs256"),
             PathBuf::from("/app/Documents/jwt_rs256_input.json")
+        );
+        assert_eq!(
+            config.r1cs_path("jwt_rs256"),
+            PathBuf::from("/app/Documents/jwt_rs256.r1cs")
         );
         assert_eq!(
             config.key_path("jwt_rs256_proving.key"),
