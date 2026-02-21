@@ -1,0 +1,193 @@
+name: mobile-build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'wallet-unit-poc/mobile/**'
+      - 'wallet-unit-poc/ecdsa-spartan2/**'
+      - 'wallet-unit-poc/circom/circuits/**'
+      - '.github/workflows/mobile-tests.yaml'
+  pull_request:
+    paths:
+      - 'wallet-unit-poc/mobile/**'
+      - 'wallet-unit-poc/ecdsa-spartan2/**'
+      - 'wallet-unit-poc/circom/circuits/**'
+      - '.github/workflows/mobile-tests.yaml'
+  workflow_dispatch:
+
+jobs:
+  compile-circuits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential \
+            libgmp-dev \
+            libsodium-dev \
+            nasm \
+            nlohmann-json3-dev
+
+      - name: Download Circom Binary v2.2.3
+        run: |
+          wget -qO /home/runner/work/circom https://github.com/iden3/circom/releases/download/v2.2.3/circom-linux-amd64
+          chmod +x /home/runner/work/circom
+          sudo mv /home/runner/work/circom /bin/circom
+
+      - name: Print Circom version
+        run: circom --version
+
+      - name: Install JS dependencies
+        run: cd wallet-unit-poc/circom && yarn
+
+      - name: Compile JWT-RS256 circuit
+        run: cd wallet-unit-poc/circom && yarn compile:jwt_rs256
+
+      - name: Upload circuit C++ artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: circuit-cpp
+          path: |
+            wallet-unit-poc/circom/build/cpp/jwt_rs256.cpp
+            wallet-unit-poc/circom/build/cpp/jwt_rs256.dat
+          retention-days: 1
+
+  build-ios:
+    needs: compile-circuits
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download circuit artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: circuit-cpp
+          path: wallet-unit-poc/circom/build/cpp/
+
+      - name: Verify circuit artifacts
+        run: ls -la wallet-unit-poc/circom/build/cpp/
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+
+      - name: Cache Cargo registry and git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ios-cargo-${{ hashFiles('wallet-unit-poc/mobile/**/Cargo.lock', 'wallet-unit-poc/mobile/**/Cargo.toml', 'wallet-unit-poc/ecdsa-spartan2/Cargo.lock') }}
+          restore-keys: |
+            ios-cargo-
+
+      - name: Cache GMP prebuild
+        uses: actions/cache@v4
+        with:
+          path: wallet-unit-poc/mobile/.build-cache/
+          key: ios-gmp-${{ hashFiles('wallet-unit-poc/mobile/scripts/prebuild-ios-gmp.sh') }}
+          restore-keys: |
+            ios-gmp-
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: wallet-unit-poc/mobile/flutter/ios/Pods
+          key: ios-pods-${{ hashFiles('wallet-unit-poc/mobile/flutter/ios/Podfile.lock') }}
+          restore-keys: |
+            ios-pods-
+
+      - name: Flutter pub get
+        run: cd wallet-unit-poc/mobile/flutter && flutter pub get
+
+      - name: Build iOS (simulator)
+        run: cd wallet-unit-poc/mobile/flutter && flutter build ios --simulator --no-codesign
+
+  build-android:
+    needs: compile-circuits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download circuit artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: circuit-cpp
+          path: wallet-unit-poc/circom/build/cpp/
+
+      - name: Verify circuit artifacts
+        run: ls -la wallet-unit-poc/circom/build/cpp/
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential \
+            libgmp-dev \
+            libsodium-dev \
+            nasm \
+            nlohmann-json3-dev
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK r26d
+        run: sdkmanager "ndk;26.3.11075529"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android,armv7-linux-androideabi
+
+      - name: Cache Cargo registry and git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: android-cargo-${{ hashFiles('wallet-unit-poc/mobile/**/Cargo.lock', 'wallet-unit-poc/mobile/**/Cargo.toml', 'wallet-unit-poc/ecdsa-spartan2/Cargo.lock') }}
+          restore-keys: |
+            android-cargo-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-gradle-${{ hashFiles('wallet-unit-poc/mobile/flutter/android/**/*.gradle*', 'wallet-unit-poc/mobile/flutter/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            android-gradle-
+
+      - name: Flutter pub get
+        run: cd wallet-unit-poc/mobile/flutter && flutter pub get
+
+      - name: Build Android APK (debug)
+        run: cd wallet-unit-poc/mobile/flutter && flutter build apk --debug
