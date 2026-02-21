@@ -150,11 +150,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android NDK r26d
-        run: sdkmanager "ndk;26.3.11075529"
+      - name: Set up Android NDK r26d
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          link-to-sdk: true
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
