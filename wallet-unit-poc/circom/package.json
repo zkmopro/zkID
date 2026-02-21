@@ -1,6 +1,6 @@
 {
-  "name": "@privacy-scaling-explorations/jwt-es256-circom",
-  "description": "circom circuits for verifying JWTs signed with ES256",
+  "name": "@privacy-scaling-explorations/zkid-circom",
+  "description": "circom circuits for verifying JWTs signed with RS256",
   "version": "0.0.1",
   "license": "MIT",
   "repository": {
@@ -10,14 +10,11 @@
   "scripts": {
     "test": "NODE_OPTIONS=--max-old-space-size=16384 npx mocha --timeout 900000",
     "save_input_file": "npx ts-node src/save_inputs.ts",
-    "compile:jwt": "bash scripts/compile.sh jwt",
-    "compile:show": "bash scripts/compile.sh show",
-    "compile:ecdsa": "bash scripts/compile.sh ecdsa",
     "compile:jwt_rs256": "bash scripts/compile.sh jwt_rs256",
     "compile:all": "bash scripts/compile.sh all",
-    "setup": "npx circomkit setup jwt",
-    "prove": "npx circomkit prove jwt",
-    "verify": "npx circomkit verify jwt"
+    "setup": "npx circomkit setup jwt_rs256",
+    "prove": "npx circomkit prove jwt_rs256",
+    "verify": "npx circomkit verify jwt_rs256"
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "^5.2.0",

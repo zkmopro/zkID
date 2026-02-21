@@ -1,20 +1,4 @@
 {
-  "jwt": {
-    "file": "jwt",
-    "template": "JWT",
-    "params": [1920, 1900, 4, 50, 128]
-  },
-  "show": {
-    "file": "show",
-    "template": "Show",
-    "params": [128],
-    "pubs": ["deviceKeyX", "deviceKeyY"]
-  },
-  "ecdsa": {
-    "file": "ecdsa/ecdsa",
-    "template": "ECDSA",
-    "params": []
-  },
   "jwt_rs256": {
     "file": "jwt_rs256",
     "template": "JWTRS256",
