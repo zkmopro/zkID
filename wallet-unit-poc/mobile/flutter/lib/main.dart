@@ -8,16 +8,10 @@ import 'package:mopro_flutter_bindings/src/rust/third_party/openac_mobile_app.da
     show
         BenchmarkResults,
         ProofResult,
-        generateSharedBlinds,
-        provePrepare,
-        proveShow,
-        reblindPrepare,
-        reblindShow,
+        prove,
         runCompleteBenchmark,
-        setupPrepareKeys,
-        setupShowKeys,
-        verifyPrepare,
-        verifyShow;
+        setupKeys,
+        verify;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,57 +20,37 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-/// Copy circuit R1CS files and input data from Flutter assets to documents directory
+/// Copy circuit R1CS files and input data from Flutter assets to documents directory.
+///
+/// Assets are stored flat in the documents directory:
+///   Documents/jwt_rs256.r1cs        (decompressed from .gz)
+///   Documents/jwt_rs256_input.json  (copied as-is)
 Future<void> _copyAssetsToDocuments() async {
   try {
     final documentsDir = await getApplicationDocumentsDirectory();
-    final circomDir = Directory('${documentsDir.path}/circom');
+    final basePath = documentsDir.path;
 
-    if (!await circomDir.exists()) {
-      await circomDir.create(recursive: true);
-    }
-
-    // Create subdirectories matching Rust circuit expectations
-    final jwtBuildDir = Directory('${circomDir.path}/build/jwt/jwt_js');
-    final showBuildDir = Directory('${circomDir.path}/build/show/show_js');
-
-    if (!await jwtBuildDir.exists()) {
-      await jwtBuildDir.create(recursive: true);
-    }
-    if (!await showBuildDir.exists()) {
-      await showBuildDir.create(recursive: true);
-    }
-
-    final compressedAssets = {
-      'assets/circom/jwt.r1cs.gz': 'build/jwt/jwt_js/jwt.r1cs',
-      'assets/circom/show.r1cs.gz': 'build/show/show_js/show.r1cs',
+    final assets = {
+      'assets/circom/jwt_rs256.r1cs.gz': 'jwt_rs256.r1cs',
+      'assets/circom/jwt_rs256_input.json': 'jwt_rs256_input.json',
     };
 
-    final regularAssets = [
-      'assets/circom/jwt_input.json',
-      'assets/circom/show_input.json',
-    ];
-
-    for (final entry in compressedAssets.entries) {
-      final targetFile = File('${circomDir.path}/${entry.value}');
+    for (final entry in assets.entries) {
+      final targetFile = File('$basePath/${entry.value}');
       if (!await targetFile.exists()) {
-        debugPrint('Decompressing: ${entry.key}');
         final data = await rootBundle.load(entry.key);
-        final compressed = data.buffer.asUint8List();
-        final decompressed = gzip.decode(compressed);
-        await targetFile.writeAsBytes(decompressed);
-        debugPrint(
-            'Decompressed ${entry.value}: ${(compressed.length / 1024 / 1024).toStringAsFixed(2)}MB → ${(decompressed.length / 1024 / 1024).toStringAsFixed(2)}MB');
-      }
-    }
+        final bytes = data.buffer.asUint8List();
 
-    for (final assetPath in regularAssets) {
-      final fileName = assetPath.split('/').last;
-      final targetFile = File('${circomDir.path}/$fileName');
-      if (!await targetFile.exists()) {
-        debugPrint('Copying: $assetPath');
-        final data = await rootBundle.load(assetPath);
-        await targetFile.writeAsBytes(data.buffer.asUint8List());
+        if (entry.key.endsWith('.gz')) {
+          debugPrint('Decompressing: ${entry.key}');
+          final decompressed = gzip.decode(bytes);
+          await targetFile.writeAsBytes(decompressed);
+          debugPrint(
+              'Decompressed ${entry.value}: ${(bytes.length / 1024 / 1024).toStringAsFixed(2)}MB -> ${(decompressed.length / 1024 / 1024).toStringAsFixed(2)}MB');
+        } else {
+          debugPrint('Copying: ${entry.key}');
+          await targetFile.writeAsBytes(bytes);
+        }
       }
     }
   } catch (e) {
@@ -109,15 +83,9 @@ class E2EProofWorkflowScreen extends StatefulWidget {
 }
 
 enum ProofTaskType {
-  setupPrepare,
-  setupShow,
-  generateBlinds,
-  provePrepare,
-  proveShow,
-  reblindPrepare,
-  reblindShow,
-  verifyPrepare,
-  verifyShow,
+  setup,
+  prove,
+  verify,
 }
 
 class TaskResult {
@@ -139,9 +107,10 @@ class TaskResult {
     this.clientTimingMs,
   });
 
-  BigInt? get totalMs => proofResult?.totalMs ?? (clientTimingMs != null ? BigInt.from(clientTimingMs!) : null);
+  BigInt? get totalMs =>
+      proofResult?.proveMs ??
+      (clientTimingMs != null ? BigInt.from(clientTimingMs!) : null);
   BigInt? get proofSizeBytes => proofResult?.proofSizeBytes;
-  String? get commWShared => proofResult?.commWShared;
 }
 
 class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
@@ -157,16 +126,12 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
 
   Future<String> _getDocumentsPath() async {
     final directory = await getApplicationDocumentsDirectory();
-    return '${directory.path}/circom';
+    return directory.path;
   }
 
   String? _getInputPath(ProofTaskType taskType) {
-    if (taskType == ProofTaskType.setupPrepare ||
-        taskType == ProofTaskType.provePrepare) {
-      return 'jwt_input.json';
-    } else if (taskType == ProofTaskType.setupShow ||
-        taskType == ProofTaskType.proveShow) {
-      return 'show_input.json';
+    if (taskType == ProofTaskType.setup || taskType == ProofTaskType.prove) {
+      return 'jwt_rs256_input.json';
     }
     return null;
   }
@@ -183,9 +148,9 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
       TaskResult result;
 
       switch (taskType) {
-        case ProofTaskType.setupPrepare:
+        case ProofTaskType.setup:
           final startTime = DateTime.now();
-          final message = await setupPrepareKeys(
+          final message = await setupKeys(
             documentsPath: documentsPath,
             inputPath: inputPath,
           );
@@ -198,37 +163,8 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
           );
           break;
 
-        case ProofTaskType.setupShow:
-          final startTime = DateTime.now();
-          final message = await setupShowKeys(
-            documentsPath: documentsPath,
-            inputPath: inputPath,
-          );
-          final elapsed = DateTime.now().difference(startTime).inMilliseconds;
-          result = TaskResult(
-            taskType: taskType,
-            success: true,
-            message: message,
-            clientTimingMs: elapsed,
-          );
-          break;
-
-        case ProofTaskType.generateBlinds:
-          final startTime = DateTime.now();
-          final message = await generateSharedBlinds(
-            documentsPath: documentsPath,
-          );
-          final elapsed = DateTime.now().difference(startTime).inMilliseconds;
-          result = TaskResult(
-            taskType: taskType,
-            success: true,
-            message: message,
-            clientTimingMs: elapsed,
-          );
-          break;
-
-        case ProofTaskType.provePrepare:
-          final proofResult = await provePrepare(
+        case ProofTaskType.prove:
+          final proofResult = await prove(
             documentsPath: documentsPath,
             inputPath: inputPath,
           );
@@ -239,57 +175,9 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
           );
           break;
 
-        case ProofTaskType.proveShow:
-          final proofResult = await proveShow(
-            documentsPath: documentsPath,
-            inputPath: inputPath,
-          );
-          result = TaskResult(
-            taskType: taskType,
-            success: true,
-            proofResult: proofResult,
-          );
-          break;
-
-        case ProofTaskType.reblindPrepare:
-          final proofResult = await reblindPrepare(
-            documentsPath: documentsPath,
-          );
-          result = TaskResult(
-            taskType: taskType,
-            success: true,
-            proofResult: proofResult,
-          );
-          break;
-
-        case ProofTaskType.reblindShow:
-          final proofResult = await reblindShow(
-            documentsPath: documentsPath,
-          );
-          result = TaskResult(
-            taskType: taskType,
-            success: true,
-            proofResult: proofResult,
-          );
-          break;
-
-        case ProofTaskType.verifyPrepare:
+        case ProofTaskType.verify:
           final startTime = DateTime.now();
-          final verifyResult = await verifyPrepare(
-            documentsPath: documentsPath,
-          );
-          final elapsed = DateTime.now().difference(startTime).inMilliseconds;
-          result = TaskResult(
-            taskType: taskType,
-            success: verifyResult,
-            verifyResult: verifyResult,
-            clientTimingMs: elapsed,
-          );
-          break;
-
-        case ProofTaskType.verifyShow:
-          final startTime = DateTime.now();
-          final verifyResult = await verifyShow(
+          final verifyResult = await verify(
             documentsPath: documentsPath,
           );
           final elapsed = DateTime.now().difference(startTime).inMilliseconds;
@@ -367,15 +255,9 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
 
   String _taskTypeToDisplayName(ProofTaskType type) {
     return switch (type) {
-      ProofTaskType.setupPrepare => 'Setup Prepare Keys',
-      ProofTaskType.setupShow => 'Setup Show Keys',
-      ProofTaskType.generateBlinds => 'Generate Shared Blinds',
-      ProofTaskType.provePrepare => 'Prove Prepare',
-      ProofTaskType.proveShow => 'Prove Show',
-      ProofTaskType.reblindPrepare => 'Reblind Prepare',
-      ProofTaskType.reblindShow => 'Reblind Show',
-      ProofTaskType.verifyPrepare => 'Verify Prepare',
-      ProofTaskType.verifyShow => 'Verify Show',
+      ProofTaskType.setup => 'Setup Keys',
+      ProofTaskType.prove => 'Prove',
+      ProofTaskType.verify => 'Verify',
     };
   }
 
@@ -383,7 +265,7 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('OpenAC E2E Proof Workflow'),
+        title: const Text('zkID - JWT RS256 Proof'),
         actions: [
           if (_results.isNotEmpty && !_isOperating)
             IconButton(
@@ -447,7 +329,7 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Run comprehensive benchmark including setup, prove, reblind, and verify for both circuits. Results include timing and artifact sizes.',
+                      'Run complete JWT-RS256 benchmark: setup, prove, and verify. Results include timing and artifact sizes.',
                       style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                     const SizedBox(height: 12),
@@ -490,141 +372,38 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
             const Divider(),
             const SizedBox(height: 16),
 
-            // Step 1: Key Setup
-            _buildSectionHeader('Step 1: Key Setup', Icons.settings),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildOperationButton(
-                    taskType: ProofTaskType.setupPrepare,
-                    label: 'Setup Prepare',
-                    icon: Icons.key,
-                    color: Colors.blue,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildOperationButton(
-                    taskType: ProofTaskType.setupShow,
-                    label: 'Setup Show',
-                    icon: Icons.key,
-                    color: Colors.blue,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // Step 2: Generate Shared Blinds
-            _buildSectionHeader(
-                'Step 2: Generate Shared Blinds', Icons.shuffle),
+            // Step 1: Setup Keys
+            _buildSectionHeader('Step 1: Setup Keys', Icons.key),
             const SizedBox(height: 12),
             _buildOperationButton(
-              taskType: ProofTaskType.generateBlinds,
-              label: 'Generate Shared Blinds',
-              icon: Icons.shuffle,
-              color: Colors.orange,
+              taskType: ProofTaskType.setup,
+              label: 'Setup JWT-RS256 Keys',
+              icon: Icons.key,
+              color: Colors.blue,
             ),
 
             const SizedBox(height: 24),
 
-            // Step 3: Prepare (Prove + Reblind)
-            _buildSectionHeader('Step 3: Prepare', Icons.assignment),
-            const SizedBox(height: 8),
-            Text(
-              'Prove Prepare + Reblind Prepare',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey.shade600,
-                fontStyle: FontStyle.italic,
-              ),
-            ),
+            // Step 2: Prove
+            _buildSectionHeader('Step 2: Prove', Icons.calculate),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildOperationButton(
-                    taskType: ProofTaskType.provePrepare,
-                    label: 'Prove Prepare',
-                    icon: Icons.calculate,
-                    color: Colors.green,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildOperationButton(
-                    taskType: ProofTaskType.reblindPrepare,
-                    label: 'Reblind Prepare',
-                    icon: Icons.sync,
-                    color: Colors.green,
-                  ),
-                ),
-              ],
+            _buildOperationButton(
+              taskType: ProofTaskType.prove,
+              label: 'Prove JWT-RS256',
+              icon: Icons.calculate,
+              color: Colors.green,
             ),
 
             const SizedBox(height: 24),
 
-            // Step 4: Show (Prove + Reblind)
-            _buildSectionHeader('Step 4: Show', Icons.visibility),
-            const SizedBox(height: 8),
-            Text(
-              'Prove Show + Reblind Show',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey.shade600,
-                fontStyle: FontStyle.italic,
-              ),
-            ),
+            // Step 3: Verify
+            _buildSectionHeader('Step 3: Verify', Icons.check_circle),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildOperationButton(
-                    taskType: ProofTaskType.proveShow,
-                    label: 'Prove Show',
-                    icon: Icons.calculate,
-                    color: Colors.deepPurple,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildOperationButton(
-                    taskType: ProofTaskType.reblindShow,
-                    label: 'Reblind Show',
-                    icon: Icons.sync,
-                    color: Colors.deepPurple,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // Step 5: Verify Proofs
-            _buildSectionHeader('Step 5: Verify Proofs', Icons.check_circle),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildOperationButton(
-                    taskType: ProofTaskType.verifyPrepare,
-                    label: 'Verify Prepare',
-                    icon: Icons.check_circle,
-                    color: Colors.teal,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildOperationButton(
-                    taskType: ProofTaskType.verifyShow,
-                    label: 'Verify Show',
-                    icon: Icons.check_circle,
-                    color: Colors.teal,
-                  ),
-                ),
-              ],
+            _buildOperationButton(
+              taskType: ProofTaskType.verify,
+              label: 'Verify JWT-RS256',
+              icon: Icons.check_circle,
+              color: Colors.teal,
             ),
 
             const SizedBox(height: 24),
@@ -670,29 +449,33 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
     final isCompleted = _completedSteps[taskType.name] == true;
     final result = _results[taskType.name];
 
-    return ElevatedButton.icon(
-      onPressed: _isOperating ? null : () => _runOperation(taskType),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isCompleted ? color.shade100 : color,
-        foregroundColor: isCompleted ? color.shade900 : Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      ),
-      icon:
-          isCompleted ? Icon(Icons.check_circle, color: color.shade700) : Icon(icon),
-      label: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label),
-          if (result?.totalMs != null)
-            Text(
-              '${result!.totalMs}ms',
-              style: TextStyle(
-                fontSize: 11,
-                color: isCompleted ? color.shade700 : Colors.white70,
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _isOperating ? null : () => _runOperation(taskType),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isCompleted ? color.shade100 : color,
+          foregroundColor: isCompleted ? color.shade900 : Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+        ),
+        icon: isCompleted
+            ? Icon(Icons.check_circle, color: color.shade700)
+            : Icon(icon),
+        label: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label),
+            if (result?.totalMs != null)
+              Text(
+                '${result!.totalMs}ms',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isCompleted ? color.shade700 : Colors.white70,
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -751,7 +534,7 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
-              Text('• Total: ${result.totalMs}ms'),
+              Text('Total: ${result.totalMs}ms'),
               const SizedBox(height: 8),
             ],
 
@@ -764,35 +547,11 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
               const SizedBox(height: 8),
             ],
 
-            // Shared commitment
-            if (result.commWShared != null) ...[
-              const Text(
-                'Shared Commitment:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: SelectableText(
-                  result.commWShared!,
-                  style: TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                    color: Colors.grey.shade800,
-                  ),
-                ),
-              ),
-            ],
-
             // Verification result
             if (result.verifyResult != null) ...[
               const SizedBox(height: 8),
               Text(
-                result.verifyResult! ? 'Verification passed ✓' : 'Verification failed ✗',
+                result.verifyResult! ? 'Verification passed' : 'Verification failed',
                 style: TextStyle(
                   color: result.verifyResult!
                       ? Colors.green.shade700
@@ -866,15 +625,9 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
               },
               children: [
                 _buildTableHeader(['Operation', 'Time (ms)']),
-                _buildTimingRow('Prepare Setup', results.prepareSetupMs),
-                _buildTimingRow('Show Setup', results.showSetupMs),
-                _buildTimingRow('Generate Blinds', results.generateBlindsMs),
-                _buildTimingRow('Prove Prepare', results.provePrepareMs),
-                _buildTimingRow('Reblind Prepare', results.reblindPrepareMs),
-                _buildTimingRow('Prove Show', results.proveShowMs),
-                _buildTimingRow('Reblind Show', results.reblindShowMs),
-                _buildTimingRow('Verify Prepare', results.verifyPrepareMs),
-                _buildTimingRow('Verify Show', results.verifyShowMs),
+                _buildTimingRow('Setup', results.setupMs),
+                _buildTimingRow('Prove', results.proveMs),
+                _buildTimingRow('Verify', results.verifyMs),
               ],
             ),
 
@@ -898,17 +651,10 @@ class _E2EProofWorkflowScreenState extends State<E2EProofWorkflowScreen> {
               },
               children: [
                 _buildTableHeader(['Artifact', 'Size']),
-                _buildSizeRow(
-                    'Prepare Proving Key', results.prepareProvingKeyBytes),
-                _buildSizeRow('Prepare Verifying Key',
-                    results.prepareVerifyingKeyBytes),
-                _buildSizeRow('Show Proving Key', results.showProvingKeyBytes),
-                _buildSizeRow(
-                    'Show Verifying Key', results.showVerifyingKeyBytes),
-                _buildSizeRow('Prepare Proof', results.prepareProofBytes),
-                _buildSizeRow('Show Proof', results.showProofBytes),
-                _buildSizeRow('Prepare Witness', results.prepareWitnessBytes),
-                _buildSizeRow('Show Witness', results.showWitnessBytes),
+                _buildSizeRow('Proving Key', results.provingKeyBytes),
+                _buildSizeRow('Verifying Key', results.verifyingKeyBytes),
+                _buildSizeRow('Proof', results.proofBytes),
+                _buildSizeRow('Witness', results.witnessBytes),
               ],
             ),
           ],
