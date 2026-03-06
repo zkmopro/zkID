@@ -7,8 +7,8 @@
   },
   "rs256": {
     "file": "rs256",
-    "template": "CertRSA256Verify",
+    "template": "FullCertRSA256Verify",
     "params": [1536, 121, 17],
-    "pubs": ["rsaModulus"]
+    "pubs": ["issuer_rsa_modulus"]
   }
 }

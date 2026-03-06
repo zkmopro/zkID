@@ -331,7 +331,7 @@ Options:
   --input, -i <path>   Override the circuit input JSON (run/prove/setup/benchmark)
 
 Examples:
-  cargo run --release -- rs256 generate-input ./circuits/response.json 123456 # optional
+  cargo run --release -- rs256 generate-input ./src/circuits/response.json 123456 # optional
   cargo run --release -- rs256 setup --input ../circom/inputs/rs256/input.json
   cargo run --release -- rs256 prove --input ../circom/inputs/rs256/input.json
   cargo run --release -- rs256 verify
