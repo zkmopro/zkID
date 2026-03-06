@@ -69,6 +69,13 @@ struct CardSignResponse {
     _version: String,
 }
 
+struct RS256CircuitInput {
+    message: Vec<String>,
+    message_length: usize,
+    rsa_modulus: Vec<String>,
+    rsa_signature: Vec<String>,
+}
+
 impl Default for Rs256Circuit {
     fn default() -> Self {
         Self {
@@ -317,13 +324,14 @@ impl Rs256Circuit {
         // Generate circuit input
         // user cert signature and tbs
         // let circuit_input = Self::generate_circuit_input(&cert, &response.signature, tbs);
-        
+
         // issuer cert signature and user tbs
-        let circuit_input = Self::generate_circuit_input(
-            &issuer_cert,
-            &base64::engine::general_purpose::STANDARD.encode(cert.signature.raw_bytes()),
-            &tbs_der,
-        );
+        // let circuit_input = Self::generate_circuit_input(
+        //     &issuer_cert,
+        //     &base64::engine::general_purpose::STANDARD.encode(cert.signature.raw_bytes()),
+        //     &tbs_der,
+        // );
+        let circuit_input = Self::generate_circuit_input(&cert, &issuer_cert, &response.signature, &base64::engine::general_purpose::STANDARD.encode(cert.signature.raw_bytes()), &tbs, &tbs_der);
         std::fs::write(
             "rs256_input.json",
             serde_json::to_string_pretty(&circuit_input).unwrap(),
@@ -332,11 +340,11 @@ impl Rs256Circuit {
         println!("Circuit input written to rs256_input.json");
     }
 
-    fn generate_circuit_input(
+    fn generate_rsa_circuit_input(
         cert: &Certificate,
         signature: &str,
         original_data: &[u8],
-    ) -> serde_json::Value {
+    ) -> RS256CircuitInput {
         const MAX_MESSAGE_LENGTH: usize = 1536;
         const RSA_N: usize = 121;
         const RSA_K: usize = 17;
@@ -362,11 +370,35 @@ impl Rs256Circuit {
         let message = Self::sha256_pad(original_data, MAX_MESSAGE_LENGTH);
         let padded_len = Self::sha256_padded_length(original_data.len());
 
+        RS256CircuitInput {
+            message: message.iter().map(|b| b.to_string()).collect::<Vec<_>>(),
+            message_length: padded_len,
+            rsa_modulus: rsa_modulus,
+            rsa_signature: rsa_signature,
+        }
+    }
+
+    fn generate_circuit_input(
+        user_cert: &Certificate,
+        issuer_cert: &Certificate,
+        user_signature: &str,
+        issuer_signature: &str,
+        user_tbs: &[u8],
+        issuer_tbs: &[u8],
+    ) -> serde_json::Value {
+        
+        let user_circuit_input = Self::generate_rsa_circuit_input(user_cert, user_signature, user_tbs);
+        let issuer_circuit_input = Self::generate_rsa_circuit_input(issuer_cert, issuer_signature, issuer_tbs);
+
         serde_json::json!({
-            "message": message.iter().map(|b| b.to_string()).collect::<Vec<_>>(),
-            "messageLength": padded_len.to_string(),
-            "rsaModulus": rsa_modulus,
-            "rsaSignature": rsa_signature,
+            "tbs": user_circuit_input.message,
+            "tbs_length": user_circuit_input.message_length,
+            "user_cert": issuer_circuit_input.message,
+            "user_cert_length": issuer_circuit_input.message_length,
+            "user_rsa_modulus": user_circuit_input.rsa_modulus,
+            "user_rsa_signature": user_circuit_input.rsa_signature,
+            "issuer_rsa_modulus": issuer_circuit_input.rsa_modulus,
+            "issuer_rsa_signature": issuer_circuit_input.rsa_signature,
         })
     }
 

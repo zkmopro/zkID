@@ -5,6 +5,7 @@ include "circomlib/circuits/comparators.circom";
 include "@zk-email/circuits/lib/sha.circom";
 include "@zk-email/circuits/lib/rsa.circom";
 include "@zk-email/circuits/utils/array.circom";
+include "utils/utils.circom";
 
 /// @title Bits2Limbs
 /// @notice Convert a bit array to k limbs of n bits each (little-endian limb order)
@@ -71,25 +72,27 @@ template CertRSA256Verify(maxMessageLength, n, k) {
 /// @param maxMessageLength Maximum TBS certificate bytes
 /// @param n RSA chunk bits (121)
 /// @param k RSA chunks (17 for 2048-bit)
-template FullCertRSA256Verify(maxMessageLength, n, k) {
+/// @param modulusBits   Actual RSA key size in bits (e.g. 2048) — must be
+///                      divisible by 8. Separate from n*k (e.g. 121*17=2057).
+template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
     // === Inputs ===
     signal input tbs[maxMessageLength];    // TBS certificate bytes
     signal input tbs_length;                // actual TBS length
     signal input user_cert[maxMessageLength];    // user certificate bytes
     signal input user_cert_length;                // actual user certificate length
-    signal input user_rsa_modulus[k];                  // user's RSA public key
+    signal input user_rsa_modulus[k]; // user's RSA public key
     signal input user_rsa_signature[k];                // certificate signature
-    signal input issuer_cert[maxMessageLength];    // issuer certificate bytes
-    signal input issuer_cert_length;                // actual issuer certificate length
+
     signal input issuer_rsa_modulus[k];                  // issuer's RSA public key
     signal input issuer_rsa_signature[k];                // certificate signature
-    
+
     CertRSA256Verify(maxMessageLength, n, k)(
         tbs, 
         tbs_length, 
         user_rsa_modulus, 
         user_rsa_signature
     );
+
     CertRSA256Verify(maxMessageLength, n, k)(
         user_cert, 
         user_cert_length, 
