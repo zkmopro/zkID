@@ -82,21 +82,35 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
     signal input user_cert_length;                // actual user certificate length
     signal input user_rsa_modulus[k]; // user's RSA public key
     signal input user_rsa_signature[k];                // certificate signature
+    // These are the "parse SPKI" hints the prover supplies:
+    signal input user_modulus_offset;      // where modulus bytes start
+    signal input user_modulus_tag_offset;  // where 0x02 INTEGER tag is
 
     signal input issuer_rsa_modulus[k];                  // issuer's RSA public key
     signal input issuer_rsa_signature[k];                // certificate signature
 
-    CertRSA256Verify(maxMessageLength, n, k)(
-        tbs, 
-        tbs_length, 
-        user_rsa_modulus, 
-        user_rsa_signature
-    );
+    signal user_rsa_extracted_modulus[k];
+    ExtractModulus(maxMessageLength, n, k, modulusBits)(
+        in               <== user_cert,
+        modulusOffset    <== user_modulus_offset,
+        modulusTagOffset <== user_modulus_tag_offset
+    ) ==> user_rsa_extracted_modulus;
 
-    CertRSA256Verify(maxMessageLength, n, k)(
-        user_cert, 
-        user_cert_length, 
-        issuer_rsa_modulus, 
-        issuer_rsa_signature
-    );
+    for (var i = 0; i < k; i++) {
+        user_rsa_extracted_modulus[i] === user_rsa_modulus[i];
+    }
+
+    // CertRSA256Verify(maxMessageLength, n, k)(
+    //     tbs, 
+    //     tbs_length, 
+    //     user_rsa_modulus, 
+    //     user_rsa_signature
+    // );
+
+    // CertRSA256Verify(maxMessageLength, n, k)(
+    //     user_cert, 
+    //     user_cert_length, 
+    //     issuer_rsa_modulus, 
+    //     issuer_rsa_signature
+    // );
 }

@@ -792,6 +792,7 @@ dependencies = [
  "hex",
  "memmap2 0.9.9",
  "num-bigint 0.4.6",
+ "num-traits",
  "rsa",
  "serde",
  "serde_json",
