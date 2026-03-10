@@ -619,12 +619,17 @@ impl Rs256Circuit {
         );
 
         let user_offsets = Self::parse_cert_offsets(&user_cert_der);
+        let user_cert_tbs = &user_cert_der[
+            user_offsets.tbs_offset..user_offsets.tbs_offset + user_offsets.tbs_length
+        ];
 
         serde_json::json!({
             "tbs": user_circuit_input.message,
             "tbs_length": user_circuit_input.message_length,
             "user_cert": zero_pad(&user_cert_der),
             "user_cert_length": issuer_circuit_input.message_length,
+            "user_cert_tbs": issuer_circuit_input.message,
+            "user_cert_tbs_length": issuer_circuit_input.message_length,
             "user_rsa_modulus": user_circuit_input.rsa_modulus,
             "user_rsa_signature": user_circuit_input.rsa_signature,
             "user_modulus_offset": user_offsets.modulus_offset,

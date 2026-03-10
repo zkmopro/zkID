@@ -396,3 +396,68 @@ template ExtractModulus(maxLen, n, k, modulusBits) {
         out[i] <== b2n[i].out;
     }
 }
+
+/// @title Sha256BytesRaw  
+/// @notice SHA-256 of zero-padded raw bytes — handles sha256 padding internally
+/// @dev    Converts raw bytes to sha256-padded bits, then runs Sha256General.
+///         Input must be zero-padded to maxByteLength.
+///         maxByteLength must be a multiple of 64.
+/// @input in       Raw bytes zero-padded to maxByteLength
+/// @input length   Actual byte length (not padded length)
+/// @output out     256-bit SHA-256 hash
+template Sha256BytesRaw(maxByteLength) {
+    assert(maxByteLength % 64 == 0);
+
+    signal input in[maxByteLength];
+    signal input length;
+    signal output out[256];
+
+    var maxBits = maxByteLength * 8;
+
+    // ── Step 1: Bytes → bits ──────────────────────────────────────────────
+    signal bits[maxBits];
+    component n2b[maxByteLength];
+    for (var i = 0; i < maxByteLength; i++) {
+        n2b[i]    = Num2Bits(8);
+        n2b[i].in <== in[i];
+        for (var j = 0; j < 8; j++) {
+            bits[i * 8 + j] <== n2b[i].out[7 - j];  // MSB first
+        }
+    }
+
+    // ── Step 2: Sha256General with length in bits ─────────────────────────
+    component sha = Sha256General(maxBits);
+    sha.paddedIn       <== bits;
+    sha.paddedInLength <== length * 8;  // actual length in bits
+    out                <== sha.out;
+}
+
+/// @title HashAndLimbs
+/// @notice SHA-256 hashes zero-padded raw bytes and packs into RSA limbs
+template HashAndLimbs(maxLen, n, k) {
+    signal input in[maxLen];      // zero-padded raw bytes
+    signal input length;          // actual byte length
+    signal output out[k];
+
+    // ── SHA-256 with internal padding ─────────────────────────────────────
+    signal hash[256];
+    component sha = Sha256BytesRaw(maxLen);
+    sha.in     <== in;
+    sha.length <== length;
+    hash       <== sha.out;
+
+    // ── Pack 256 bits → k limbs, LSB first ───────────────────────────────
+    component b2n[k];
+    for (var i = 0; i < k; i++) {
+        b2n[i] = Bits2Num(n);
+        for (var j = 0; j < n; j++) {
+            var bitPos = i * n + j;
+            if (bitPos < 256) {
+                b2n[i].in[j] <== hash[255 - bitPos];
+            } else {
+                b2n[i].in[j] <== 0;
+            }
+        }
+        out[i] <== b2n[i].out;
+    }
+}

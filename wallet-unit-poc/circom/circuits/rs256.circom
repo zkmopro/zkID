@@ -80,6 +80,8 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
     signal input tbs_length;                // actual TBS length
     signal input user_cert[maxMessageLength];    // user certificate bytes
     signal input user_cert_length;                // actual user certificate length
+    signal input user_cert_tbs[maxMessageLength]; // user certificate TBS bytes
+    signal input user_cert_tbs_length;                // actual user certificate TBS length
     signal input user_rsa_modulus[k]; // user's RSA public key
     signal input user_rsa_signature[k];                // certificate signature
     // These are the "parse SPKI" hints the prover supplies:
@@ -99,6 +101,33 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
     for (var i = 0; i < k; i++) {
         user_rsa_extracted_modulus[i] === user_rsa_modulus[i];
     }
+
+    // ── Hash user_cert_tbs and verify issuer signature ────────────────────
+    signal user_cert_tbs_hash[k];
+    HashAndLimbs(maxMessageLength, n, k)(
+        in     <== user_cert_tbs,             
+        length <== user_cert_tbs_length      
+    ) ==> user_cert_tbs_hash;
+
+    RSAVerifier65537(n, k)(
+        modulus   <== issuer_rsa_modulus,
+        signature <== issuer_rsa_signature,
+        message   <== user_cert_tbs_hash
+    );
+
+    // ── Hash tbs and verify user signature ───────────────────────────────
+    signal tbs_hash[k];
+    HashAndLimbs(maxMessageLength, n, k)(
+        in     <== tbs,                         
+        length <== tbs_length                    
+    ) ==> tbs_hash;
+
+    RSAVerifier65537(n, k)(
+        modulus   <== user_rsa_modulus,
+        signature <== user_rsa_signature,
+        message   <== tbs_hash
+    );
+
 
     // CertRSA256Verify(maxMessageLength, n, k)(
     //     tbs, 
