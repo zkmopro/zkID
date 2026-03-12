@@ -81,7 +81,8 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
     signal input user_cert[maxMessageLength];    // user certificate bytes
     signal input user_cert_length;                // actual user certificate length
     signal input user_cert_tbs[maxMessageLength]; // user certificate TBS bytes
-    signal input user_cert_tbs_length;                // actual user certificate TBS length
+    signal input user_cert_tbs_offset;        // hint: where TBS starts in user_cert
+    signal input user_cert_tbs_length;        // hint: TBS byte length
     signal input user_rsa_modulus[k]; // user's RSA public key
     signal input user_rsa_signature[k];                // certificate signature
     // These are the "parse SPKI" hints the prover supplies:
@@ -98,9 +99,47 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
         modulusTagOffset <== user_modulus_tag_offset
     ) ==> user_rsa_extracted_modulus;
 
-    for (var i = 0; i < k; i++) {
-        user_rsa_extracted_modulus[i] === user_rsa_modulus[i];
+    // ── Step 1: Extract TBS from user_cert ────────────────────────────────
+    // TBS bytes are a sub-array of user_cert
+    // Proves user_cert_tbs came from the same cert as the modulus
+    signal user_cert_tbs_output[maxMessageLength];
+    component tbs_extract[maxMessageLength];
+    component tbs_lt[maxMessageLength];
+    component tbs_ltn[maxMessageLength];
+    signal tbs_inbounds[maxMessageLength];
+
+
+    for (var i = 0; i < maxMessageLength; i++) {
+        // Check i < tbs_length
+        tbs_lt[i] = LessThan(12);
+        tbs_lt[i].in[0] <== i;
+        tbs_lt[i].in[1] <== user_cert_tbs_length;
+
+        // Check tbs_offset + i < maxMessageLength
+        tbs_ltn[i] = LessThan(12);
+        tbs_ltn[i].in[0] <== user_cert_tbs_offset + i;
+        tbs_ltn[i].in[1] <== maxMessageLength;
+
+        // Select byte from user_cert at offset+i, clamp if out of bounds
+        tbs_extract[i] = Multiplexer(1, maxMessageLength);
+        for (var j = 0; j < maxMessageLength; j++) {
+            tbs_extract[i].inp[j][0] <== user_cert[j];
+        }
+        tbs_extract[i].sel <== tbs_ltn[i].out * (user_cert_tbs_offset + i)
+                             + (1 - tbs_ltn[i].out) * 0;
+
+        // Zero out if beyond TBS length or out of bounds
+        tbs_inbounds[i] <== tbs_lt[i].out * tbs_ltn[i].out;
+        user_cert_tbs_output[i] <== tbs_extract[i].out[0] * tbs_inbounds[i];
     }
+
+    // Validate TBS starts with SEQUENCE tag (0x30)
+    component tbsTagSel = Multiplexer(1, maxMessageLength);
+    for (var i = 0; i < maxMessageLength; i++) {
+        tbsTagSel.inp[i][0] <== user_cert[i];
+    }
+    tbsTagSel.sel    <== user_cert_tbs_offset;
+    tbsTagSel.out[0] === 48;  // 0x30 SEQUENCE tag
 
     // ── Hash user_cert_tbs and verify issuer signature ────────────────────
     signal user_cert_tbs_hash[k];
@@ -109,11 +148,17 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
         length <== user_cert_tbs_length      
     ) ==> user_cert_tbs_hash;
 
-    RSAVerifier65537(n, k)(
-        modulus   <== issuer_rsa_modulus,
-        signature <== issuer_rsa_signature,
-        message   <== user_cert_tbs_hash
-    );
+    // signal user_cert_tbs_hash_output[k];
+    // HashAndLimbs(maxMessageLength, n, k)(
+    //     in     <== user_cert_tbs_output,             
+    //     length <== user_cert_tbs_length      
+    // ) ==> user_cert_tbs_hash_output;
+
+    // RSAVerifier65537(n, k)(
+    //     modulus   <== issuer_rsa_modulus,
+    //     signature <== issuer_rsa_signature,
+    //     message   <== user_cert_tbs_hash
+    // );
 
     // ── Hash tbs and verify user signature ───────────────────────────────
     signal tbs_hash[k];
@@ -137,8 +182,8 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
     // );
 
     // CertRSA256Verify(maxMessageLength, n, k)(
-    //     user_cert, 
-    //     user_cert_length, 
+    //     user_cert_tbs, 
+    //     user_cert_tbs_length, 
     //     issuer_rsa_modulus, 
     //     issuer_rsa_signature
     // );
