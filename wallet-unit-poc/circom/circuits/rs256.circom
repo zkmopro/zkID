@@ -145,7 +145,7 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
     signal user_cert_tbs_hash[k];
     HashAndLimbs(maxMessageLength, n, k)(
         in     <== user_cert_tbs,             
-        length <== user_cert_tbs_length      
+        length <== user_cert_length      
     ) ==> user_cert_tbs_hash;
 
     // signal user_cert_tbs_hash_output[k];
@@ -154,11 +154,11 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
     //     length <== user_cert_tbs_length      
     // ) ==> user_cert_tbs_hash_output;
 
-    // RSAVerifier65537(n, k)(
-    //     modulus   <== issuer_rsa_modulus,
-    //     signature <== issuer_rsa_signature,
-    //     message   <== user_cert_tbs_hash
-    // );
+    RSAVerifier65537(n, k)(
+        modulus   <== issuer_rsa_modulus,
+        signature <== issuer_rsa_signature,
+        message   <== user_cert_tbs_hash
+    );
 
     // ── Hash tbs and verify user signature ───────────────────────────────
     signal tbs_hash[k];
