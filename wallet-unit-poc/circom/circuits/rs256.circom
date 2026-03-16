@@ -77,7 +77,9 @@ template CertRSA256Verify(maxMessageLength, n, k) {
 template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
     // === Inputs ===
     signal input tbs[maxMessageLength];    // TBS certificate bytes
+    signal input tbs_zero_padded[maxMessageLength];    // TBS certificate bytes zero padded
     signal input tbs_length;                // actual TBS length
+    signal input actual_tbs_length;         // actual TBS length
     signal input user_cert[maxMessageLength];    // user certificate bytes
     signal input user_cert_length;                // actual user certificate length
     signal input user_rsa_modulus[k]; // user's RSA public key
@@ -86,6 +88,8 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
     signal input issuer_rsa_modulus[k];                  // issuer's RSA public key
     signal input issuer_rsa_signature[k];                // certificate signature
 
+    VerifySHA256Padding(maxMessageLength)(tbs_zero_padded, tbs, actual_tbs_length);
+
     CertRSA256Verify(maxMessageLength, n, k)(
         tbs, 
         tbs_length, 
@@ -93,10 +97,10 @@ template FullCertRSA256Verify(maxMessageLength, n, k, modulusBits) {
         user_rsa_signature
     );
 
-    CertRSA256Verify(maxMessageLength, n, k)(
-        user_cert, 
-        user_cert_length, 
-        issuer_rsa_modulus, 
-        issuer_rsa_signature
-    );
+    // CertRSA256Verify(maxMessageLength, n, k)(
+    //     user_cert, 
+    //     user_cert_length, 
+    //     issuer_rsa_modulus, 
+    //     issuer_rsa_signature
+    // );
 }

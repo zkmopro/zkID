@@ -386,6 +386,19 @@ impl Rs256Circuit {
         user_tbs: &[u8],
         issuer_tbs: &[u8],
     ) -> serde_json::Value {
+
+        const MAX_MESSAGE_LENGTH: usize = 1536;
+        let zero_pad = |bytes: &[u8]| -> Vec<u64> {
+            assert!(
+                bytes.len() <= MAX_MESSAGE_LENGTH,
+                "too large: {} > {}",
+                bytes.len(),
+                MAX_MESSAGE_LENGTH
+            );
+            let mut v: Vec<u64> = bytes.iter().map(|&b| b as u64).collect();
+            v.resize(MAX_MESSAGE_LENGTH, 0);
+            v
+        };
         
         let user_circuit_input = Self::generate_rsa_circuit_input(user_cert, user_signature, user_tbs);
         let issuer_circuit_input = Self::generate_rsa_circuit_input(issuer_cert, issuer_signature, issuer_tbs);
@@ -393,6 +406,8 @@ impl Rs256Circuit {
         serde_json::json!({
             "tbs": user_circuit_input.message,
             "tbs_length": user_circuit_input.message_length,
+            "tbs_zero_padded": zero_pad(user_tbs),
+            "actual_tbs_length": user_tbs.len(),
             "user_cert": issuer_circuit_input.message,
             "user_cert_length": issuer_circuit_input.message_length,
             "user_rsa_modulus": user_circuit_input.rsa_modulus,

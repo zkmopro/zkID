@@ -278,3 +278,56 @@ template ExtractBase64UrlValue(maxPayloadLength, maxValueChars, expectedLength) 
     signal closingChar <== SelectArrayValue(maxPayloadLength)(payload, closingIndex, 1);
     closingChar === 34;
 }
+
+template IndexSelector(maxMessageLength) {
+    signal input sha_padded[maxMessageLength];
+    signal input len;
+    component isEqIdx[maxMessageLength];
+    signal selected[maxMessageLength];
+    signal sum;
+
+    for (var i = 0; i < maxMessageLength; i++) {
+        isEqIdx[i] = IsEqual();
+        isEqIdx[i].in[0] <== i;
+        isEqIdx[i].in[1] <== len;
+        selected[i] <== sha_padded[i] * isEqIdx[i].out;
+    }
+
+    // sum = sha_padded[len] (only one term is non-zero)
+    var acc = 0;
+    signal sums[maxMessageLength + 1];
+    sums[0] <== 0;
+    for (var i = 0; i < maxMessageLength; i++) {
+        sums[i+1] <== sums[i] + selected[i];
+    }
+    sums[maxMessageLength] === 0x80;
+}
+
+template VerifySHA256Padding(maxMessageLength) {
+    signal input zero_padded[maxMessageLength];  // [msg | 0x00 * padding]
+    signal input sha_padded[maxMessageLength];   // [msg | 0x80 | 0x00... | bit_len_be | 0x00...]
+    signal input len;                   // actual message length
+
+    component isLt[maxMessageLength];
+    component isEq[maxMessageLength];
+
+    for (var i = 0; i < maxMessageLength; i++) {
+        // 1. message region must match
+        isLt[i] = LessThan(12);
+        isLt[i].in[0] <== i;
+        isLt[i].in[1] <== len;
+        (zero_padded[i] - sha_padded[i]) * isLt[i].out === 0;
+
+        // 2. zero_pad region must be 0
+        isEq[i] = IsEqual();
+        isEq[i].in[0] <== i;
+        isEq[i].in[1] <== len;
+        // if i >= len: zero_padded[i] must be 0
+        zero_padded[i] * (1 - isLt[i].out) === 0;
+    }
+
+    // 3. 0x80 byte must be at position `len` in sha_padded
+    component sel = IndexSelector(maxMessageLength);
+    sel.sha_padded <== sha_padded;
+    sel.len <== len;
+}
