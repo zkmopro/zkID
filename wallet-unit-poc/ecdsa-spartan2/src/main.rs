@@ -86,15 +86,26 @@ fn main() {
             match command_args[i].as_str() {
                 "--smt-server" => {
                     i += 1;
-                    smt_server = Some(command_args[i].clone());
+                    smt_server = Some(
+                        command_args.get(i).cloned().unwrap_or_else(|| {
+                            eprintln!("Missing value for --smt-server");
+                            process::exit(1);
+                        }),
+                    );
                 }
                 "--issuer" => {
                     i += 1;
-                    issuer = command_args[i].clone();
+                    issuer = command_args.get(i).cloned().unwrap_or_else(|| {
+                        eprintln!("Missing value for --issuer");
+                        process::exit(1);
+                    });
                 }
                 "--output" | "-o" => {
                     i += 1;
-                    output = command_args[i].clone();
+                    output = command_args.get(i).cloned().unwrap_or_else(|| {
+                        eprintln!("Missing value for --output");
+                        process::exit(1);
+                    });
                 }
                 other => {
                     eprintln!("Unknown flag for generate-input: {}", other);

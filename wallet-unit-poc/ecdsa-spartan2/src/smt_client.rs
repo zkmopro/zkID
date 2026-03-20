@@ -29,13 +29,13 @@ pub struct SmtCircuitInputs {
 }
 
 /// Convert a potentially 0x-prefixed hex string to a decimal string.
-fn hex_to_decimal(val: &str) -> String {
+fn hex_to_decimal(val: &str) -> Result<String, Box<dyn Error>> {
     if let Some(hex_digits) = val.strip_prefix("0x").or_else(|| val.strip_prefix("0X")) {
         BigUint::parse_bytes(hex_digits.as_bytes(), 16)
             .map(|n| n.to_string())
-            .unwrap_or_else(|| val.to_string())
+            .ok_or_else(|| format!("invalid hex value: {}", val).into())
     } else {
-        val.to_string()
+        Ok(val.to_string())
     }
 }
 
@@ -62,23 +62,28 @@ pub fn fetch_smt_proof(
     let resp: SmtProofResponse = ureq::get(&url).call()?.into_json()?;
 
     // Convert siblings to decimal, pad to depth
-    let mut siblings: Vec<String> = resp.siblings.iter().map(|s| hex_to_decimal(s)).collect();
+    let mut siblings: Vec<String> = resp
+        .siblings
+        .iter()
+        .map(|s| hex_to_decimal(s))
+        .collect::<Result<Vec<_>, _>>()?;
     siblings.resize(depth, "0".to_string());
+    siblings.truncate(depth);
 
     let (old_key, old_value, is_old0) = match &resp.matching_entry {
         Some(entry) if entry.len() >= 2 => (
-            hex_to_decimal(&entry[0]),
-            hex_to_decimal(&entry[1]),
+            hex_to_decimal(&entry[0])?,
+            hex_to_decimal(&entry[1])?,
             "0".to_string(),
         ),
         _ => ("0".to_string(), "0".to_string(), "1".to_string()),
     };
 
     Ok(SmtCircuitInputs {
-        smt_root: hex_to_decimal(&resp.root),
+        smt_root: hex_to_decimal(&resp.root)?,
         serial_number: hex_to_decimal(
             resp.entry.first().ok_or("empty entry array in SMT response")?,
-        ),
+        )?,
         smt_siblings: siblings,
         smt_old_key: old_key,
         smt_old_value: old_value,
