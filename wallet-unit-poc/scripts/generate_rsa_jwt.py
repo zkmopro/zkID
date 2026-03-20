@@ -478,6 +478,57 @@ def generate_rsa_jwt_test_data(birthday: str = "1040605") -> dict[str, Any]:
     return result
 
 
+def fetch_smt_proof_inputs(
+    server_url: str,
+    issuer_id: str,
+    serial_hex: str,
+    depth: int = 128
+) -> dict[str, Any]:
+    """
+    Fetch a non-membership proof from the moica-revocation-smt server
+    and convert it to circuit inputs.
+
+    Args:
+        server_url: Base URL of the SMT server (e.g., http://localhost:3000)
+        issuer_id: Issuer identifier (e.g., "g2")
+        serial_hex: Certificate serial number in hex (e.g., "0x639ACA88...")
+        depth: SMT depth (default 128)
+
+    Returns:
+        Dictionary with smtRoot, serialNumber, smtSiblings, smtOldKey, smtOldValue, smtIsOld0
+    """
+    import urllib.request
+
+    url = f"{server_url}/proof/{issuer_id}/{serial_hex}"
+    req = urllib.request.Request(url)
+    with urllib.request.urlopen(req) as resp:
+        proof = json.loads(resp.read().decode('utf-8'))
+
+    # Pad siblings to depth
+    siblings = proof.get("siblings", [])
+    while len(siblings) < depth:
+        siblings.append("0")
+
+    matching_entry = proof.get("matchingEntry")
+    if matching_entry and len(matching_entry) >= 2:
+        old_key = str(matching_entry[0])
+        old_value = str(matching_entry[1])
+        is_old0 = "0"
+    else:
+        old_key = "0"
+        old_value = "0"
+        is_old0 = "1"
+
+    return {
+        "smtRoot": str(proof["root"]),
+        "serialNumber": str(proof["entry"][0]),
+        "smtSiblings": [str(s) for s in siblings],
+        "smtOldKey": old_key,
+        "smtOldValue": old_value,
+        "smtIsOld0": is_old0,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate RS256 JWT test data for zkID circuit testing"
@@ -522,6 +573,24 @@ def main():
         default=None,
         help="Current day for age verification (default: current day)"
     )
+    parser.add_argument(
+        "--smt-server",
+        type=str,
+        default=None,
+        help="SMT revocation server URL (e.g., http://localhost:3000)"
+    )
+    parser.add_argument(
+        "--issuer",
+        type=str,
+        default="g2",
+        help="Issuer ID for SMT proof lookup (default: g2)"
+    )
+    parser.add_argument(
+        "--serial-number",
+        type=str,
+        default=None,
+        help="Certificate serial number (hex, e.g., 0x639ACA88B568E0F7AAAC471953F962FD)"
+    )
 
     args = parser.parse_args()
 
@@ -538,6 +607,15 @@ def main():
         )
     else:
         output_data = test_data
+
+    # Fetch and merge SMT revocation proof if server is specified
+    if args.smt_server:
+        serial_hex = args.serial_number
+        if not serial_hex:
+            print("Error: --serial-number is required when --smt-server is specified", file=sys.stderr)
+            sys.exit(1)
+        smt_inputs = fetch_smt_proof_inputs(args.smt_server, args.issuer, serial_hex)
+        output_data.update(smt_inputs)
 
     # Format output
     indent = 2 if args.pretty else None
