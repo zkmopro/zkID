@@ -3,4 +3,4 @@ pragma circom 2.2.3;
 
 include "../rs256.circom";
 
-component main {public[rsaModulus]} = CertRSA256Verify(1536, 121, 17);
+component main {public[rsaModulus, smtRoot, serialNumber]} = CertRSA256VerifyWithRevocation(1536, 121, 17, 128);

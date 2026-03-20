@@ -5,6 +5,7 @@ include "circomlib/circuits/comparators.circom";
 include "@zk-email/circuits/lib/sha.circom";
 include "@zk-email/circuits/lib/rsa.circom";
 include "@zk-email/circuits/utils/array.circom";
+include "components/smt-nonmembership.circom";
 
 /// @title Bits2Limbs
 /// @notice Convert a bit array to k limbs of n bits each (little-endian limb order)
@@ -64,4 +65,54 @@ template CertRSA256Verify(maxMessageLength, n, k) {
     rsaVerifier.modulus <== rsaModulus;
     rsaVerifier.signature <== rsaSignature;
     rsaVerifier.message <== hashToLimbs.out;
+}
+
+/// @title CertRSA256VerifyWithRevocation
+/// @notice Verifies an X.509 certificate RSA-SHA256 signature and proves
+///         the certificate's serial number is NOT in the revocation SMT
+/// @param maxMessageLength Maximum TBS certificate bytes
+/// @param n RSA chunk bits (121)
+/// @param k RSA chunks (17 for 2048-bit)
+/// @param smtDepth Sparse Merkle Tree depth (128)
+template CertRSA256VerifyWithRevocation(maxMessageLength, n, k, smtDepth) {
+    // === RSA Verification Inputs ===
+    signal input message[maxMessageLength];
+    signal input messageLength;
+    signal input rsaModulus[k];
+    signal input rsaSignature[k];
+
+    // === SMT Non-Membership Inputs ===
+    signal input smtRoot;
+    signal input serialNumber;
+    signal input smtSiblings[smtDepth];
+    signal input smtOldKey;
+    signal input smtOldValue;
+    signal input smtIsOld0;
+
+    // === Step 1: RSA-SHA256 Verification (same as CertRSA256Verify) ===
+    AssertZeroPadding(maxMessageLength)(message, messageLength);
+
+    signal sha[256] <== Sha256Bytes(maxMessageLength)(message, messageLength);
+
+    signal shaReversed[256];
+    for (var i = 0; i < 256; i++) {
+        shaReversed[i] <== sha[255 - i];
+    }
+
+    component hashToLimbs = Bits2Limbs(256, n, k);
+    hashToLimbs.in <== shaReversed;
+
+    component rsaVerifier = RSAVerifier65537(n, k);
+    rsaVerifier.modulus <== rsaModulus;
+    rsaVerifier.signature <== rsaSignature;
+    rsaVerifier.message <== hashToLimbs.out;
+
+    // === Step 2: SMT Non-Membership Proof (revocation check) ===
+    component smtVerifier = SMTNonMembershipVerifier(smtDepth);
+    smtVerifier.root <== smtRoot;
+    smtVerifier.key <== serialNumber;
+    smtVerifier.siblings <== smtSiblings;
+    smtVerifier.oldKey <== smtOldKey;
+    smtVerifier.oldValue <== smtOldValue;
+    smtVerifier.isOld0 <== smtIsOld0;
 }
