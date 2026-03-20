@@ -138,7 +138,13 @@ impl Rs256Circuit {
         Ok(())
     }
 
-    pub fn generate_input_from_response(response_path: &PathBuf, tbs: &[u8]) {
+    pub fn generate_input_from_response(
+        response_path: &PathBuf,
+        tbs: &[u8],
+        smt_server: Option<&str>,
+        issuer: &str,
+        output_path: &str,
+    ) {
         let response_string = std::fs::read_to_string(response_path).unwrap();
         let response: CardSignResponse = serde_json::from_str(&response_string).unwrap();
 
@@ -259,14 +265,33 @@ impl Rs256Circuit {
             Err(e) => println!("❌ Verification failed: {}", e),
         }
 
+        // Fetch SMT proof if server is specified
+        let smt_inputs = if let Some(server_url) = smt_server {
+            println!("Fetching SMT proof from {}...", server_url);
+            match crate::smt_client::fetch_smt_proof(server_url, issuer, &serial_hex, 128) {
+                Ok(inputs) => {
+                    println!("  SMT root: {}...", &inputs.smt_root[..20.min(inputs.smt_root.len())]);
+                    println!("  Serial (decimal): {}...", &inputs.serial_number[..20.min(inputs.serial_number.len())]);
+                    println!("  isOld0: {}", inputs.smt_is_old0);
+                    Some(inputs)
+                }
+                Err(e) => {
+                    eprintln!("Failed to fetch SMT proof: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            None
+        };
+
         // Generate circuit input
-        let circuit_input = Self::generate_circuit_input(&response, tbs, None);
+        let circuit_input = Self::generate_circuit_input(&response, tbs, smt_inputs.as_ref());
         std::fs::write(
-            "rs256_input.json",
+            output_path,
             serde_json::to_string_pretty(&circuit_input).unwrap(),
         )
         .unwrap();
-        println!("Circuit input written to rs256_input.json");
+        println!("Circuit input written to {}", output_path);
 
 
     }

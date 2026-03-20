@@ -67,14 +67,50 @@ fn main() {
     let command_args: &[String] = if args.len() > 1 { &args[1..] } else { &[] };
 
     if command_args.contains(&"generate-input".to_string()) {
-        // Expect "generate-input" <response.json path> as args
         if command_args.len() < 4 {
-            eprintln!("Usage: {} generate-input <response.json path> <tbs string>", args[0]);
+            eprintln!(
+                "Usage: {} rs256 generate-input <response.json> <tbs> [--smt-server URL] [--issuer ID] [--output PATH]",
+                args[0]
+            );
             process::exit(1);
         }
         let response_path = PathBuf::from(&command_args[2]);
         let tbs = command_args[3].as_bytes();
-        Rs256Circuit::generate_input_from_response(&response_path, tbs);
+
+        // Parse optional flags
+        let mut smt_server: Option<String> = None;
+        let mut issuer = "g2".to_string();
+        let mut output = "rs256_input.json".to_string();
+        let mut i = 4;
+        while i < command_args.len() {
+            match command_args[i].as_str() {
+                "--smt-server" => {
+                    i += 1;
+                    smt_server = Some(command_args[i].clone());
+                }
+                "--issuer" => {
+                    i += 1;
+                    issuer = command_args[i].clone();
+                }
+                "--output" | "-o" => {
+                    i += 1;
+                    output = command_args[i].clone();
+                }
+                other => {
+                    eprintln!("Unknown flag for generate-input: {}", other);
+                    process::exit(1);
+                }
+            }
+            i += 1;
+        }
+
+        Rs256Circuit::generate_input_from_response(
+            &response_path,
+            tbs,
+            smt_server.as_deref(),
+            &issuer,
+            &output,
+        );
         process::exit(0);
     }
 
@@ -323,6 +359,7 @@ Actions:
   run                  Run the complete circuit (setup, prove, verify)
   setup                Generate proving and verifying keys
   generate-input       Generate circuit input from response.json and tbs
+                       Options: --smt-server URL, --issuer ID (default: g2), --output PATH
   prove                Generate proof
   verify               Verify proof
   benchmark            Run complete benchmark pipeline
@@ -331,7 +368,7 @@ Options:
   --input, -i <path>   Override the circuit input JSON (run/prove/setup/benchmark)
 
 Examples:
-  cargo run --release -- rs256 generate-input ./circuits/response.json 123456 # optional
+  cargo run --release -- rs256 generate-input ./response.json <tbs> --smt-server http://localhost:3000 --output ../circom/inputs/rs256/input.json
   cargo run --release -- rs256 setup --input ../circom/inputs/rs256/input.json
   cargo run --release -- rs256 prove --input ../circom/inputs/rs256/input.json
   cargo run --release -- rs256 verify
