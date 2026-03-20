@@ -70,7 +70,7 @@ pub fn fetch_smt_proof(
     siblings.resize(depth, "0".to_string());
     siblings.truncate(depth);
 
-    let (old_key, old_value, is_old0) = match &resp.matching_entry {
+    let (old_key, old_value, is_old0): (String, String, String) = match &resp.matching_entry {
         Some(entry) if entry.len() >= 2 => (
             hex_to_decimal(&entry[0])?,
             hex_to_decimal(&entry[1])?,

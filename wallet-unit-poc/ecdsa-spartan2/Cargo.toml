@@ -32,7 +32,7 @@ rsa = "0.9"
 der = { version = "0.7", features = ["derive"] }
 const-oid = { version = "0.9", features = ["db"] }
 hex = "0.4.3"
-ureq = "2"
+ureq = { version = "2", features = ["json"] }
 
 [build-dependencies]
 witnesscalc-adapter = { git = "https://github.com/zkmopro/witnesscalc_adapter.git", branch = "secq256r1-support" }
