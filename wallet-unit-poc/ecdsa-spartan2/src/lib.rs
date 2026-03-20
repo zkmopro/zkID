@@ -14,6 +14,7 @@ pub mod circuits;
 pub mod paths;
 pub mod prover;
 pub mod setup;
+pub mod smt_client;
 pub mod utils;
 
 // Re-export commonly used types and functions
