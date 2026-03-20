@@ -260,7 +260,7 @@ impl Rs256Circuit {
         }
 
         // Generate circuit input
-        let circuit_input = Self::generate_circuit_input(&response, tbs);
+        let circuit_input = Self::generate_circuit_input(&response, tbs, None);
         std::fs::write(
             "rs256_input.json",
             serde_json::to_string_pretty(&circuit_input).unwrap(),
@@ -274,6 +274,7 @@ impl Rs256Circuit {
     fn generate_circuit_input(
         response: &CardSignResponse,
         original_data: &[u8],
+        smt_inputs: Option<&crate::smt_client::SmtCircuitInputs>,
     ) -> serde_json::Value {
         const MAX_MESSAGE_LENGTH: usize = 1536;
         const RSA_N: usize = 121;
@@ -304,12 +305,24 @@ impl Rs256Circuit {
         let message = Self::sha256_pad(original_data, MAX_MESSAGE_LENGTH);
         let padded_len = Self::sha256_padded_length(original_data.len());
 
-        serde_json::json!({
+        let mut input = serde_json::json!({
             "message": message.iter().map(|b| b.to_string()).collect::<Vec<_>>(),
             "messageLength": padded_len.to_string(),
             "rsaModulus": rsa_modulus,
             "rsaSignature": rsa_signature,
-        })
+        });
+
+        if let Some(smt) = smt_inputs {
+            let obj = input.as_object_mut().unwrap();
+            obj.insert("smtRoot".to_string(), serde_json::json!(smt.smt_root));
+            obj.insert("serialNumber".to_string(), serde_json::json!(smt.serial_number));
+            obj.insert("smtSiblings".to_string(), serde_json::json!(smt.smt_siblings));
+            obj.insert("smtOldKey".to_string(), serde_json::json!(smt.smt_old_key));
+            obj.insert("smtOldValue".to_string(), serde_json::json!(smt.smt_old_value));
+            obj.insert("smtIsOld0".to_string(), serde_json::json!(smt.smt_is_old0));
+        }
+
+        input
     }
 
     fn bigint_to_chunks(n: &BigUint, count: usize, chunk_bits: usize) -> Vec<String> {
