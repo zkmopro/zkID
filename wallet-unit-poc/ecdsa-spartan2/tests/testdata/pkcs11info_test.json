@@ -1,0 +1,27 @@
+{
+  "func": "pkcs11info",
+  "last_error": 0,
+  "ret_code": 0,
+  "slots": [
+    {
+      "token": {
+        "certs": [
+          {
+            "certb64": "MIIDfzCCAmegAwIBAgIUJsdu4TFzmN8KlV0xLwZFcDpHQY8wDQYJKoZIhvcNAQELBQAwTzELMAkGA1UEBhMCVFcxGzAZBgNVBAoMElRlc3QgR292ZXJubWVudCBDQTEjMCEGA1UECwwaVGVzdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkwHhcNMjYwMzI1MDk1ODAzWhcNMzYwMzIyMDk1ODAzWjBPMQswCQYDVQQGEwJUVzEbMBkGA1UECgwSVGVzdCBHb3Zlcm5tZW50IENBMSMwIQYDVQQLDBpUZXN0IENlcnRpZmljYXRlIEF1dGhvcml0eTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALQbLCFin7OCb+tl/8iMhu8Zw07ii7nJ3QFu3CrWzu8GvgGZkcB+CBgWa0Zp2zj+oWGAGeaXYiIw6qj1gWE9SseJmcVwg7aTHeOCHmTKsrnKC7+q69ISzcKaH/iaVfocUpx/IgQT6/3C+YYXcGv4dP+kYZyIIVTG7Ejec1HYt4+D4kumU4PYthSBSbMkUrT6Nq+xQpqVo/y6D5iukYc8M0FczJ3YvsSHvyTksi0NcTO7XBkV40UuzhqSuFM3Y5u+NPGxJbwSjrcZI3nk/Ubd0c9YDm6teuyWcAVD1HI+OpoqYtKcG4L9ejrzkCsVC9h7wdxoSaAbojvYJuszLP+EO9UCAwEAAaNTMFEwHQYDVR0OBBYEFM2WUkhsgaa+btW7BkeSLEl0C3VaMB8GA1UdIwQYMBaAFM2WUkhsgaa+btW7BkeSLEl0C3VaMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBADzaegGW88SvZ2siHHQEljempVzcl+bfk+jA9HvLNHIDABvtgk8Tcz3uZ4HrgeZROA8WBmzrK+J7w1nWkIrzvYuUNt9IFxebc9eCwckP8XbtHlN3VBGun2HEFPMW+02MvYB87SkoCxA0H7uO4UU12DUZ/pLzGnp9qxrx14Fy2AWoHdiqKAlZT3GoT2WMV75oObPrGlVAHgaufBSFM44nQvZaxxyC0cKjcVrVXFHLhC9vGQIRZXLlkAyJ61jCZgbZFCq8bPUrHvEMoH6/1n6wnTE2IqVelGOIPLpeEhjbTe/62KV0p+rx27DkWwP9xOt11zORlWvVMc4iQFJNivHDKY8=",
+            "label": "CA Cert",
+            "subjectDN": "C=TW,O=Test Government CA,OU=Test Certificate Authority",
+            "issuerDN": "C=TW,O=Test Government CA,OU=Test Certificate Authority",
+            "usage": "keyCertSign|cRLSign"
+          },
+          {
+            "certb64": "MIIDWzCCAkOgAwIBAgIUXk+tCnxt2FS+Eh56AHM7ISwa7YowDQYJKoZIhvcNAQELBQAwTzELMAkGA1UEBhMCVFcxGzAZBgNVBAoMElRlc3QgR292ZXJubWVudCBDQTEjMCEGA1UECwwaVGVzdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkwHhcNMjYwMzI1MDk1ODAzWhcNMzYwMzIyMDk1ODAzWjA8MQswCQYDVQQGEwJUVzESMBAGA1UEAwwJVGVzdCBVc2VyMRkwFwYDVQQFExAwMDAwMDAwMDAwMDAwMDAwMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtAxRbUiPRf0I4gkQzShWNJS4jXPSoVCK0zbNn80PjCvGofHGCHNZ512HddUI6CoxQMghK+yp1ZA910pjBAgFoayc9UGd+z2m/uFiG9+xkazGcfNRoa+xLGN+lCqJmlL9m2w8/ECERvIWlRvg2Vhe7pVA5qIxDKJ/rnG/JRyG/f4HE4Gea8phSTIokbFaDJvO2vxFqnreLFCi7yB7iR8oj8iu11wChy5ouxb2qraSFfM3/zaynqw5pnwHqSrJyT/RGfdBOrPFEozqT1OOy6vdeuo0bw4dXY0d9kd+OPzoMjc4NHPOKTMgHHqEy2mDfNOBTbrCCSxQC9SNNTcjgRGgtwIDAQABo0IwQDAdBgNVHQ4EFgQUlGACLX1ey6Ck1CM0/WwRLH7t8cswHwYDVR0jBBgwFoAUzZZSSGyBpr5u1bsGR5IsSXQLdVowDQYJKoZIhvcNAQELBQADggEBAGr8f9BiPrrImWnT1vyM1uwIOnPtYXt4MZvNRdFd5Dxw3S/0u2vLkNZ32Uy9jcYg66qZl3AUplEbeT9wAO2rYY3nnwTNUbBd/cklb1FE7qtCcaJFiOMZG0zHSXFUu5q9bnKHv0Eg1TWG+U8MNZqUbnzcrUyN9HBthvEwTVkvPsEd7JX7ZJ2qShS/Luj5M1bnOUFDu1+Ea90ak/LeUhfMIl9e2Eic91DXYsB1dcrBPtUwFGSSnTZTM/6DhhfWW8YZpcJztYiCq7/E5TDhpjH3kiFQl730RN10kUGLj+xfuqkx0X2/ZPHJ1NcIsYYBisKVAb3bnx1C3wVE1Fsot/lsQqY=",
+            "label": "cert1",
+            "subjectDN": "C=TW,CN=Test User,serialNumber=0000000000000000",
+            "issuerDN": "C=TW,O=Test Government CA,OU=Test Certificate Authority",
+            "usage": "digitalSignature"
+          }
+        ]
+      }
+    }
+  ]
+}

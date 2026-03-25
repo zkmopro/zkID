@@ -11,6 +11,7 @@ pub type E = T256HyraxEngine;
 pub type Scalar = <E as Engine>::Scalar;
 
 pub mod circuits;
+pub mod hipki_client;
 pub mod paths;
 pub mod prover;
 pub mod setup;

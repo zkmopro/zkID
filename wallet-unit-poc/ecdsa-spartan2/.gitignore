@@ -1,3 +1,8 @@
 /target
 /output.wtns
 /keys
+/response.json
+
+# Test fixtures containing personal certificate data (generate your own via HiPKI)
+/tests/testdata/response_sign.json
+/tests/testdata/pkcs11info_withcert.json
