@@ -1,7 +1,8 @@
-//! RS256 Circuit implementation for single-stage proof verification.
+//! RS256 Circuit implementation for certificate chain verification.
 //!
-//! This circuit verifies RS256 (RSA-SHA256) signatures and performs age verification
-//! in a single stage, without requiring a separate Show circuit for device binding.
+//! This circuit verifies a certificate chain (user cert signed by issuer CA)
+//! using RSA-SHA256 signatures, extracts the user's public key from the cert DER
+//! in-circuit, and proves non-revocation via a Sparse Merkle Tree.
 
 use crate::{paths::PathConfig, utils::parse_witness, Scalar, E};
 use base64::Engine;
@@ -11,7 +12,6 @@ use const_oid::db::rfc4519::*;
 use der::Encode;
 use der::{
     asn1::{PrintableStringRef, Utf8StringRef},
-    oid::db::rfc4519::ORGANIZATION_NAME,
     Decode,
 };
 use ff::Field;
@@ -27,7 +27,7 @@ use std::{
     any::type_name,
     fs::File,
     io::Read,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -53,33 +53,75 @@ pub struct Rs256Circuit {
     cached_witness: Arc<Mutex<Option<Vec<Scalar>>>>,
 }
 
+/// Response from HiPKI `/sign` API with `signatureType: "PKCS1"`.
 #[derive(Deserialize)]
-struct CardSignResponse {
+pub struct CardSignResponse {
     #[serde(rename = "cardSN")]
-    card_sn: String,
-    certb64: String,
+    pub card_sn: String,
+    pub certb64: String,
     #[serde(rename = "func")]
     _func: String,
     #[serde(rename = "last_error")]
     _last_error: i32,
     #[serde(rename = "ret_code")]
     _ret_code: i32,
-    signature: String,
+    pub signature: String,
     #[serde(rename = "version")]
     _version: String,
 }
 
-struct RS256CircuitInput {
+/// Intermediate result from per-certificate RSA input generation.
+struct RsaCircuitInput {
     message: Vec<String>,
     message_length: usize,
     rsa_modulus: Vec<String>,
     rsa_signature: Vec<String>,
 }
 
+/// DER byte offsets for in-circuit modulus extraction.
 #[derive(Debug)]
 struct CertOffsets {
-    pub modulus_offset: usize, // first real modulus byte (after sign byte)
-    pub modulus_tag_offset: usize, // where 0x02 INTEGER tag is
+    modulus_offset: usize,
+    modulus_tag_offset: usize,
+}
+
+// === HiPKI /pkcs11info?withcert=true response structs ===
+
+/// A certificate entry from the PKCS#11 token.
+#[derive(Deserialize, Debug)]
+pub struct Pkcs11CertEntry {
+    pub certb64: String,
+    pub label: String,
+    #[serde(default)]
+    pub usage: Option<String>,
+    #[serde(default)]
+    pub sn: Option<String>,
+    #[serde(rename = "subjectDN", default)]
+    pub subject_dn: Option<String>,
+    #[serde(rename = "issuerDN", default)]
+    pub issuer_dn: Option<String>,
+}
+
+/// Token info containing certificates and keys.
+#[derive(Deserialize, Debug)]
+pub struct Pkcs11TokenInfo {
+    #[serde(default)]
+    pub certs: Vec<Pkcs11CertEntry>,
+    #[serde(rename = "serialNumber", default)]
+    pub serial_number: Option<String>,
+}
+
+/// A PKCS#11 slot with optional token.
+#[derive(Deserialize, Debug)]
+pub struct Pkcs11Slot {
+    #[serde(default)]
+    pub token: Option<Pkcs11TokenInfo>,
+}
+
+/// Response from HiPKI `/pkcs11info?withcert=true` API.
+#[derive(Deserialize, Debug)]
+pub struct Pkcs11InfoResponse {
+    pub slots: Vec<Pkcs11Slot>,
 }
 
 impl Default for Rs256Circuit {
@@ -125,310 +167,196 @@ impl Rs256Circuit {
         self.path_config.r1cs_path("rs256")
     }
 
-    fn verify_card_signature(
-        response: &CardSignResponse,
-        tbs: &[u8], // the data that was signed
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // 1. Decode certificate
-        let cert_der = base64::engine::general_purpose::STANDARD.decode(&response.certb64)?;
-        let cert = Certificate::from_der(&cert_der)?;
+    // === Certificate extraction from PKCS#11 response ===
 
-        // 2. Extract RSA public key from certificate
-        let spki_der = cert.tbs_certificate.subject_public_key_info.to_der()?;
-        let rsa_pub = RsaPublicKey::from_public_key_der(&spki_der)?;
+    /// Extract the issuer (CA) certificate from a pkcs11info response.
+    /// Looks for the cert with label "CA Cert" in the first slot's token.
+    pub fn extract_issuer_cert(
+        pkcs11info: &Pkcs11InfoResponse,
+    ) -> Result<Certificate, Box<dyn std::error::Error>> {
+        let certs = pkcs11info
+            .slots
+            .first()
+            .and_then(|s| s.token.as_ref())
+            .map(|t| &t.certs)
+            .ok_or("No token found in pkcs11info response")?;
 
-        println!("RSA key size: {} bits", rsa_pub.n().bits());
+        let ca_entry = certs
+            .iter()
+            .find(|c| c.label == "CA Cert")
+            .ok_or("No cert with label 'CA Cert' found in pkcs11info response")?;
 
-        // 3. Decode signature
-        let sig_bytes = base64::engine::general_purpose::STANDARD.decode(&response.signature)?;
-        let sig = rsa::pkcs1v15::Signature::try_from(sig_bytes.as_slice())?;
-
-        // 4. Verify
-        let verifying_key = VerifyingKey::<Sha256>::new(rsa_pub);
-        verifying_key.verify(tbs, &sig)?;
-
-        println!("✅ Signature verified for card: {}", response.card_sn);
-        Ok(())
+        let der = base64::engine::general_purpose::STANDARD.decode(&ca_entry.certb64)?;
+        Ok(Certificate::from_der(&der)?)
     }
 
+    /// Verify that the issuer certificate signed the user certificate.
     fn verify_issuer_signature(
         issuer_cert: &Certificate,
-        user_cert: &Certificate, // ← add user cert parameter
+        user_cert: &Certificate,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // 1. Extract issuer's RSA public key
         let spki_der = issuer_cert
             .tbs_certificate
             .subject_public_key_info
             .to_der()?;
         let rsa_pub = RsaPublicKey::from_public_key_der(&spki_der)?;
-        println!("Issuer RSA key size: {} bits", rsa_pub.n().bits());
 
-        // 2. Get the signature from the USER cert
-        //    (this is MOICA's signature over the user's TBS)
         let sig_bytes = user_cert.signature.raw_bytes();
         let sig = rsa::pkcs1v15::Signature::try_from(sig_bytes)?;
 
-        // 3. Get the TBS from the USER cert
-        //    (this is what MOICA signed)
         let user_tbs_der = user_cert.tbs_certificate.to_der()?;
 
-        // 4. Verify issuer signed the user cert's TBS
         let verifying_key = VerifyingKey::<Sha256>::new(rsa_pub);
         verifying_key.verify(&user_tbs_der, &sig)?;
-
-        println!("✅ Issuer signature valid: MOICA signed the user cert");
         Ok(())
     }
 
-    pub fn generate_input_from_response(
-        response_path: &PathBuf,
+    /// Verify the card's raw PKCS#1 signature over the TBS data.
+    fn verify_card_signature(
+        response: &CardSignResponse,
         tbs: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cert_der = base64::engine::general_purpose::STANDARD.decode(&response.certb64)?;
+        let cert = Certificate::from_der(&cert_der)?;
+
+        let spki_der = cert.tbs_certificate.subject_public_key_info.to_der()?;
+        let rsa_pub = RsaPublicKey::from_public_key_der(&spki_der)?;
+
+        let sig_bytes = base64::engine::general_purpose::STANDARD.decode(&response.signature)?;
+        let sig = rsa::pkcs1v15::Signature::try_from(sig_bytes.as_slice())?;
+
+        let verifying_key = VerifyingKey::<Sha256>::new(rsa_pub);
+        verifying_key.verify(tbs, &sig)?;
+        Ok(())
+    }
+
+    // === Main entry points for circuit input generation ===
+
+    /// Generate circuit input JSON from a parsed CardSignResponse.
+    ///
+    /// This is the primary entry point — accepts already-parsed API responses
+    /// (from HiPKI client or test fixtures).
+    pub fn generate_input(
+        sign_response: &CardSignResponse,
+        tbs: &[u8],
+        issuer_cert: &Certificate,
         smt_server: Option<&str>,
-        issuer: &str,
+        issuer_id: &str,
         output_path: &str,
-    ) {
-        let response_string = std::fs::read_to_string(response_path).unwrap();
-        let response: CardSignResponse = serde_json::from_str(&response_string).unwrap();
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let cert_der =
+            base64::engine::general_purpose::STANDARD.decode(&sign_response.certb64)?;
+        let user_cert = Certificate::from_der(&cert_der)?;
 
-        let issuer_cert_b64 = "MIIFKDCCAxCgAwIBAgIQUcO1wamhWIYJIiIx1hrArTANBgkqhkiG9w0BAQsFADA/MQswCQYDVQQGEwJUVzEwMC4GA1UECgwnR292ZXJubWVudCBSb290IENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4XDTE0MDEwMjA2MzEwNFoXDTM0MDEwMjA2MzEwNFowRzELMAkGA1UEBhMCVFcxEjAQBgNVBAoMCeihjOaUv+mZojEkMCIGA1UECwwb5YWn5pS/6YOo5oaR6K2J566h55CG5Lit5b+DMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAn9gInAVVnWPVqzS8XfaF+10vRLo3ulZAI4sAYxrOcFCTNQnQ+bZzb/6iqWgg4fvAxbIbMZfhbQ01eihjledeZEAvN66P/87iSBwiplWESeE1LrKEQkot4ic2F/YKXU9/u2Vk8ek6pQzoxNMNg5BACTYqAWC13VPoGPiPNErxLphj5VJopMgboiCUETh1UYy/TVAZUIHWMKpALi+eqThHJc+oJ1Qju0C715zdnRI3HQYkuFoF9vYiOSLJgVUeqJ538E3z4iuTUZ+jcohxfSFGt4e3hwPVqn/xhn+cYI8gbpxqOfAMLyv/+REKhb8Vwl2uILOKf29aEgJtCKHLxoEpHQIDAQABo4IBFjCCARIwHwYDVR0jBBgwFoAU1Wcd4Jx6LJzLxZjnHQcmKobsdM0wHQYDVR0OBBYEFPqbNGcJCpgi92JIi4ImpkXFwyKkMA4GA1UdDwEB/wQEAwIBBjAUBgNVHSAEDTALMAkGB2CGdmUAAwMwEgYDVR0TAQH/BAgwBgEB/wIBADA+BgNVHR8ENzA1MDOgMaAvhi1odHRwOi8vZ3JjYS5uYXQuZ292LnR3L3JlcG9zaXRvcnkvQ1JMMi9DQS5jcmwwVgYIKwYBBQUHAQEESjBIMEYGCCsGAQUFBzAChjpodHRwOi8vZ3JjYS5uYXQuZ292LnR3L3JlcG9zaXRvcnkvQ2VydHMvSXNzdWVkVG9UaGlzQ0EucDdiMA0GCSqGSIb3DQEBCwUAA4ICAQAYjLOx0ErTqE8Yul0WIRw7yl7UPy23z1xNn2lhs022lpTSWA8ebx3fATUnSPx6oBiGoxG8U/x+NV5DgUy7qenxXHscgOVZVpf7avGcrq8FYrZ0nRGmMCRC30lELnrrH7C9H8YTVZymh2Ovg2jtJHupvmvb43AV9T68T/739lmSkaw7/tu+Ea3Wtxlunzw++5ameC/UZ/1LN0qt/ImKlxBIhXmJbhrHGl20bQp3ZfvGtQ8n03rJtX6dbN2U+JQO4LMcY/3T6Q1sPy2KLA0f2sW4oUM13g8UCIQvhV029DKL3rkDL9xzUHfKBjD9LGDHgdzZ7FszBpFwWEEhsGZx5ZQgFexauozom2lfxSLyZRprWySpMCRlqhU/Vgmx4DwXwWimqH/gtD6cK9+88lcMqhC2d+Jy6D2OrhSbMMW5chfDW6BETxUBXQRBQ6pG8FfWH+f1WN2jytWvymqmvR31e8XsxUa3oOQUTO+NcKBkI3iH7DMR9N5PWwA5OVTrunAl8eC3cb9ZdIG6j27xMjNck46fYAIIp3uqyK1MTC6Z6e8yygL1pSW7/whNWL/4gp0EFyMkx7M1V8QmqYNaeVbRVFjDGZ30qh2Osr4mtEPImvHZFX8Sv0keMYemH9oLqyxYzhsb40XCWNzYC0RS73kTcXATtetNSsXzrxLfbno09jQHsg==";
-        let issuer_cert = Certificate::from_der(
-            &base64::engine::general_purpose::STANDARD
-                .decode(&issuer_cert_b64)
-                .unwrap(),
-        )
-        .unwrap();
-        let issuer_cert_tbs = &issuer_cert.tbs_certificate;
-        let issuer_cert_subject_cn = Self::get_attr(&issuer_cert_tbs.subject, COMMON_NAME);
-        let issuer_cert_subject_org = Self::get_attr(&issuer_cert_tbs.subject, ORGANIZATION_NAME);
-        let issuer_cert_subject_country = Self::get_attr(&issuer_cert_tbs.subject, COUNTRY_NAME);
-        let issuer_cert_subject_serial = Self::get_attr(&issuer_cert_tbs.subject, SERIAL_NUMBER);
-        let issuer_cert_issuer_cn = Self::get_attr(&issuer_cert_tbs.issuer, COMMON_NAME);
-        let issuer_cert_issuer_org = Self::get_attr(&issuer_cert_tbs.issuer, ORGANIZATION_NAME);
-        let issuer_cert_issuer_ou =
-            Self::get_attr(&issuer_cert_tbs.issuer, ORGANIZATIONAL_UNIT_NAME);
-        let issuer_cert_issuer_country = Self::get_attr(&issuer_cert_tbs.issuer, COUNTRY_NAME);
-        let issuer_cert_not_before = issuer_cert_tbs.validity.not_before;
-        let issuer_cert_not_after = issuer_cert_tbs.validity.not_after;
-        let issuer_cert_serial = issuer_cert_tbs.serial_number.as_bytes();
-        let issuer_cert_serial_hex = hex::encode(issuer_cert_serial);
-        let issuer_cert_version = issuer_cert_tbs.version;
-        println!("issuer_cert_subject_cn: {}", issuer_cert_subject_cn);
-        println!("issuer_cert_subject_org: {}", issuer_cert_subject_org);
-        println!(
-            "issuer_cert_subject_country: {}",
-            issuer_cert_subject_country
-        );
-        println!("issuer_cert_subject_serial: {}", issuer_cert_subject_serial);
-        println!("issuer_cert_issuer_cn: {}", issuer_cert_issuer_cn);
-        println!("issuer_cert_issuer_org: {}", issuer_cert_issuer_org);
-        println!("issuer_cert_issuer_ou: {}", issuer_cert_issuer_ou);
-        println!("issuer_cert_issuer_country: {}", issuer_cert_issuer_country);
-        println!("issuer_cert_not_before: {:?}", issuer_cert_not_before);
-        println!("issuer_cert_not_after: {:?}", issuer_cert_not_after);
-        println!("issuer_cert_serial: {}", issuer_cert_serial_hex);
-        println!("issuer_cert_version: {:?}", issuer_cert_version);
+        let subject_cn = Self::get_attr(&user_cert.tbs_certificate.subject, COMMON_NAME);
+        // Strip leading 0x00 padding bytes from DER INTEGER encoding
+        let serial_bytes = user_cert.tbs_certificate.serial_number.as_bytes();
+        let trimmed: Vec<u8> = serial_bytes.iter().skip_while(|&&b| b == 0).copied().collect();
+        let serial_hex = hex::encode(if trimmed.is_empty() { serial_bytes } else { &trimmed });
+        info!(subject = %subject_cn, serial = %serial_hex, "Parsed user certificate");
 
-        // Decode base64
-        let raw_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&response.certb64)
-            .expect("Failed to decode base64");
+        Self::verify_issuer_signature(issuer_cert, &user_cert)?;
+        info!("Issuer signature verified on user cert");
 
-        // Parse DER certificate
-        let cert = Certificate::from_der(&raw_bytes).expect("Failed to parse certificate");
-        let cert_tbs = &cert.tbs_certificate;
+        Self::verify_card_signature(sign_response, tbs)?;
+        info!(card_sn = %sign_response.card_sn, "Card signature verified");
 
-        // === Subject (who the cert is issued to) ===
-        let subject_cn = Self::get_attr(&cert_tbs.subject, COMMON_NAME); // CN
-        let subject_org = Self::get_attr(&cert_tbs.subject, ORGANIZATION_NAME); // O
-        let subject_country = Self::get_attr(&cert_tbs.subject, COUNTRY_NAME); // C
-        let subject_serial = Self::get_attr(&cert_tbs.subject, SERIAL_NUMBER); // serialNumber
-
-        // === Issuer (who issued the cert) ===
-        let issuer_cn = Self::get_attr(&cert_tbs.issuer, COMMON_NAME);
-        let issuer_org = Self::get_attr(&cert_tbs.issuer, ORGANIZATION_NAME);
-        let issuer_ou = Self::get_attr(&cert_tbs.issuer, ORGANIZATIONAL_UNIT_NAME); // OU
-        let issuer_country = Self::get_attr(&cert_tbs.issuer, COUNTRY_NAME);
-
-        // === Validity ===
-        let not_before = cert_tbs.validity.not_before;
-        let not_after = cert_tbs.validity.not_after;
-
-        // === Serial Number ===
-        let serial = cert_tbs.serial_number.as_bytes();
-        let serial_hex = hex::encode(serial);
-
-        // === Version ===
-        let version = cert_tbs.version; // v1, v2, or v3
-
-        // === Signature Algorithm ===
-        let sig_alg_oid = cert.signature_algorithm.oid.to_string();
-        let sig_alg_name = match sig_alg_oid.as_str() {
-            "1.2.840.113549.1.1.11" => "SHA256withRSA",
-            "1.2.840.113549.1.1.12" => "SHA384withRSA",
-            "1.2.840.113549.1.1.13" => "SHA512withRSA",
-            "1.2.840.113549.1.1.5" => "SHA1withRSA",
-            _ => "Unknown",
-        };
-
-        // === Public Key Info ===
-        let _pub_key_alg = cert_tbs.subject_public_key_info.algorithm.oid.to_string();
-        let pub_key_bytes = cert_tbs
-            .subject_public_key_info
-            .subject_public_key
-            .raw_bytes();
-        let pub_key_bit_len = pub_key_bytes.len() * 8;
-
-        // === Signature ===
-        let signature_bytes = cert.signature.raw_bytes();
-
-        // === TBS (To-Be-Signed) raw bytes ===
-        let tbs_der = cert_tbs.to_der().unwrap();
-
-        // === Extensions (v3) ===
-        if let Some(extensions) = &cert_tbs.extensions {
-            for ext in extensions.iter() {
-                let oid = ext.extn_id.to_string();
-                let _critical = ext.critical;
-                let _value = ext.extn_value.as_bytes();
-
-                match oid.as_str() {
-                    "2.5.29.17" => println!("Subject Alt Name"),
-                    "2.5.29.15" => println!("Key Usage"),
-                    "2.5.29.19" => println!("Basic Constraints"),
-                    "2.5.29.31" => println!("CRL Distribution Points"),
-                    "2.5.29.35" => println!("Authority Key Identifier"),
-                    "2.5.29.14" => println!("Subject Key Identifier"),
-                    "1.3.6.1.5.5.7.1.1" => println!("Authority Info Access (OCSP/CA)"),
-                    _ => println!("Extension OID: {}", oid),
-                }
-            }
-        }
-
-        // === Print everything ===
-        println!("Subject CN: {}", subject_cn);
-        println!("Subject Org: {}", subject_org);
-        println!("Subject Country: {}", subject_country);
-        println!("Subject Serial: {}", subject_serial);
-        println!("Issuer CN: {}", issuer_cn);
-        println!("Issuer Org: {}", issuer_org);
-        println!("Issuer OU: {}", issuer_ou);
-        println!("Issuer Country: {}", issuer_country);
-        println!("Not Before: {:?}", not_before);
-        println!("Not After: {:?}", not_after);
-        println!("Serial: {}", serial_hex);
-        println!("Version: {:?}", version);
-        println!("Sig Algorithm: {} ({})", sig_alg_name, sig_alg_oid);
-        println!("Public Key: {} bits", pub_key_bit_len);
-        println!("TBS size: {} bytes", tbs_der.len());
-        println!("Signature size: {} bytes", signature_bytes.len());
-
-        match Self::verify_issuer_signature(&issuer_cert, &cert) {
-            Ok(()) => println!("✅ MOICA signed the user cert"),
-            Err(e) => println!("❌ Issuer verification failed: {}", e),
-        }
-
-        // Verify signature first
-        match Self::verify_card_signature(&response, tbs) {
-            Ok(()) => println!("Signature valid"),
-            Err(e) => println!("❌ Verification failed: {}", e),
-        }
-
-        // Fetch SMT proof if server is specified
         let smt_inputs = if let Some(server_url) = smt_server {
-            println!("Fetching SMT proof from {}...", server_url);
-            match crate::smt_client::fetch_smt_proof(server_url, issuer, &serial_hex, 128) {
-                Ok(inputs) => {
-                    println!(
-                        "  SMT root: {}...",
-                        &inputs.smt_root[..20.min(inputs.smt_root.len())]
-                    );
-                    println!(
-                        "  Serial (decimal): {}...",
-                        &inputs.serial_number[..20.min(inputs.serial_number.len())]
-                    );
-                    println!("  isOld0: {}", inputs.smt_is_old0);
-                    Some(inputs)
-                }
-                Err(e) => {
-                    eprintln!("Failed to fetch SMT proof: {}", e);
-                    std::process::exit(1);
-                }
-            }
+            info!(url = %server_url, "Fetching SMT proof");
+            Some(crate::smt_client::fetch_smt_proof(
+                server_url, issuer_id, &serial_hex, 128,
+            )?)
         } else {
             None
         };
 
-        // Generate circuit input
-        let circuit_input = Self::generate_circuit_input(
-            &cert,
-            &issuer_cert,
-            &response.signature,
-            &base64::engine::general_purpose::STANDARD.encode(cert.signature.raw_bytes()),
-            &tbs,
-            &tbs_der,
-            smt_inputs.as_ref(),
-        );
+        let user_cert_tbs_der = user_cert.tbs_certificate.to_der()?;
+        let issuer_sig_on_user_cert =
+            base64::engine::general_purpose::STANDARD.encode(user_cert.signature.raw_bytes());
 
-        std::fs::write(
-            output_path,
-            serde_json::to_string_pretty(&circuit_input).unwrap(),
-        )
-        .unwrap();
-        println!("Circuit input written to {}", output_path);
+        let circuit_input = Self::generate_circuit_input(
+            &user_cert,
+            issuer_cert,
+            &sign_response.signature,
+            &issuer_sig_on_user_cert,
+            tbs,
+            &user_cert_tbs_der,
+            &serial_hex,
+            smt_inputs.as_ref(),
+        )?;
+
+        std::fs::write(output_path, serde_json::to_string_pretty(&circuit_input)?)?;
+        info!(path = %output_path, "Circuit input written");
+        Ok(())
     }
 
+    /// Convenience wrapper that reads a sign response from a JSON file.
+    /// Used for default mode with bundled test fixtures.
+    pub fn generate_input_from_file(
+        response_path: &Path,
+        tbs: &[u8],
+        issuer_cert: &Certificate,
+        smt_server: Option<&str>,
+        issuer_id: &str,
+        output_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let response_string = std::fs::read_to_string(response_path)?;
+        let response: CardSignResponse = serde_json::from_str(&response_string)?;
+        Self::generate_input(&response, tbs, issuer_cert, smt_server, issuer_id, output_path)
+    }
+
+    // === Per-certificate RSA input generation ===
+
+    /// Generate RSA circuit input for a single certificate.
+    /// Extracts the modulus from the cert and chunks both modulus and signature.
     fn generate_rsa_circuit_input(
         cert: &Certificate,
-        signature: &str,
+        signature_b64: &str,
         original_data: &[u8],
-    ) -> RS256CircuitInput {
+    ) -> Result<RsaCircuitInput, Box<dyn std::error::Error>> {
         const MAX_MESSAGE_LENGTH: usize = 1536;
         const RSA_N: usize = 121;
         const RSA_K: usize = 17;
 
-        // 1. Parse cert and extract RSA public key
-        let spki_der = cert
-            .tbs_certificate
-            .subject_public_key_info
-            .to_der()
-            .unwrap();
-        let rsa_pub = RsaPublicKey::from_public_key_der(&spki_der).unwrap();
+        let spki_der = cert.tbs_certificate.subject_public_key_info.to_der()?;
+        let rsa_pub = RsaPublicKey::from_public_key_der(&spki_der)?;
         let modulus = BigUint::from_bytes_be(&rsa_pub.n().to_bytes_be());
         let rsa_modulus = Self::bigint_to_chunks(&modulus, RSA_K, RSA_N);
 
-        // 2. Decode and chunk signature
-        let sig_bytes = base64::engine::general_purpose::STANDARD
-            .decode(signature)
-            .unwrap();
+        let sig_bytes = base64::engine::general_purpose::STANDARD.decode(signature_b64)?;
         let sig_biguint = BigUint::from_bytes_be(&sig_bytes);
         let rsa_signature = Self::bigint_to_chunks(&sig_biguint, RSA_K, RSA_N);
 
-        // 3. SHA-256 pad the original data
         let message = Self::sha256_pad(original_data, MAX_MESSAGE_LENGTH);
         let padded_len = Self::sha256_padded_length(original_data.len());
 
-        RS256CircuitInput {
-            message: message.iter().map(|b| b.to_string()).collect::<Vec<_>>(),
+        Ok(RsaCircuitInput {
+            message: message.iter().map(|b| b.to_string()).collect(),
             message_length: padded_len,
-            rsa_modulus: rsa_modulus,
-            rsa_signature: rsa_signature,
-        }
+            rsa_modulus,
+            rsa_signature,
+        })
     }
 
+    // === Full circuit input assembly ===
+
+    /// Combine user cert + issuer cert + SMT data into the full circuit input JSON.
     fn generate_circuit_input(
         user_cert: &Certificate,
         issuer_cert: &Certificate,
-        user_signature: &str,
-        issuer_signature: &str,
+        user_signature_b64: &str,
+        issuer_signature_b64: &str,
         user_tbs: &[u8],
-        issuer_tbs: &[u8],
+        issuer_tbs: &[u8], // actually the user cert's TBS DER (what the issuer signed)
+        serial_hex: &str,
         smt_inputs: Option<&crate::smt_client::SmtCircuitInputs>,
-    ) -> serde_json::Value {
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         const MAX_MESSAGE_LENGTH: usize = 1536;
+
         let zero_pad = |bytes: &[u8]| -> Vec<u64> {
             assert!(
                 bytes.len() <= MAX_MESSAGE_LENGTH,
-                "too large: {} > {}",
+                "Certificate too large: {} > {}",
                 bytes.len(),
                 MAX_MESSAGE_LENGTH
             );
@@ -437,122 +365,95 @@ impl Rs256Circuit {
             v
         };
 
-        let user_circuit_input =
-            Self::generate_rsa_circuit_input(user_cert, user_signature, user_tbs);
-        let issuer_circuit_input =
-            Self::generate_rsa_circuit_input(issuer_cert, issuer_signature, issuer_tbs);
-        let user_cert_der = user_cert.to_der().unwrap();
-        let user_offsets = Self::parse_cert_offsets(&user_cert_der);
+        let user_input =
+            Self::generate_rsa_circuit_input(user_cert, user_signature_b64, user_tbs)?;
+        let issuer_input =
+            Self::generate_rsa_circuit_input(issuer_cert, issuer_signature_b64, issuer_tbs)?;
 
+        let user_cert_der = user_cert.to_der()?;
+        let user_offsets = Self::parse_cert_offsets(&user_cert_der)?;
 
-        serde_json::json!({
-            "tbs": user_circuit_input.message,
-            "tbs_length": user_circuit_input.message_length,
-            "issuer_tbs": issuer_circuit_input.message,
-            "issuer_tbs_length": issuer_circuit_input.message_length,
+        // Derive serial number as decimal string from hex
+        let serial_decimal = BigUint::parse_bytes(serial_hex.as_bytes(), 16)
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "0".to_string());
+
+        // SMT fields: use provided values or zero defaults
+        let (smt_root, smt_serial, smt_siblings, smt_old_key, smt_old_value, smt_is_old0) =
+            match smt_inputs {
+                Some(smt) => (
+                    smt.smt_root.clone(),
+                    smt.serial_number.clone(),
+                    smt.smt_siblings.clone(),
+                    smt.smt_old_key.clone(),
+                    smt.smt_old_value.clone(),
+                    smt.smt_is_old0.clone(),
+                ),
+                None => {
+                    let zeros = vec!["0".to_string(); 128];
+                    (
+                        "0".to_string(),
+                        serial_decimal,
+                        zeros,
+                        "0".to_string(),
+                        "0".to_string(),
+                        "1".to_string(),
+                    )
+                }
+            };
+
+        Ok(serde_json::json!({
+            "tbs": user_input.message,
+            "tbs_length": user_input.message_length,
+            "issuer_tbs": issuer_input.message,
+            "issuer_tbs_length": issuer_input.message_length,
             "actual_issuer_tbs_length": issuer_tbs.len(),
             "user_cert_zero_padded": zero_pad(&user_cert_der),
             "actual_user_cert_length": user_cert_der.len(),
             "user_modulus_offset": user_offsets.modulus_offset,
             "user_modulus_tag_offset": user_offsets.modulus_tag_offset,
-            "user_rsa_signature": user_circuit_input.rsa_signature,
-            "issuer_rsa_modulus": issuer_circuit_input.rsa_modulus,
-            "issuer_rsa_signature": issuer_circuit_input.rsa_signature,
-            "smtRoot": smt_inputs.unwrap().smt_root,
-            "serialNumber": smt_inputs.unwrap().serial_number,
-            "smtSiblings": smt_inputs.unwrap().smt_siblings,
-            "smtOldKey": smt_inputs.unwrap().smt_old_key,
-            "smtOldValue": smt_inputs.unwrap().smt_old_value,
-            "smtIsOld0": smt_inputs.unwrap().smt_is_old0,
+            "user_rsa_signature": user_input.rsa_signature,
+            "issuer_rsa_modulus": issuer_input.rsa_modulus,
+            "issuer_rsa_signature": issuer_input.rsa_signature,
+            "smtRoot": smt_root,
+            "serialNumber": smt_serial,
+            "smtSiblings": smt_siblings,
+            "smtOldKey": smt_old_key,
+            "smtOldValue": smt_old_value,
+            "smtIsOld0": smt_is_old0,
+        }))
+    }
+
+    // === DER parsing helpers ===
+
+    /// Find the RSA modulus byte offsets in a DER-encoded certificate.
+    fn parse_cert_offsets(der: &[u8]) -> Result<CertOffsets, Box<dyn std::error::Error>> {
+        let (modulus_offset, modulus_tag_offset) = Self::find_modulus_offset(der)?;
+
+        if der[modulus_tag_offset] != 0x02 {
+            return Err(format!(
+                "Modulus INTEGER tag wrong at {}: got 0x{:02x}",
+                modulus_tag_offset, der[modulus_tag_offset]
+            )
+            .into());
+        }
+
+        Ok(CertOffsets {
+            modulus_offset,
+            modulus_tag_offset,
         })
     }
 
-    fn parse_cert_offsets(der: &[u8]) -> CertOffsets {
-        // let cert = Certificate::from_der(der).expect("Failed to parse certificate DER");
-
-        // let tbs_offset = Self::find_tbs_offset(der);
-        // println!("find_tbs_offset = {}", Self::find_tbs_offset(der));
-        // let tbs_der = cert.tbs_certificate.to_der().unwrap();
-        // let tbs_length = tbs_der.len();
-
-        // let subject_der = cert.tbs_certificate.subject.to_der().unwrap();
-        // let subject_offset =
-        //     Self::find_subslice(der, &subject_der).expect("Subject not found in cert DER");
-        // let subject_length = subject_der.len();
-
-        let (modulus_offset, modulus_tag_offset) = Self::find_modulus_offset(der);
-
-        // // ── Sanity checks ─────────────────────────────────────────────────────
-        // assert_eq!(
-        //     der[tbs_offset], 0x30,
-        //     "TBS tag wrong at {}: got 0x{:02x}",
-        //     tbs_offset, der[tbs_offset]
-        // );
-        // assert_eq!(
-        //     der[subject_offset], 0x30,
-        //     "Subject tag wrong at {}: got 0x{:02x}",
-        //     subject_offset, der[subject_offset]
-        // );
-        assert_eq!(
-            der[modulus_tag_offset], 0x02,
-            "Modulus INTEGER tag wrong at {}: got 0x{:02x}",
-            modulus_tag_offset, der[modulus_tag_offset]
-        );
-
-        println!("modulus_tag_offset: {}", modulus_tag_offset);
-        println!("modulus_offset:     {}", modulus_offset);
-        println!(
-            "gap tag→value:      {}",
-            modulus_offset - modulus_tag_offset
-        );
-
-        CertOffsets {
-            modulus_offset,
-            modulus_tag_offset,
-        }
-    }
-
-    // ── TBS offset ────────────────────────────────────────────────────────────
-    // X.509 DER layout:
-    //   30 82 XX XX        SEQUENCE (Certificate)      ← outer, 4 bytes
-    //     30 82 YY YY      SEQUENCE (TBSCertificate)   ← starts at byte 4
-    // fn find_tbs_offset(der: &[u8]) -> usize {
-    //     // Outer SEQUENCE tag(1) + length field
-    //     let mut pos = 1usize; // skip 0x30 tag
-    //     let (_, lb) = Self::read_der_len(der, pos);
-    //     pos += lb;
-    //     // pos now points to start of TBSCertificate SEQUENCE
-    //     pos
-    // }
-
-    // ── Modulus offset ────────────────────────────────────────────────────────
-    // Returns (modulus_value_offset, integer_tag_offset)
-    fn find_modulus_offset(der: &[u8]) -> (usize, usize) {
-        let cert = Certificate::from_der(der).unwrap();
+    /// Returns (modulus_value_offset, integer_tag_offset) by navigating the SPKI structure.
+    fn find_modulus_offset(der: &[u8]) -> Result<(usize, usize), Box<dyn std::error::Error>> {
+        let cert = Certificate::from_der(der)?;
         let spki_der = cert
             .tbs_certificate
             .subject_public_key_info
-            .to_der()
-            .unwrap();
+            .to_der()?;
 
-        // Find ALL occurrences to detect ambiguity
-        let occurrences: Vec<usize> = der
-            .windows(spki_der.len())
-            .enumerate()
-            .filter(|(_, w)| *w == spki_der.as_slice())
-            .map(|(i, _)| i)
-            .collect();
-
-        println!("SPKI occurrences in cert: {:?}", occurrences);
-        assert_eq!(
-            occurrences.len(),
-            1,
-            "Expected exactly 1 SPKI occurrence, found {}",
-            occurrences.len()
-        );
-
-        // Find where SPKI starts in the full cert DER
-        let spki_abs = Self::find_subslice(der, &spki_der).expect("SPKI not found in cert DER");
+        let spki_abs = Self::find_subslice(der, &spki_der)
+            .ok_or("SPKI not found in cert DER")?;
 
         let mut pos = 0usize;
 
@@ -578,58 +479,33 @@ impl Rs256Circuit {
         pos += slb;
 
         // Now at INTEGER tag for modulus
-        assert_eq!(
-            spki_der[pos], 0x02,
-            "Expected INTEGER tag at spki pos {}, got 0x{:02x}",
-            pos, spki_der[pos]
-        );
-        let tag_pos = pos; // record tag position
-        pos += 1; // skip tag
+        if spki_der[pos] != 0x02 {
+            return Err(format!(
+                "Expected INTEGER tag at spki pos {}, got 0x{:02x}",
+                pos, spki_der[pos]
+            )
+            .into());
+        }
+        let tag_pos = pos;
+        pos += 1;
 
-        // Skip length field (1 byte short form or 3 bytes long form for RSA-2048)
-        let (mod_len, mlb) = Self::read_der_len(&spki_der, pos);
+        // Skip length field
+        let (_mod_len, mlb) = Self::read_der_len(&spki_der, pos);
         pos += mlb;
 
-        println!(
-            "modulus DER length field: {} bytes, value: {}",
-            mlb, mod_len
-        );
-
         // Skip leading 0x00 sign byte if present
-        // RSA-2048 modulus MSB is usually set → DER adds 0x00 to keep it positive
         if spki_der[pos] == 0x00 {
-            println!("skipping sign byte at spki pos {}", pos);
             pos += 1;
         }
 
-        let modulus_offset = spki_abs + pos;
-        let tag_offset = spki_abs + tag_pos;
-
-        // Final validation
-        assert_eq!(
-            der[tag_offset], 0x02,
-            "Final check: der[{}] = 0x{:02x}, expected 0x02",
-            tag_offset, der[tag_offset]
-        );
-        assert!(
-            modulus_offset > tag_offset,
-            "modulus_offset {} must be > tag_offset {}",
-            modulus_offset,
-            tag_offset
-        );
-
-        (modulus_offset, tag_offset)
+        Ok((spki_abs + pos, spki_abs + tag_pos))
     }
 
-    // ── DER helpers ───────────────────────────────────────────────────────────
-
-    /// Returns (length_value, bytes_consumed_by_length_field)
+    /// Read a DER length field. Returns (length_value, bytes_consumed).
     fn read_der_len(der: &[u8], pos: usize) -> (usize, usize) {
         if der[pos] & 0x80 == 0 {
-            // Short form: single byte
             (der[pos] as usize, 1)
         } else {
-            // Long form: first byte = 0x80 | num_following_bytes
             let num_len_bytes = (der[pos] & 0x7f) as usize;
             let value =
                 (0..num_len_bytes).fold(0usize, |acc, i| (acc << 8) | der[pos + 1 + i] as usize);
@@ -637,13 +513,15 @@ impl Rs256Circuit {
         }
     }
 
-    /// Find first occurrence of needle in haystack, return start index
+    /// Find first occurrence of needle in haystack.
     fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         if needle.is_empty() {
             return Some(0);
         }
         haystack.windows(needle.len()).position(|w| w == needle)
     }
+
+    // === Utility functions ===
 
     fn bigint_to_chunks(n: &BigUint, count: usize, chunk_bits: usize) -> Vec<String> {
         let mask = (BigUint::from(1u64) << chunk_bits) - BigUint::from(1u64);
@@ -677,7 +555,6 @@ impl Rs256Circuit {
         len + 8
     }
 
-    // Helper function
     fn get_attr(name: &x509_cert::name::Name, oid: const_oid::ObjectIdentifier) -> String {
         name.0
             .iter()
@@ -807,5 +684,143 @@ impl SpartanCircuit<E> for Rs256Circuit {
 
     fn num_challenges(&self) -> usize {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Sanitized test fixtures — synthetic CA + user cert with no personal data
+    const SIGN_RESPONSE: &str = include_str!("../../tests/testdata/response_sign_test.json");
+    const PKCS11_RESPONSE: &str = include_str!("../../tests/testdata/pkcs11info_test.json");
+
+    fn load_user_cert() -> Certificate {
+        let response: CardSignResponse = serde_json::from_str(SIGN_RESPONSE).unwrap();
+        let der = base64::engine::general_purpose::STANDARD
+            .decode(&response.certb64)
+            .unwrap();
+        Certificate::from_der(&der).unwrap()
+    }
+
+    fn load_issuer_cert() -> Certificate {
+        let pkcs11: Pkcs11InfoResponse = serde_json::from_str(PKCS11_RESPONSE).unwrap();
+        Rs256Circuit::extract_issuer_cert(&pkcs11).unwrap()
+    }
+
+    #[test]
+    fn test_extract_issuer_cert() {
+        let pkcs11: Pkcs11InfoResponse = serde_json::from_str(PKCS11_RESPONSE).unwrap();
+        let cert = Rs256Circuit::extract_issuer_cert(&pkcs11).unwrap();
+        let ou = Rs256Circuit::get_attr(
+            &cert.tbs_certificate.subject,
+            ORGANIZATIONAL_UNIT_NAME,
+        );
+        assert!(!ou.is_empty(), "Issuer cert should have an OU");
+    }
+
+    #[test]
+    fn test_verify_issuer_signature() {
+        let user_cert = load_user_cert();
+        let issuer_cert = load_issuer_cert();
+        Rs256Circuit::verify_issuer_signature(&issuer_cert, &user_cert)
+            .expect("Issuer should have signed the user cert");
+    }
+
+    #[test]
+    fn test_parse_cert_offsets() {
+        let user_cert = load_user_cert();
+        let der = user_cert.to_der().unwrap();
+        let offsets = Rs256Circuit::parse_cert_offsets(&der).unwrap();
+
+        assert_eq!(der[offsets.modulus_tag_offset], 0x02);
+        assert!(offsets.modulus_offset > offsets.modulus_tag_offset);
+
+        let spki_der = user_cert
+            .tbs_certificate
+            .subject_public_key_info
+            .to_der()
+            .unwrap();
+        let rsa_pub = RsaPublicKey::from_public_key_der(&spki_der).unwrap();
+        let expected_bytes = rsa_pub.n().to_bytes_be();
+
+        let extracted = &der[offsets.modulus_offset..offsets.modulus_offset + expected_bytes.len()];
+        assert_eq!(extracted, expected_bytes.as_slice());
+    }
+
+    #[test]
+    fn test_rsa_circuit_input_dimensions() {
+        let user_cert = load_user_cert();
+        let input = Rs256Circuit::generate_rsa_circuit_input(
+            &user_cert,
+            "AAAA", // dummy base64 signature
+            b"test",
+        )
+        .unwrap();
+
+        assert_eq!(input.message.len(), 1536);
+        assert_eq!(input.rsa_modulus.len(), 17);
+        assert_eq!(input.rsa_signature.len(), 17);
+        assert!(input.message_length <= 1536);
+    }
+
+    #[test]
+    fn test_generate_circuit_input_without_smt() {
+        let user_cert = load_user_cert();
+        let issuer_cert = load_issuer_cert();
+
+        let response: CardSignResponse = serde_json::from_str(SIGN_RESPONSE).unwrap();
+        let tbs = b"123456";
+        let user_cert_tbs_der = user_cert.tbs_certificate.to_der().unwrap();
+        let issuer_sig = base64::engine::general_purpose::STANDARD
+            .encode(user_cert.signature.raw_bytes());
+        let serial_hex = hex::encode(user_cert.tbs_certificate.serial_number.as_bytes());
+
+        let input = Rs256Circuit::generate_circuit_input(
+            &user_cert,
+            &issuer_cert,
+            &response.signature,
+            &issuer_sig,
+            tbs,
+            &user_cert_tbs_der,
+            &serial_hex,
+            None,
+        )
+        .unwrap();
+
+        let obj = input.as_object().unwrap();
+
+        // Verify all 18 fields are present
+        assert!(obj.contains_key("tbs"));
+        assert!(obj.contains_key("tbs_length"));
+        assert!(obj.contains_key("issuer_tbs"));
+        assert!(obj.contains_key("issuer_tbs_length"));
+        assert!(obj.contains_key("actual_issuer_tbs_length"));
+        assert!(obj.contains_key("user_cert_zero_padded"));
+        assert!(obj.contains_key("actual_user_cert_length"));
+        assert!(obj.contains_key("user_modulus_offset"));
+        assert!(obj.contains_key("user_modulus_tag_offset"));
+        assert!(obj.contains_key("user_rsa_signature"));
+        assert!(obj.contains_key("issuer_rsa_modulus"));
+        assert!(obj.contains_key("issuer_rsa_signature"));
+        assert!(obj.contains_key("smtRoot"));
+        assert!(obj.contains_key("serialNumber"));
+        assert!(obj.contains_key("smtSiblings"));
+        assert!(obj.contains_key("smtOldKey"));
+        assert!(obj.contains_key("smtOldValue"));
+        assert!(obj.contains_key("smtIsOld0"));
+
+        // SMT defaults should be zero
+        assert_eq!(obj["smtRoot"], "0");
+        assert_eq!(obj["smtIsOld0"], "1");
+
+        // Array dimensions
+        assert_eq!(obj["tbs"].as_array().unwrap().len(), 1536);
+        assert_eq!(obj["issuer_tbs"].as_array().unwrap().len(), 1536);
+        assert_eq!(obj["user_cert_zero_padded"].as_array().unwrap().len(), 1536);
+        assert_eq!(obj["issuer_rsa_modulus"].as_array().unwrap().len(), 17);
+        assert_eq!(obj["user_rsa_signature"].as_array().unwrap().len(), 17);
+        assert_eq!(obj["issuer_rsa_signature"].as_array().unwrap().len(), 17);
+        assert_eq!(obj["smtSiblings"].as_array().unwrap().len(), 128);
     }
 }
