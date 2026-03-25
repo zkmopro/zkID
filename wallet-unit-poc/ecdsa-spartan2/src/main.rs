@@ -1,14 +1,15 @@
 //! CLI for running the Spartan-2 RS256 circuit.
 //!
 //! Usage examples:
-//!   cargo run --release -- rs256 generate-input ./response.json 123456 # optional
+//!   cargo run --release -- rs256 generate-input                          # default mode
+//!   cargo run --release -- rs256 generate-input --tbs 123456 --pin 8309  # live mode (HiPKI)
 //!   cargo run --release -- rs256 setup --input ../circom/inputs/rs256/input.json
 //!   cargo run --release -- rs256 prove --input ../circom/inputs/rs256/input.json
 //!   cargo run --release -- rs256 verify
-//!   cargo run --release -- rs256 benchmark --input ../circom/inputs/rs256/input.json"
 
 use ecdsa_spartan2::{
-    circuits::rs256_circuit::Rs256Circuit,
+    circuits::rs256_circuit::{Pkcs11InfoResponse, Rs256Circuit},
+    hipki_client,
     load_proof,
     paths::keys::{
         RS256_INSTANCE, RS256_PROOF, RS256_PROVING_KEY, RS256_VERIFYING_KEY, RS256_WITNESS,
@@ -67,31 +68,43 @@ fn main() {
     let command_args: &[String] = if args.len() > 1 { &args[1..] } else { &[] };
 
     if command_args.contains(&"generate-input".to_string()) {
-        if command_args.len() < 4 {
-            eprintln!(
-                "Usage: {} rs256 generate-input <response.json> <tbs> [--smt-server URL] [--issuer ID] [--output PATH]",
-                args[0]
-            );
-            process::exit(1);
-        }
-        let response_path = PathBuf::from(&command_args[2]);
-        let tbs = command_args[3].as_bytes();
-
-        // Parse optional flags
+        let mut tbs_data: Option<String> = None;
+        let mut pin: Option<String> = None;
+        let mut hipki_server = hipki_client::default_server_url().to_string();
         let mut smt_server: Option<String> = None;
         let mut issuer = "g2".to_string();
-        let mut output = "rs256_input.json".to_string();
-        let mut i = 4;
+        let mut output = "../circom/inputs/rs256/input.json".to_string();
+
+        let mut i = 2; // skip "rs256 generate-input"
         while i < command_args.len() {
             match command_args[i].as_str() {
+                "--tbs" => {
+                    i += 1;
+                    tbs_data = Some(command_args.get(i).cloned().unwrap_or_else(|| {
+                        eprintln!("Missing value for --tbs");
+                        process::exit(1);
+                    }));
+                }
+                "--pin" => {
+                    i += 1;
+                    pin = Some(command_args.get(i).cloned().unwrap_or_else(|| {
+                        eprintln!("Missing value for --pin");
+                        process::exit(1);
+                    }));
+                }
+                "--hipki-server" => {
+                    i += 1;
+                    hipki_server = command_args.get(i).cloned().unwrap_or_else(|| {
+                        eprintln!("Missing value for --hipki-server");
+                        process::exit(1);
+                    });
+                }
                 "--smt-server" => {
                     i += 1;
-                    smt_server = Some(
-                        command_args.get(i).cloned().unwrap_or_else(|| {
-                            eprintln!("Missing value for --smt-server");
-                            process::exit(1);
-                        }),
-                    );
+                    smt_server = Some(command_args.get(i).cloned().unwrap_or_else(|| {
+                        eprintln!("Missing value for --smt-server");
+                        process::exit(1);
+                    }));
                 }
                 "--issuer" => {
                     i += 1;
@@ -107,21 +120,83 @@ fn main() {
                         process::exit(1);
                     });
                 }
+                "--help" | "-h" => {
+                    print_generate_input_usage();
+                    process::exit(0);
+                }
                 other => {
                     eprintln!("Unknown flag for generate-input: {}", other);
+                    print_generate_input_usage();
                     process::exit(1);
                 }
             }
             i += 1;
         }
 
-        Rs256Circuit::generate_input_from_response(
-            &response_path,
-            tbs,
-            smt_server.as_deref(),
-            &issuer,
-            &output,
-        );
+        let result = if let (Some(tbs), Some(pin)) = (tbs_data, pin) {
+            // Live mode: call HiPKI APIs directly
+            info!(server = %hipki_server, "Fetching cert chain from HiPKI");
+            let pkcs11info = hipki_client::fetch_pkcs11info(&hipki_server).unwrap_or_else(|e| {
+                eprintln!("Failed to fetch pkcs11info from {}: {}", hipki_server, e);
+                process::exit(1);
+            });
+            let issuer_cert =
+                Rs256Circuit::extract_issuer_cert(&pkcs11info).unwrap_or_else(|e| {
+                    eprintln!("Failed to extract issuer cert: {}", e);
+                    process::exit(1);
+                });
+
+            info!(tbs = %tbs, "Signing TBS via HiPKI");
+            let sign_response =
+                hipki_client::sign_tbs(&hipki_server, &tbs, &pin).unwrap_or_else(|e| {
+                    eprintln!("Failed to sign via HiPKI: {}", e);
+                    process::exit(1);
+                });
+
+            Rs256Circuit::generate_input(
+                &sign_response,
+                tbs.as_bytes(),
+                &issuer_cert,
+                smt_server.as_deref(),
+                &issuer,
+                &output,
+            )
+        } else {
+            // Default mode: use bundled test fixtures
+            let default_sign = "tests/testdata/response_sign.json";
+            let default_pkcs11 = "tests/testdata/pkcs11info_withcert.json";
+            let default_tbs = "123456";
+            info!("Using bundled test fixtures (default mode)");
+
+            let pkcs11_string = fs::read_to_string(default_pkcs11).unwrap_or_else(|e| {
+                eprintln!("Failed to read {}: {}", default_pkcs11, e);
+                process::exit(1);
+            });
+            let pkcs11info: Pkcs11InfoResponse =
+                serde_json::from_str(&pkcs11_string).unwrap_or_else(|e| {
+                    eprintln!("Failed to parse pkcs11info: {}", e);
+                    process::exit(1);
+                });
+            let issuer_cert =
+                Rs256Circuit::extract_issuer_cert(&pkcs11info).unwrap_or_else(|e| {
+                    eprintln!("Failed to extract issuer cert: {}", e);
+                    process::exit(1);
+                });
+
+            Rs256Circuit::generate_input_from_file(
+                &PathBuf::from(default_sign),
+                default_tbs.as_bytes(),
+                &issuer_cert,
+                smt_server.as_deref(),
+                &issuer,
+                &output,
+            )
+        };
+
+        if let Err(e) = result {
+            eprintln!("Error generating circuit input: {}", e);
+            process::exit(1);
+        }
         process::exit(0);
     }
 
@@ -361,6 +436,37 @@ fn parse_options(args: &[String]) -> Result<CommandOptions, String> {
     Ok(options)
 }
 
+fn print_generate_input_usage() {
+    eprintln!(
+        "Usage: ecdsa-spartan2 rs256 generate-input [options]
+
+Generates circuit input JSON for the FullCertRSA256VerifyWithRevocation circuit.
+
+Modes:
+  Default (no args)    Uses bundled test fixtures (no card reader needed)
+  Live (--tbs + --pin) Calls HiPKI LocalSignServer APIs directly
+
+Options:
+  --tbs <data>            TBS data for the card to sign (required for live mode)
+  --pin <pin>             Card PIN, 6-8 digits (required for live mode)
+  --hipki-server <url>    HiPKI server URL (default: http://localhost:61161)
+  --smt-server <url>      Optional SMT revocation server URL
+  --issuer <id>           Issuer ID for SMT lookup (default: g2)
+  --output, -o <path>     Output path (default: ../circom/inputs/rs256/input.json)
+
+Examples:
+  # Default mode (uses bundled test data, no card needed)
+  RUST_LOG=info cargo run --release -- rs256 generate-input
+
+  # Live mode (requires HiPKI LocalSignServer + card reader + card)
+  RUST_LOG=info cargo run --release -- rs256 generate-input --tbs 123456 --pin 830929
+
+  # Live mode with SMT revocation server
+  RUST_LOG=info cargo run --release -- rs256 generate-input \\
+    --tbs 123456 --pin 830929 --smt-server http://localhost:3000"
+    );
+}
+
 fn print_usage() {
     eprintln!(
         "Usage:
@@ -369,8 +475,7 @@ fn print_usage() {
 Actions:
   run                  Run the complete circuit (setup, prove, verify)
   setup                Generate proving and verifying keys
-  generate-input       Generate circuit input from response.json and tbs
-                       Options: --smt-server URL, --issuer ID (default: g2), --output PATH
+  generate-input       Generate circuit input (use --help for details)
   prove                Generate proof
   verify               Verify proof
   benchmark            Run complete benchmark pipeline
@@ -379,7 +484,8 @@ Options:
   --input, -i <path>   Override the circuit input JSON (run/prove/setup/benchmark)
 
 Examples:
-  cargo run --release -- rs256 generate-input ./response.json <tbs> --smt-server http://localhost:3000 --output ../circom/inputs/rs256/input.json
+  cargo run --release -- rs256 generate-input
+  cargo run --release -- rs256 generate-input --tbs 123456 --pin 830929
   cargo run --release -- rs256 setup --input ../circom/inputs/rs256/input.json
   cargo run --release -- rs256 prove --input ../circom/inputs/rs256/input.json
   cargo run --release -- rs256 verify
