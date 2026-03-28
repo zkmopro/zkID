@@ -18,8 +18,31 @@ note: This project uses [circomkit](https://github.com/erhant/circomkit) to comp
 
 ## Circuits
 
-- `es256` – ECDSA signature verification (ES256)
-- `jwt` – JWT validation circuit
+- `es256` -- ECDSA signature verification (ES256)
+- `jwt` -- JWT validation circuit
+- `rs256` -- X.509 certificate RSA-SHA256 verification with revocation checking
+
+### Components
+
+- **DERSerialExtractor(maxLen, maxSerialLen)** -- Extracts a certificate serial number from a DER-encoded INTEGER field. Validates the 0x02 tag, reads `serialLength` bytes starting at `serialOffset + 2`, and packs them big-endian into a single field element.
+- **ExtractSubjectDN(maxLen, maxDNLen)** -- Extracts the Subject Distinguished Name from a DER-encoded SEQUENCE. Validates the 0x30 tag and extracts up to `maxDNLen` bytes.
+- **SMTNonMembershipVerifier(depth)** -- Verifies non-membership in a Sparse Merkle Tree for certificate revocation checking.
+
+### Public Signals (rs256 main circuit)
+
+- `issuer_rsa_modulus` -- Issuer RSA public key (input)
+- `smtRoot` -- Sparse Merkle Tree root for revocation (input)
+- `tbs_hash[256]` -- SHA-256 hash bits of the user's TBS certificate (output)
+- `dn_nullifier` -- Poseidon hash of the Subject DN for unlinkable identity binding (output)
+
+### Nullifier Computation
+
+The DN nullifier provides a deterministic, unlinkable identifier derived from the Subject Distinguished Name:
+
+1. Extract up to 256 DN bytes from the TBS certificate
+2. Pack into 9 field elements (31 bytes each, big-endian)
+3. Sequential Poseidon chain: `h = Poseidon(chunk[0], chunk[1])`, then `h = Poseidon(h, chunk[i])` for i=2..8
+4. Output the final hash as `dn_nullifier`
 
 ## Testing
 
