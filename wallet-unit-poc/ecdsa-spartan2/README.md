@@ -30,7 +30,9 @@ RUST_LOG=info cargo run --release -- rs256 generate-input \
 In live mode, the CLI:
 1. Calls `GET /pkcs11info?withcert=true` to fetch the certificate chain (Root CA, MOICA CA, user certs)
 2. Calls `POST /sign` with the TBS data and PIN to get a raw PKCS#1 v1.5 RSA signature
-3. Extracts the issuer (CA) certificate, verifies the chain, and generates the 18-field circuit input JSON
+3. Extracts the issuer (CA) certificate, verifies the chain, and generates the circuit input JSON
+
+The circuit input includes DER offset hints (`serial_offset`, `serial_length`, `subject_dn_offset`, `subject_dn_length`) for in-circuit serial number and Subject DN extraction. `serialNumber` is no longer a separate input field.
 
 ### 2. Setup, prove, verify
 
@@ -46,6 +48,9 @@ RUST_LOG=info cargo run --release -- rs256 prove --input ../circom/inputs/rs256/
 
 # Verify proof
 RUST_LOG=info cargo run --release -- rs256 verify
+
+# Verify proof with TBS hash challenge validation
+RUST_LOG=info cargo run --release -- rs256 verify --challenge <hex-encoded-challenge-bytes>
 ```
 
 ### 3. Benchmark

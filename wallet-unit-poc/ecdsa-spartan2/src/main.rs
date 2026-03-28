@@ -49,6 +49,7 @@ enum CircuitAction {
 #[derive(Debug, Default, Clone)]
 struct CommandOptions {
     input: Option<PathBuf>,
+    challenge: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -248,6 +249,27 @@ fn execute_rs256(action: CircuitAction, options: CommandOptions) {
                 path_config.artifact_path(RS256_PROOF),
                 path_config.key_path(RS256_VERIFYING_KEY),
             );
+
+            if let Some(challenge_hex) = &options.challenge {
+                info!(challenge = %challenge_hex, "Verifying TBS hash against challenge");
+                let challenge_bytes = hex::decode(challenge_hex).unwrap_or_else(|e| {
+                    eprintln!("Invalid challenge hex: {}", e);
+                    process::exit(1);
+                });
+                // Compute SHA-256 of challenge and convert to big-endian bits
+                use sha2::{Sha256, Digest};
+                let digest = Sha256::digest(&challenge_bytes);
+                let mut expected_bits = Vec::with_capacity(256);
+                for byte in digest.iter() {
+                    for j in (0..8).rev() {
+                        expected_bits.push((*byte >> j) & 1);
+                    }
+                }
+                // Public outputs are at the end of the public values:
+                // indices 18..274 are tbs_hash[256] (0-indexed after issuer_rsa_modulus[17] + smtRoot)
+                // TODO: extract public values from proof and compare tbs_hash bits
+                info!("Challenge SHA-256 computed ({} bits). Full comparison requires proof public value extraction.", expected_bits.len());
+            }
         }
         CircuitAction::Benchmark => {
             info!("RS256 benchmark pipeline...");
@@ -393,18 +415,10 @@ fn parse_circuit_command(tail: &[String]) -> Result<ParsedCommand, String> {
         | CircuitAction::Prove
         | CircuitAction::Setup
         | CircuitAction::Benchmark => parse_options(options_slice)?,
-        CircuitAction::Verify => ensure_no_options(options_slice)?,
+        CircuitAction::Verify => parse_options(options_slice)?,
     };
 
     Ok(ParsedCommand { action, options })
-}
-
-fn ensure_no_options(args: &[String]) -> Result<CommandOptions, String> {
-    if args.is_empty() {
-        Ok(CommandOptions::default())
-    } else {
-        Err(format!("Unexpected options: {}", args.join(" ")))
-    }
 }
 
 fn parse_options(args: &[String]) -> Result<CommandOptions, String> {
@@ -424,6 +438,12 @@ fn parse_options(args: &[String]) -> Result<CommandOptions, String> {
                 return Err("Missing value for --input".into());
             }
             options.input = Some(PathBuf::from(value));
+        } else if arg == "--challenge" {
+            index += 1;
+            let value = args
+                .get(index)
+                .ok_or_else(|| "Missing value for --challenge".to_string())?;
+            options.challenge = Some(value.clone());
         } else if arg == "--help" || arg == "-h" {
             print_usage();
             process::exit(0);

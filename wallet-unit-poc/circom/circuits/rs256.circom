@@ -151,7 +151,7 @@ template FullCertRSA256VerifyWithRevocation(maxMessageLength, n, k, modulusBits,
     ) ==> (issuerShaOut);
 
     // === Serial Number Extraction (replaces external serialNumber input) ===
-    var maxSerialLen = 16;
+    var maxSerialLen = 20;  // DER INTEGERs may have a leading 0x00 sign byte; 20 covers up to 19-byte serials
     signal extractedSerial;
     DERSerialExtractor(maxMessageLength, maxSerialLen)(
         in           <== user_cert_zero_padded,

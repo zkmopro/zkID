@@ -78,11 +78,15 @@ struct RsaCircuitInput {
     rsa_signature: Vec<String>,
 }
 
-/// DER byte offsets for in-circuit modulus extraction.
+/// DER byte offsets for in-circuit extraction.
 #[derive(Debug)]
 struct CertOffsets {
     modulus_offset: usize,
     modulus_tag_offset: usize,
+    serial_offset: usize,
+    serial_length: usize,
+    subject_dn_offset: usize,
+    subject_dn_length: usize,
 }
 
 // === HiPKI /pkcs11info?withcert=true response structs ===
@@ -281,7 +285,6 @@ impl Rs256Circuit {
             &issuer_sig_on_user_cert,
             tbs,
             &user_cert_tbs_der,
-            &serial_hex,
             smt_inputs.as_ref(),
         )?;
 
@@ -348,7 +351,6 @@ impl Rs256Circuit {
         issuer_signature_b64: &str,
         user_tbs: &[u8],
         issuer_tbs: &[u8], // actually the user cert's TBS DER (what the issuer signed)
-        serial_hex: &str,
         smt_inputs: Option<&crate::smt_client::SmtCircuitInputs>,
     ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         const MAX_MESSAGE_LENGTH: usize = 1536;
@@ -373,17 +375,12 @@ impl Rs256Circuit {
         let user_cert_der = user_cert.to_der()?;
         let user_offsets = Self::parse_cert_offsets(&user_cert_der)?;
 
-        // Derive serial number as decimal string from hex
-        let serial_decimal = BigUint::parse_bytes(serial_hex.as_bytes(), 16)
-            .map(|n| n.to_string())
-            .unwrap_or_else(|| "0".to_string());
-
         // SMT fields: use provided values or zero defaults
-        let (smt_root, smt_serial, smt_siblings, smt_old_key, smt_old_value, smt_is_old0) =
+        // serialNumber is now extracted in-circuit, not passed as input
+        let (smt_root, smt_siblings, smt_old_key, smt_old_value, smt_is_old0) =
             match smt_inputs {
                 Some(smt) => (
                     smt.smt_root.clone(),
-                    smt.serial_number.clone(),
                     smt.smt_siblings.clone(),
                     smt.smt_old_key.clone(),
                     smt.smt_old_value.clone(),
@@ -393,7 +390,6 @@ impl Rs256Circuit {
                     let zeros = vec!["0".to_string(); 128];
                     (
                         "0".to_string(),
-                        serial_decimal,
                         zeros,
                         "0".to_string(),
                         "0".to_string(),
@@ -416,17 +412,20 @@ impl Rs256Circuit {
             "issuer_rsa_modulus": issuer_input.rsa_modulus,
             "issuer_rsa_signature": issuer_input.rsa_signature,
             "smtRoot": smt_root,
-            "serialNumber": smt_serial,
             "smtSiblings": smt_siblings,
             "smtOldKey": smt_old_key,
             "smtOldValue": smt_old_value,
             "smtIsOld0": smt_is_old0,
+            "serial_offset": user_offsets.serial_offset,
+            "serial_length": user_offsets.serial_length,
+            "subject_dn_offset": user_offsets.subject_dn_offset,
+            "subject_dn_length": user_offsets.subject_dn_length,
         }))
     }
 
     // === DER parsing helpers ===
 
-    /// Find the RSA modulus byte offsets in a DER-encoded certificate.
+    /// Find all DER byte offsets needed for in-circuit extraction.
     fn parse_cert_offsets(der: &[u8]) -> Result<CertOffsets, Box<dyn std::error::Error>> {
         let (modulus_offset, modulus_tag_offset) = Self::find_modulus_offset(der)?;
 
@@ -438,9 +437,16 @@ impl Rs256Circuit {
             .into());
         }
 
+        let (serial_offset, serial_length) = Self::parse_serial_offset(der)?;
+        let (subject_dn_offset, subject_dn_length) = Self::parse_subject_dn_offset(der)?;
+
         Ok(CertOffsets {
             modulus_offset,
             modulus_tag_offset,
+            serial_offset,
+            serial_length,
+            subject_dn_offset,
+            subject_dn_length,
         })
     }
 
@@ -499,6 +505,108 @@ impl Rs256Circuit {
         }
 
         Ok((spki_abs + pos, spki_abs + tag_pos))
+    }
+
+    /// Find the serial number offset in the full certificate DER.
+    /// Returns (tag_offset, value_length) where tag_offset points to the 0x02 INTEGER tag.
+    ///
+    /// DER TBS structure: SEQUENCE { version, serialNumber INTEGER, ... }
+    fn parse_serial_offset(der: &[u8]) -> Result<(usize, usize), Box<dyn std::error::Error>> {
+        let cert = Certificate::from_der(der)?;
+        let tbs_der = cert.tbs_certificate.to_der()?;
+        let tbs_abs = Self::find_subslice(der, &tbs_der)
+            .ok_or("TBS not found in cert DER")?;
+
+        let mut pos = 0usize;
+
+        // Skip TBS SEQUENCE tag + length
+        pos += 1;
+        let (_, lb) = Self::read_der_len(&tbs_der, pos);
+        pos += lb;
+
+        // Skip version [0] EXPLICIT if present (tag = 0xa0)
+        if tbs_der[pos] == 0xa0 {
+            pos += 1;
+            let (ver_len, vlb) = Self::read_der_len(&tbs_der, pos);
+            pos += vlb + ver_len;
+        }
+
+        // Now at serialNumber INTEGER (tag = 0x02)
+        if tbs_der[pos] != 0x02 {
+            return Err(format!(
+                "Expected INTEGER tag at TBS pos {}, got 0x{:02x}",
+                pos, tbs_der[pos]
+            ).into());
+        }
+        let tag_offset = tbs_abs + pos;
+        pos += 1;
+
+        let (serial_len, _) = Self::read_der_len(&tbs_der, pos);
+
+        // serial_len is the full DER INTEGER value length, which may include
+        // a leading 0x00 sign byte. The circuit's maxSerialLen (20) is large
+        // enough to hold this. The leading zero doesn't change the packed
+        // big-endian integer value (it's in the MSB position).
+        Ok((tag_offset, serial_len))
+    }
+
+    /// Find the Subject DN offset in the full certificate DER.
+    /// Returns (tag_offset, total_length) where tag_offset points to the 0x30 SEQUENCE tag.
+    ///
+    /// DER TBS structure: SEQUENCE { version, serialNumber, signatureAlgorithm,
+    ///                               issuer, validity, subject, ... }
+    fn parse_subject_dn_offset(der: &[u8]) -> Result<(usize, usize), Box<dyn std::error::Error>> {
+        let cert = Certificate::from_der(der)?;
+        let tbs_der = cert.tbs_certificate.to_der()?;
+        let tbs_abs = Self::find_subslice(der, &tbs_der)
+            .ok_or("TBS not found in cert DER")?;
+
+        let mut pos = 0usize;
+
+        // Skip TBS SEQUENCE tag + length
+        pos += 1;
+        let (_, lb) = Self::read_der_len(&tbs_der, pos);
+        pos += lb;
+
+        // Skip version [0] EXPLICIT if present
+        if tbs_der[pos] == 0xa0 {
+            pos += 1;
+            let (ver_len, vlb) = Self::read_der_len(&tbs_der, pos);
+            pos += vlb + ver_len;
+        }
+
+        // Skip serialNumber INTEGER
+        pos += 1; // tag
+        let (serial_len, slb) = Self::read_der_len(&tbs_der, pos);
+        pos += slb + serial_len;
+
+        // Skip signatureAlgorithm SEQUENCE
+        pos += 1; // tag
+        let (sig_alg_len, salb) = Self::read_der_len(&tbs_der, pos);
+        pos += salb + sig_alg_len;
+
+        // Skip issuer Name SEQUENCE
+        pos += 1; // tag
+        let (issuer_len, ilb) = Self::read_der_len(&tbs_der, pos);
+        pos += ilb + issuer_len;
+
+        // Skip validity SEQUENCE
+        pos += 1; // tag
+        let (validity_len, vlb) = Self::read_der_len(&tbs_der, pos);
+        pos += vlb + validity_len;
+
+        // Now at subject Name SEQUENCE (tag = 0x30)
+        if tbs_der[pos] != 0x30 {
+            return Err(format!(
+                "Expected SEQUENCE tag at TBS pos {} (subject), got 0x{:02x}",
+                pos, tbs_der[pos]
+            ).into());
+        }
+        let tag_offset = tbs_abs + pos;
+        pos += 1;
+        let (subject_len, _) = Self::read_der_len(&tbs_der, pos);
+
+        Ok((tag_offset, subject_len))
     }
 
     /// Read a DER length field. Returns (length_value, bytes_consumed).
@@ -664,7 +772,7 @@ impl SpartanCircuit<E> for Rs256Circuit {
 
     /// RS256 circuit public inputs
     fn public_values(&self) -> Result<Vec<Scalar>, SynthesisError> {
-        let num_public = 19; // 17 (rsaModulus limbs) + 1 (smtRoot) + 1 (serialNumber)
+        let num_public = 275; // 17 (issuer_rsa_modulus) + 1 (smtRoot) + 256 (tbs_hash) + 1 (dn_nullifier)
         let witness = self.get_or_generate_witness().ok();
 
         let mut values = Vec::with_capacity(num_public);
@@ -774,7 +882,6 @@ mod tests {
         let user_cert_tbs_der = user_cert.tbs_certificate.to_der().unwrap();
         let issuer_sig = base64::engine::general_purpose::STANDARD
             .encode(user_cert.signature.raw_bytes());
-        let serial_hex = hex::encode(user_cert.tbs_certificate.serial_number.as_bytes());
 
         let input = Rs256Circuit::generate_circuit_input(
             &user_cert,
@@ -783,14 +890,13 @@ mod tests {
             &issuer_sig,
             tbs,
             &user_cert_tbs_der,
-            &serial_hex,
             None,
         )
         .unwrap();
 
         let obj = input.as_object().unwrap();
 
-        // Verify all 18 fields are present
+        // Verify all expected fields are present
         assert!(obj.contains_key("tbs"));
         assert!(obj.contains_key("tbs_length"));
         assert!(obj.contains_key("issuer_tbs"));
@@ -804,11 +910,17 @@ mod tests {
         assert!(obj.contains_key("issuer_rsa_modulus"));
         assert!(obj.contains_key("issuer_rsa_signature"));
         assert!(obj.contains_key("smtRoot"));
-        assert!(obj.contains_key("serialNumber"));
         assert!(obj.contains_key("smtSiblings"));
         assert!(obj.contains_key("smtOldKey"));
         assert!(obj.contains_key("smtOldValue"));
         assert!(obj.contains_key("smtIsOld0"));
+        // New offset fields for in-circuit extraction
+        assert!(obj.contains_key("serial_offset"));
+        assert!(obj.contains_key("serial_length"));
+        assert!(obj.contains_key("subject_dn_offset"));
+        assert!(obj.contains_key("subject_dn_length"));
+        // serialNumber removed (now extracted in-circuit)
+        assert!(!obj.contains_key("serialNumber"));
 
         // SMT defaults should be zero
         assert_eq!(obj["smtRoot"], "0");
@@ -822,5 +934,39 @@ mod tests {
         assert_eq!(obj["user_rsa_signature"].as_array().unwrap().len(), 17);
         assert_eq!(obj["issuer_rsa_signature"].as_array().unwrap().len(), 17);
         assert_eq!(obj["smtSiblings"].as_array().unwrap().len(), 128);
+    }
+
+    #[test]
+    fn test_parse_serial_offset() {
+        let user_cert = load_user_cert();
+        let der = user_cert.to_der().unwrap();
+        let (tag_offset, serial_len) = Rs256Circuit::parse_serial_offset(&der).unwrap();
+
+        // Tag at offset should be 0x02 (INTEGER)
+        assert_eq!(der[tag_offset], 0x02, "Serial tag should be 0x02 INTEGER");
+        // Serial length should be reasonable (1-20 bytes for CDC certs)
+        assert!(serial_len > 0 && serial_len <= 20, "Serial length {} out of range", serial_len);
+
+        // Verify extracted bytes match the x509_cert parsed serial
+        let expected_serial = user_cert.tbs_certificate.serial_number.as_bytes();
+        let value_offset = tag_offset + 1 + if der[tag_offset + 1] & 0x80 != 0 {
+            1 + (der[tag_offset + 1] & 0x7f) as usize
+        } else {
+            1
+        };
+        let extracted = &der[value_offset..value_offset + serial_len];
+        assert_eq!(extracted, expected_serial, "Extracted serial should match parsed cert serial");
+    }
+
+    #[test]
+    fn test_parse_subject_dn_offset() {
+        let user_cert = load_user_cert();
+        let der = user_cert.to_der().unwrap();
+        let (tag_offset, dn_len) = Rs256Circuit::parse_subject_dn_offset(&der).unwrap();
+
+        // Tag at offset should be 0x30 (SEQUENCE)
+        assert_eq!(der[tag_offset], 0x30, "Subject DN tag should be 0x30 SEQUENCE");
+        // DN length should be reasonable
+        assert!(dn_len > 0 && dn_len <= 256, "DN length {} out of range", dn_len);
     }
 }
