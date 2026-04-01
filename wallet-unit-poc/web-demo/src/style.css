@@ -199,3 +199,50 @@ h1 {
   border: 1px solid #a00;
   color: #f00;
 }
+
+.proof-output {
+  margin-top: 0.5rem;
+}
+
+.proof-output.hidden { display: none; }
+
+.proof-output label {
+  display: block;
+  font-size: 0.8rem;
+  color: #888;
+  margin-bottom: 0.25rem;
+}
+
+.proof-output textarea {
+  width: 100%;
+  background: #111;
+  color: #0f0;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-family: inherit;
+  font-size: 0.75rem;
+  resize: vertical;
+}
+
+.btn-small {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+a {
+  color: #0f0;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+code {
+  background: #1a1a1a;
+  padding: 0.1rem 0.3rem;
+  border-radius: 2px;
+  font-size: 0.8rem;
+}

@@ -9,8 +9,6 @@ const CONFIG = {
   witnessWasmUrl: '/assets/rs256.wasm',
   // Proving server endpoint (ecdsa-spartan2 HTTP mode)
   proveServerUrl: 'http://localhost:8080/prove',
-  // go-zkid-verifier endpoint
-  verifierUrl: 'http://localhost:8081/verify',
 };
 
 // --- Types ---
@@ -129,11 +127,13 @@ async function handleProve() {
       throw new Error(`Proving server error (${resp.status}): ${errText}`);
     }
     const result = await resp.json();
-    proofBytes = base64ToBytes(result.proof);
+    const proofB64 = result.proof;
+    proofBytes = base64ToBytes(proofB64);
     const ms = Math.round(performance.now() - t0);
-    addLog(3, `Proof generated (${(proofBytes.length / 1024).toFixed(1)}KB)`, ms);
+    addLog(3, `Proof generated (${(proofBytes.length / 1024).toFixed(1)}KB) in ${(result.timing_ms / 1000).toFixed(1)}s server-side`, ms);
     setStepState(3, 'done', `${ms}ms`);
-    setStepState(4, 'active');
+    setStepState(4, 'done', 'ready');
+    showProofOutput(proofB64);
   } catch (e) {
     const ms = Math.round(performance.now() - t0);
     addLog(3, `Proving failed: ${e}`, ms, true);
@@ -141,68 +141,28 @@ async function handleProve() {
   }
 }
 
-// --- Step 4: Verify Proof ---
-async function handleVerify() {
-  if (!proofBytes) return;
-  const t0 = performance.now();
-  try {
-    setStepState(4, 'active', 'verifying...');
-    const resp = await fetch(CONFIG.verifierUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        proof: bytesToBase64(proofBytes),
-        public_inputs: extractPublicInputs(),
-        circuit: 'rs256',
-      }),
-    });
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`Verifier error (${resp.status}): ${errText}`);
-    }
-    const result = await resp.json();
-    const ms = Math.round(performance.now() - t0);
+// --- Step 4: Show proof for go-zkid-verifier ---
+function showProofOutput(proofB64: string) {
+  const proofOutput = document.getElementById('proof-output');
+  const proofText = document.getElementById('proof-text') as HTMLTextAreaElement | null;
+  if (proofOutput) proofOutput.classList.remove('hidden');
+  if (proofText) proofText.value = proofB64;
 
-    if (result.verified) {
-      addLog(4, 'Proof verified successfully', ms);
-      setStepState(4, 'done', `${ms}ms`);
-      showResult(true, `
-        <strong>Verification: PASSED</strong><br/>
-        The certificate proof is valid. The prover demonstrated knowledge of a valid
-        MOICA citizen certificate chain without revealing the certificate contents.<br/>
-        <br/>
-        <strong>Timing:</strong> ${formatTimingSummary()}
-      `);
-    } else {
-      addLog(4, `Verification failed: ${result.error || 'unknown'}`, ms, true);
-      setStepState(4, 'error', 'invalid');
-      showResult(false, `<strong>Verification: FAILED</strong><br/>${result.error || 'Proof invalid'}`);
-    }
-  } catch (e) {
-    const ms = Math.round(performance.now() - t0);
-    addLog(4, `Verification error: ${e}`, ms, true);
-    setStepState(4, 'error', 'error');
-    showResult(false, `<strong>Verification Error</strong><br/>${e}`);
-  }
+  addLog(4, 'Proof ready — submit to go-zkid-verifier /verify endpoint', 0);
+  showResult(true, `
+    <strong>Proof Generated Successfully</strong><br/>
+    Size: ${proofBytes ? (proofBytes.length / 1024).toFixed(1) : '?'}KB |
+    Timing: ${formatTimingSummary()}<br/><br/>
+    Submit the proof to
+    <a href="https://github.com/zkmopro/go-zkid-verifier" target="_blank">go-zkid-verifier</a>
+    for off-chain verification.
+  `);
 }
 
 // --- Utilities ---
 function base64ToBytes(b64: string): Uint8Array {
   const binString = atob(b64);
   return Uint8Array.from(binString, (c) => c.charCodeAt(0));
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  const binString = Array.from(bytes, (b) => String.fromCharCode(b)).join('');
-  return btoa(binString);
-}
-
-function extractPublicInputs(): string[] {
-  if (!circuitInput) return [];
-  const modulus = circuitInput['issuer_rsa_modulus'] as string[];
-  const smtRoot = circuitInput['smtRoot'] as string;
-  const serialNumber = circuitInput['serialNumber'] as string;
-  return [...modulus, smtRoot, serialNumber];
 }
 
 function formatTimingSummary(): string {
@@ -221,5 +181,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-load')?.addEventListener('click', handleLoad);
   document.getElementById('btn-witness')?.addEventListener('click', handleWitness);
   document.getElementById('btn-prove')?.addEventListener('click', handleProve);
-  document.getElementById('btn-verify')?.addEventListener('click', handleVerify);
+  document.getElementById('btn-copy')?.addEventListener('click', () => {
+    const proofText = document.getElementById('proof-text') as HTMLTextAreaElement | null;
+    if (proofText) {
+      navigator.clipboard.writeText(proofText.value);
+      const btn = document.getElementById('btn-copy');
+      if (btn) { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy to clipboard'; }, 2000); }
+    }
+  });
 });

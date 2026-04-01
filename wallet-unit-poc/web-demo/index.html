@@ -64,8 +64,14 @@
           <span class="step-status"></span>
         </div>
         <div class="step-body">
-          <p>Send proof to go-zkid-verifier for off-chain verification.</p>
-          <button id="btn-verify" class="btn" disabled>Verify Proof</button>
+          <p>Verification is handled by
+            <a href="https://github.com/zkmopro/go-zkid-verifier" target="_blank" rel="noopener">go-zkid-verifier</a>.
+            Copy the proof below and submit it to the verifier's <code>/verify</code> endpoint.</p>
+          <div id="proof-output" class="proof-output hidden">
+            <label>Proof (base64):</label>
+            <textarea id="proof-text" readonly rows="4"></textarea>
+            <button id="btn-copy" class="btn btn-small">Copy to clipboard</button>
+          </div>
         </div>
       </div>
     </div>
