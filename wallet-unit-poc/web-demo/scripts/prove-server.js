@@ -34,6 +34,28 @@ function findDylibDir() {
 }
 const DYLIB_DIR = findDylibDir();
 
+// Serialize prove requests to avoid race condition on shared output files
+let proveInProgress = false;
+const proveQueue = [];
+function acquireProveLock() {
+  return new Promise((resolve) => {
+    if (!proveInProgress) {
+      proveInProgress = true;
+      resolve();
+    } else {
+      proveQueue.push(resolve);
+    }
+  });
+}
+function releaseProveLock() {
+  if (proveQueue.length > 0) {
+    const next = proveQueue.shift();
+    next();
+  } else {
+    proveInProgress = false;
+  }
+}
+
 // Check prerequisites
 async function checkPrereqs() {
   try {
@@ -77,6 +99,9 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // Serialize: only one prove at a time (shared output files)
+    await acquireProveLock();
+
     // Write to temp file
     const tmpFile = join(tmpdir(), `zkid-input-${randomBytes(4).toString('hex')}.json`);
     await writeFile(tmpFile, JSON.stringify(inputJson));
@@ -96,6 +121,7 @@ const server = createServer(async (req, res) => {
       await unlink(tmpFile).catch(() => {});
 
       if (error) {
+        releaseProveLock();
         console.error(`Proving failed (${Date.now() - t0}ms):`, stderr || error.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: `Proving failed: ${stderr || error.message}` }));
@@ -116,7 +142,9 @@ const server = createServer(async (req, res) => {
           instance: instanceBytes.toString('base64'),
           timing_ms: elapsed,
         }));
+        releaseProveLock();
       } catch (e) {
+        releaseProveLock();
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: `Failed to read proof: ${e.message}` }));
       }

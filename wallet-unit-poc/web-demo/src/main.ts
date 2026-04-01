@@ -81,8 +81,8 @@ async function handleLoad() {
   }
 }
 
-// --- Step 2: Generate Witness ---
-// Uses circom WASM witness calculator in the browser
+// --- Step 2: Prepare Input ---
+// Loads circom witness WASM and prepares circuit input for the proving server
 async function handleWitness() {
   if (!circuitInput) return;
   const t0 = performance.now();
@@ -106,7 +106,7 @@ async function handleWitness() {
     setStepState(3, 'active');
   } catch (e) {
     const ms = Math.round(performance.now() - t0);
-    addLog(2, `Witness generation failed: ${e}`, ms, true);
+    addLog(2, `Input preparation failed: ${e}`, ms, true);
     setStepState(2, 'error', 'failed');
   }
 }
