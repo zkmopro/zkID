@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>zkID Web Demo — RS256 Proof Pipeline</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>zkID Web Demo</h1>
+      <p class="subtitle">RS256 Certificate Proof Pipeline (Hybrid: Browser Witness + Server Prove)</p>
+    </header>
+
+    <div id="overlay" class="overlay">
+      <div class="overlay-content">
+        <p>Loading circuit assets...</p>
+        <div class="spinner"></div>
+      </div>
+    </div>
+
+    <div class="pipeline">
+      <div class="step" id="step-1" data-state="active">
+        <div class="step-header">
+          <span class="step-number">1</span>
+          <span class="step-title">Load Certificate</span>
+          <span class="step-status"></span>
+        </div>
+        <div class="step-body">
+          <p>Load pre-generated test certificate data (RS256 circuit input).</p>
+          <button id="btn-load" class="btn">Load Test Certificate</button>
+        </div>
+      </div>
+
+      <div class="step" id="step-2" data-state="disabled">
+        <div class="step-header">
+          <span class="step-number">2</span>
+          <span class="step-title">Generate Witness</span>
+          <span class="step-status"></span>
+        </div>
+        <div class="step-body">
+          <p>Generate circuit witness using circom WASM calculator in the browser.</p>
+          <button id="btn-witness" class="btn" disabled>Generate Witness</button>
+        </div>
+      </div>
+
+      <div class="step" id="step-3" data-state="disabled">
+        <div class="step-header">
+          <span class="step-number">3</span>
+          <span class="step-title">Generate Proof (Server)</span>
+          <span class="step-status"></span>
+        </div>
+        <div class="step-body">
+          <p>Send witness to proving server. Spartan2 proof generation happens server-side.</p>
+          <button id="btn-prove" class="btn" disabled>Generate Proof</button>
+        </div>
+      </div>
+
+      <div class="step" id="step-4" data-state="disabled">
+        <div class="step-header">
+          <span class="step-number">4</span>
+          <span class="step-title">Verify Proof</span>
+          <span class="step-status"></span>
+        </div>
+        <div class="step-body">
+          <p>Send proof to go-zkid-verifier for off-chain verification.</p>
+          <button id="btn-verify" class="btn" disabled>Verify Proof</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="logs" class="logs"></div>
+
+    <div id="result-banner" class="result-banner hidden"></div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
