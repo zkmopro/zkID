@@ -1,0 +1,17 @@
+node_modules/
+dist/
+
+# Built WASM binaries (copied by scripts/copy-assets.sh)
+public/openac_wasm_bg.wasm
+public/jwt.wasm
+public/show.wasm
+public/keys
+
+# Circuit assets (copied by scripts/copy-assets.sh)
+public/assets/
+
+# Patched witness calculator (copied by scripts/copy-assets.sh)
+src/assets/witness_calculator.js
+
+# WASM glue code (copied by scripts/copy-assets.sh)
+src/wasm/

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>zkID - RS256 WASM Proof Demo</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="header">
+        <h1>zkID</h1>
+        <p class="subtitle">RS256 Certificate Verification — Multi-threaded WASM</p>
+        <p class="description">
+          Proving RS256 (RSA-2048) certificate signatures entirely in-browser
+          via multi-threaded WebAssembly (Web Workers + SharedArrayBuffer).
+        </p>
+      </header>
+
+      <div class="pipeline">
+        <!-- Step 1: Load Certificate -->
+        <div class="step disabled" id="step-1">
+          <div class="step-header">
+            <span class="step-number">1</span>
+            <div class="step-info">
+              <h2>Load Certificate</h2>
+              <p class="step-desc">
+                Fetch test RS256 certificate input (circuit input JSON).
+              </p>
+            </div>
+            <button class="btn" id="btn-load" type="button" disabled>
+              Load
+            </button>
+          </div>
+          <div class="step-details" id="details-1"></div>
+          <div class="step-status" id="status-1"></div>
+        </div>
+
+        <!-- Step 2: Generate Witness -->
+        <div class="step disabled" id="step-2">
+          <div class="step-header">
+            <span class="step-number">2</span>
+            <div class="step-info">
+              <h2>Generate Witness</h2>
+              <p class="step-desc">
+                Calculate circom witness in-browser using the RS256 witness
+                calculator WASM (11MB).
+              </p>
+            </div>
+            <button class="btn" id="btn-witness" type="button" disabled>
+              Witness
+            </button>
+          </div>
+          <div class="step-details" id="details-2"></div>
+          <div class="step-status" id="status-2"></div>
+        </div>
+
+        <!-- Step 3: Prove -->
+        <div class="step disabled" id="step-3">
+          <div class="step-header">
+            <span class="step-number">3</span>
+            <div class="step-info">
+              <h2>Prove</h2>
+              <p class="step-desc">
+                Generate Spartan2 ZK proof from witness using multi-threaded
+                WASM (rayon via wasm-bindgen-rayon).
+              </p>
+            </div>
+            <button class="btn" id="btn-prove" type="button" disabled>
+              Prove
+            </button>
+          </div>
+          <div class="step-details" id="details-3"></div>
+          <div class="step-status" id="status-3"></div>
+        </div>
+
+        <!-- Step 4: Verify -->
+        <div class="step disabled" id="step-4">
+          <div class="step-header">
+            <span class="step-number">4</span>
+            <div class="step-info">
+              <h2>Verify</h2>
+              <p class="step-desc">
+                Verify the Spartan2 proof in-browser via WASM.
+              </p>
+            </div>
+            <button class="btn" id="btn-verify" type="button" disabled>
+              Verify
+            </button>
+          </div>
+          <div class="step-details" id="details-4"></div>
+          <div class="step-status" id="status-4"></div>
+        </div>
+      </div>
+
+      <!-- Verification Result Banner -->
+      <div class="result-banner hidden" id="result-banner">
+        <div class="result-icon" id="result-icon"></div>
+        <div class="result-body">
+          <h3 id="result-title"></h3>
+          <div class="result-details" id="result-details"></div>
+        </div>
+      </div>
+
+      <footer class="footer">
+        <p>
+          Powered by
+          <strong>Spartan2 + Hyrax</strong> ZK-SNARK prover running in
+          multi-threaded WebAssembly via
+          <strong>wasm-bindgen-rayon</strong>.
+        </p>
+        <p>
+          Circuit: <code>rs256.circom</code> — RSA-2048 certificate
+          verification on secq256r1 field.
+        </p>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

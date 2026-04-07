@@ -1,0 +1,467 @@
+/* ========================================================================
+   zkID Web Demo — Clean Card/Step Layout
+   ======================================================================== */
+
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface-hover: #22252f;
+  --border: #2a2d3a;
+  --border-active: #4a5568;
+  --text: #e2e8f0;
+  --text-muted: #8892a4;
+  --text-dim: #5a6478;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.1);
+  --error: #ef4444;
+  --error-bg: rgba(239, 68, 68, 0.1);
+  --warning: #f59e0b;
+  --mono: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+/* ---- Header ---- */
+
+.header {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #818cf8, #6366f1, #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.header .subtitle {
+  color: var(--text-muted);
+  font-size: 1rem;
+  margin-top: 0.25rem;
+}
+
+.header .description {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  font-family: var(--mono);
+}
+
+/* ---- Pipeline Steps ---- */
+
+.pipeline {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.step {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  transition: border-color 0.2s, opacity 0.2s;
+}
+
+.step.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.step.active {
+  border-color: var(--accent);
+}
+
+.step.done {
+  border-color: var(--success);
+}
+
+.step.error {
+  border-color: var(--error);
+}
+
+/* Step header */
+
+.step-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.step-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--border);
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.step.active .step-number {
+  background: var(--accent);
+  color: #fff;
+}
+
+.step.done .step-number {
+  background: var(--success);
+  color: #fff;
+}
+
+.step-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-info h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.step-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* Button */
+
+.btn {
+  padding: 0.5rem 1.25rem;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+.btn.running {
+  border-color: var(--warning);
+  color: var(--warning);
+  cursor: wait;
+}
+
+/* Step details (sub-logs) */
+
+.step-details {
+  margin-top: 0;
+  overflow: hidden;
+  transition: margin-top 0.2s;
+}
+
+.step-details:not(:empty) {
+  margin-top: 1rem;
+}
+
+.step-details .log-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.3rem 0;
+  font-size: 0.78rem;
+  font-family: var(--mono);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.step-details .log-line:last-child {
+  border-bottom: none;
+}
+
+.step-details .log-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.step-details .log-check {
+  color: var(--success);
+}
+
+.step-details .log-spinner {
+  color: var(--warning);
+}
+
+.step-details .log-duration {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.step-details .detail-item {
+  padding: 0.3rem 0;
+  font-size: 0.78rem;
+  font-family: var(--mono);
+  color: var(--text-dim);
+}
+
+.step-details .detail-item .detail-label {
+  color: var(--text-muted);
+}
+
+.step-details .detail-item .detail-value {
+  color: var(--text);
+}
+
+/* Step status bar */
+
+.step-status {
+  margin-top: 0;
+  overflow: hidden;
+}
+
+.step-status:not(:empty) {
+  margin-top: 0.75rem;
+}
+
+.step-status .status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.status-bar.running {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--warning);
+}
+
+.status-bar.done {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.status-bar.error {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.status-bar .timing {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+
+/* ---- Result Banner ---- */
+
+.result-banner {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  border-radius: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  animation: fadeIn 0.3s ease;
+}
+
+.result-banner.hidden {
+  display: none;
+}
+
+.result-banner.success {
+  background: var(--success-bg);
+  border: 1px solid var(--success);
+}
+
+.result-banner.failure {
+  background: var(--error-bg);
+  border: 1px solid var(--error);
+}
+
+.result-icon {
+  font-size: 2rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.result-body h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.result-banner.success h3 {
+  color: var(--success);
+}
+
+.result-banner.failure h3 {
+  color: var(--error);
+}
+
+.result-details {
+  font-size: 0.82rem;
+  font-family: var(--mono);
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.result-details .result-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.result-details .result-label {
+  color: var(--text-dim);
+  min-width: 120px;
+}
+
+.result-details .result-value {
+  color: var(--text);
+}
+
+.result-details .result-value.positive {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.result-details .result-value.negative {
+  color: var(--error);
+  font-weight: 600;
+}
+
+/* ---- Footer ---- */
+
+.footer {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  line-height: 1.8;
+}
+
+.footer code {
+  color: var(--text-muted);
+  background: var(--surface);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+/* ---- Init overlay ---- */
+
+.init-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 17, 23, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.init-overlay.hidden {
+  display: none;
+}
+
+.init-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem 2.5rem;
+  text-align: center;
+  max-width: 400px;
+}
+
+.init-box h2 {
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.init-box .init-mode {
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-family: var(--mono);
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.init-box .init-status {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-family: var(--mono);
+  min-height: 1.5em;
+}
+
+.init-box .init-logs {
+  margin-top: 1rem;
+  text-align: left;
+  font-size: 0.75rem;
+  font-family: var(--mono);
+  color: var(--text-dim);
+  line-height: 1.8;
+}
+
+.spinner {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
