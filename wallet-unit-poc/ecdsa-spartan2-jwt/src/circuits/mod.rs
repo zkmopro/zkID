@@ -1,6 +1,4 @@
-pub mod prepare_circuit;
 pub mod rs256_circuit;
-pub mod show_circuit;
 
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use ff::PrimeField;

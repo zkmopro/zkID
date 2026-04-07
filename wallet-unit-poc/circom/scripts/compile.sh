@@ -1,11 +1,9 @@
 #!/bin/bash
 
 usage() {
-  echo "Usage: $0 {jwt_rs256|rs256|jwt|show|all}"
+  echo "Usage: $0 {jwt_rs256|rs256|all}"
   echo "  jwt_rs256: Compile files for JWT-RS256."
   echo "  rs256: Compile files for RS256."
-  echo "  jwt: Compile files for JWT ES256."
-  echo "  show: Compile files for Show circuit."
   echo "  all: Compile all circuits."
   exit 1
 }
@@ -48,20 +46,8 @@ case "$1" in
     cd build/rs256/ && mv rs256.r1cs rs256_js/ && cd ../.. || { echo "Error: Failed to process RS256."; exit 1; }
     cp -f build/rs256/rs256_cpp/rs256.cpp build/cpp/
     cp -f build/rs256/rs256_cpp/rs256.dat build/cpp/
-    
+
     echo "All circuits compiled successfully."
-    ;;
-  jwt)
-    echo "Compiling JWT ES256 circuit..."
-    npx circomkit compile jwt || { echo "Error: Failed to compile JWT."; exit 1; }
-    cd build/jwt/ && mv jwt.r1cs jwt_js/ && cd ../.. || { echo "Error: Failed to process JWT."; exit 1; }
-    echo "JWT ES256 circuit compiled successfully."
-    ;;
-  show)
-    echo "Compiling Show circuit..."
-    npx circomkit compile show || { echo "Error: Failed to compile Show."; exit 1; }
-    cd build/show/ && mv show.r1cs show_js/ && cd ../.. || { echo "Error: Failed to process Show."; exit 1; }
-    echo "Show circuit compiled successfully."
     ;;
   *)
     echo "Error: Invalid option '$1'."

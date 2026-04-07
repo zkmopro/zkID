@@ -12,8 +12,6 @@
     "save_input_file": "npx tsx src/save_inputs.ts",
     "compile:jwt_rs256": "bash scripts/compile.sh jwt_rs256",
     "compile:rs256": "bash scripts/compile.sh rs256",
-    "compile:jwt": "bash scripts/compile.sh jwt",
-    "compile:show": "bash scripts/compile.sh show",
     "compile:all": "bash scripts/compile.sh all",
     "setup": "npx circomkit setup jwt_rs256",
     "prove": "npx circomkit prove jwt_rs256",

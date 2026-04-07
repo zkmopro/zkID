@@ -116,15 +116,7 @@ impl PathConfig {
 }
 
 pub mod keys {
-    pub const PREPARE_PROVING_KEY: &str = "prepare_proving.key";
-    pub const PREPARE_VERIFYING_KEY: &str = "prepare_verifying.key";
-    pub const SHOW_PROVING_KEY: &str = "show_proving.key";
-    pub const SHOW_VERIFYING_KEY: &str = "show_verifying.key";
-    pub const PREPARE_PROOF: &str = "prepare_proof.bin";
-    pub const PREPARE_WITNESS: &str = "prepare_witness.bin";
-    pub const PREPARE_INSTANCE: &str = "prepare_instance.bin";
-    pub const SHOW_PROOF: &str = "show_proof.bin";
-    pub const SHOW_WITNESS: &str = "show_witness.bin";
-    pub const SHOW_INSTANCE: &str = "show_instance.bin";
+    pub const RS256_PROVING_KEY: &str = "rs256_proving.key";
+    pub const RS256_VERIFYING_KEY: &str = "rs256_verifying.key";
     pub const SHARED_BLINDS: &str = "shared_blinds.bin";
 }

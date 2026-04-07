@@ -1,30 +1,18 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
-use std::{fs::File, path::Path};
-
-#[cfg(target_arch = "wasm32")]
 use std::path::Path;
 
-#[cfg(feature = "native-witness")]
-use crate::circuits::prepare_circuit::call_jwt_witness;
-use crate::utils::parse_witness;
-use crate::{paths::PathConfig, Scalar, E};
+use crate::{Scalar, E};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::{
-    setup::{
-        load_instance, load_proof, load_proving_key, load_shared_blinds, load_verifying_key,
-        load_witness, save_instance, save_proof, save_shared_blinds, save_witness,
-    },
-    utils::{hashmap_to_json_string, parse_jwt_inputs},
+use crate::setup::{
+    load_instance, load_proof, load_proving_key, load_shared_blinds, load_verifying_key,
+    load_witness, save_instance, save_proof, save_shared_blinds, save_witness,
 };
 
-use bellpepper_core::SynthesisError;
 use ff::{derive::rand_core::OsRng, Field};
-#[cfg(not(target_arch = "wasm32"))]
-use serde_json::Value;
 use spartan2::{
-    bellpepper::{solver::SatisfyingAssignment, zk_r1cs::SpartanWitness},
+    bellpepper::solver::SatisfyingAssignment,
     errors::SpartanError,
     provider::traits::DlogGroup,
     traits::{
@@ -235,7 +223,7 @@ pub fn reblind_with_loaded_data(
 }
 
 /// Prove a circuit and return results in memory (no file I/O).
-/// This is the building block for the WASM `precompute()` API.
+/// This is the building block for the WASM `prove_rs256()` API.
 pub fn prove_circuit_in_memory<C: SpartanCircuit<E> + Clone + std::fmt::Debug>(
     circuit: C,
     pk: &<R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey,
@@ -277,10 +265,6 @@ pub fn prove_circuit_in_memory<C: SpartanCircuit<E> + Clone + std::fmt::Debug>(
 }
 
 /// Reblind a proof with shared randomness and return results in memory (no file I/O).
-/// This is the building block for the WASM `present()` API.
-///
-/// Uses the public values stored in the instance (from the original proving step)
-/// rather than re-deriving them from the circuit.
 pub fn reblind_in_memory(
     pk: &<R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey,
     instance: spartan2::r1cs::SplitR1CSInstance<E>,
@@ -340,50 +324,4 @@ pub fn verify_circuit_with_loaded_data(
 
     info!("Verification successful! Time: {} ms", verify_ms);
     public_values
-}
-
-#[cfg(feature = "native-witness")]
-pub fn generate_prepare_witness(
-    config: &PathConfig,
-    input_json_path: Option<&Path>,
-) -> Result<Vec<Scalar>, SynthesisError> {
-    let json_path = input_json_path
-        .map(|p| config.resolve(p))
-        .unwrap_or_else(|| config.input_json("jwt"));
-
-    info!("Loading prepare inputs from {}", json_path.display());
-
-    let json_file = File::open(&json_path).map_err(|_| SynthesisError::AssignmentMissing)?;
-
-    let json_value: Value =
-        serde_json::from_reader(json_file).map_err(|_| SynthesisError::AssignmentMissing)?;
-
-    let inputs = parse_jwt_inputs(&json_value)?;
-
-    info!("Generating witness using witnesscalc...");
-    let t0 = Instant::now();
-
-    let inputs_json = hashmap_to_json_string(
-        &inputs,
-        config.circuit_size.max_matches(),
-        config.circuit_size.max_substring_length(),
-        config.circuit_size.max_claims_length(),
-    )?;
-
-    let witness_bytes = call_jwt_witness(config.circuit_size.circuit_name(), &inputs_json)?;
-
-    info!("witnesscalc time: {} ms", t0.elapsed().as_millis());
-
-    let witness = parse_witness(&witness_bytes)?;
-
-    Ok(witness)
-}
-
-/// Stub for WASM builds - witness must be provided via with_witness() constructor.
-#[cfg(not(feature = "native-witness"))]
-pub fn generate_prepare_witness(
-    _config: &PathConfig,
-    _input_json_path: Option<&Path>,
-) -> Result<Vec<Scalar>, SynthesisError> {
-    Err(SynthesisError::AssignmentMissing)
 }
