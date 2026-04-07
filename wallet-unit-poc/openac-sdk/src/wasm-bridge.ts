@@ -1,18 +1,16 @@
 // Async loader and typed wrapper over the Spartan2 WASM module.
-// Provides 4 high-level API methods aligned with the zkID paper protocol:
-// 1. setup()      — Generate keys for both circuits (one-time)
-// 2. precompute() — Prove Prepare circuit (once per credential)
-// 3. present()    — Reblind Prepare + Prove Show + Reblind Show (per presentation)
-// 4. verify()     — Verify both proofs + commitment check (per presentation)
+// Provides high-level API methods aligned with the zkID paper protocol:
+// 1. loadKeys(baseUrl, vcSize)    — Fetch pre-generated keys (one-time, by VC size)
+// 2. precomputeFromWitness()      — Prove Prepare circuit (once per credential)
+// 3. precomputeShowFromWitness()  — Prove Show circuit (once per credential)
+// 4. present()                    — Reblind both proofs with shared randomness (per presentation)
+// 5. verify()                     — Verify both proofs + commitment check (per presentation)
+//
+// NOTE: Keys are generated offline via native CLI, not in browser.
 
 import { WasmError } from "./errors.js";
 
-interface WasmSetupResult {
-  prepare_pk: Uint8Array;
-  prepare_vk: Uint8Array;
-  show_pk: Uint8Array;
-  show_vk: Uint8Array;
-}
+export type VcSize = "1k" | "2k" | "4k" | "8k";
 
 interface WasmPrecomputeResult {
   proof: Uint8Array;
@@ -34,20 +32,37 @@ interface WasmVerifyResult {
   error: string | null;
 }
 
-interface WasmSingleSetupResult {
-  pk: Uint8Array;
-  vk: Uint8Array;
-}
-
 interface WasmSingleVerifyResult {
   valid: boolean;
   public_values: string[];
 }
 
+interface WasmSetupResult {
+  prepare_pk: Uint8Array;
+  prepare_vk: Uint8Array;
+  show_pk: Uint8Array;
+  show_vk: Uint8Array;
+}
+
+interface WasmSingleSetupResult {
+  pk: Uint8Array;
+  vk: Uint8Array;
+}
+
 interface OpenACWasmModule {
   init(): void;
   setup(): WasmSetupResult;
+  setup_prepare(): WasmSingleSetupResult;
+  setup_show(): WasmSingleSetupResult;
   precompute(pk: Uint8Array): WasmPrecomputeResult;
+  precompute_from_witness(
+    pk: Uint8Array,
+    witnessWtns: Uint8Array,
+  ): WasmPrecomputeResult;
+  precompute_show_from_witness(
+    pk: Uint8Array,
+    witnessWtns: Uint8Array,
+  ): WasmPrecomputeResult;
   present(
     preparePk: Uint8Array,
     prepareInstance: Uint8Array,
@@ -64,9 +79,6 @@ interface OpenACWasmModule {
     showVk: Uint8Array,
     showInstance: Uint8Array,
   ): WasmVerifyResult;
-
-  setup_prepare(): WasmSingleSetupResult;
-  setup_show(): WasmSingleSetupResult;
   verify_single(proof: Uint8Array, vk: Uint8Array): WasmSingleVerifyResult;
   compare_comm_w_shared(instance1: Uint8Array, instance2: Uint8Array): boolean;
 }
@@ -102,6 +114,16 @@ export class WasmBridge {
   private wasm: OpenACWasmModule | null = null;
   private initialized = false;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  initWithModule(module: any): void {
+    if (this.initialized) return;
+    this.wasm = module as OpenACWasmModule;
+    if (this.wasm?.init) {
+      this.wasm.init();
+    }
+    this.initialized = true;
+  }
+
   async init(wasmPath?: string): Promise<void> {
     if (this.initialized) return;
 
@@ -110,7 +132,7 @@ export class WasmBridge {
       this.wasm = module as OpenACWasmModule;
     } else {
       try {
-        // @ts-expect-error Dynamic WASM import path resolved at runtime
+        // @ts-ignore Dynamic WASM import path resolved at runtime
         const module = await import("../wasm/pkg/openac_wasm.js");
         this.wasm = module as OpenACWasmModule;
       } catch {
@@ -142,20 +164,58 @@ export class WasmBridge {
     return this.wasm;
   }
 
-  async setup(): Promise<SetupKeys> {
+  async loadKeys(baseUrl: string, vcSize: VcSize): Promise<SetupKeys> {
+    const prefix = `${vcSize}_`;
+    const keyFiles = [
+      `${prefix}prepare_proving.key`,
+      `${prefix}prepare_verifying.key`,
+      `${prefix}show_proving.key`,
+      `${prefix}show_verifying.key`,
+    ];
+
+    const fetchKey = async (filename: string): Promise<Uint8Array> => {
+      const url = `${baseUrl}/${filename}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new WasmError(
+          "KEY_LOAD_FAILED",
+          `Failed to load key from ${url}: ${response.status} ${response.statusText}`,
+        );
+      }
+      const buffer = await response.arrayBuffer();
+      return new Uint8Array(buffer);
+    };
+
+    const keys = await Promise.all(keyFiles.map(fetchKey));
+    const [preparePk, prepareVk, showPk, showVk] = keys as [
+      Uint8Array,
+      Uint8Array,
+      Uint8Array,
+      Uint8Array,
+    ];
+
+    return { preparePk, prepareVk, showPk, showVk };
+  }
+
+  async precomputeFromWitness(
+    preparePk: Uint8Array,
+    witnessWtns: Uint8Array,
+  ): Promise<PrecomputeState> {
     const wasm = this.getWasm();
-    const result = wasm.setup();
+    const result = wasm.precompute_from_witness(preparePk, witnessWtns);
     return {
-      preparePk: new Uint8Array(result.prepare_pk),
-      prepareVk: new Uint8Array(result.prepare_vk),
-      showPk: new Uint8Array(result.show_pk),
-      showVk: new Uint8Array(result.show_vk),
+      proof: new Uint8Array(result.proof),
+      instance: new Uint8Array(result.instance),
+      witness: new Uint8Array(result.witness),
     };
   }
 
-  async precompute(preparePk: Uint8Array): Promise<PrecomputeState> {
+  async precomputeShowFromWitness(
+    showPk: Uint8Array,
+    witnessWtns: Uint8Array,
+  ): Promise<PrecomputeState> {
     const wasm = this.getWasm();
-    const result = wasm.precompute(preparePk);
+    const result = wasm.precompute_show_from_witness(showPk, witnessWtns);
     return {
       proof: new Uint8Array(result.proof),
       instance: new Uint8Array(result.instance),
@@ -197,19 +257,40 @@ export class WasmBridge {
     showInstance: Uint8Array,
   ): Promise<VerificationResult> {
     const wasm = this.getWasm();
-    const result = wasm.verify(
-      prepareProof,
-      prepareVk,
-      prepareInstance,
-      showProof,
-      showVk,
-      showInstance,
-    );
+    try {
+      const result = wasm.verify(
+        prepareProof,
+        prepareVk,
+        prepareInstance,
+        showProof,
+        showVk,
+        showInstance,
+      );
+      return {
+        valid: result.valid,
+        preparePublicValues: result.prepare_public_values,
+        showPublicValues: result.show_public_values,
+        error: result.error ?? undefined,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        valid: false,
+        preparePublicValues: [],
+        showPublicValues: [],
+        error: errorMessage,
+      };
+    }
+  }
+
+  async setup(): Promise<SetupKeys> {
+    const wasm = this.getWasm();
+    const result = wasm.setup();
     return {
-      valid: result.valid,
-      preparePublicValues: result.prepare_public_values,
-      showPublicValues: result.show_public_values,
-      error: result.error ?? undefined,
+      preparePk: new Uint8Array(result.prepare_pk),
+      prepareVk: new Uint8Array(result.prepare_vk),
+      showPk: new Uint8Array(result.show_pk),
+      showVk: new Uint8Array(result.show_vk),
     };
   }
 
@@ -225,6 +306,16 @@ export class WasmBridge {
     const wasm = this.getWasm();
     const result = wasm.setup_show();
     return { pk: new Uint8Array(result.pk), vk: new Uint8Array(result.vk) };
+  }
+
+  async precompute(preparePk: Uint8Array): Promise<PrecomputeState> {
+    const wasm = this.getWasm();
+    const result = wasm.precompute(preparePk);
+    return {
+      proof: new Uint8Array(result.proof),
+      instance: new Uint8Array(result.instance),
+      witness: new Uint8Array(result.witness),
+    };
   }
 
   /** @deprecated Use verify() instead */

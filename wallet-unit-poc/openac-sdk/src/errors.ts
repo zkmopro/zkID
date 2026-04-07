@@ -16,7 +16,8 @@ export type ErrorCode =
   | "PARAMS_EXCEEDED"
   | "WASM_LOAD_FAILED"
   | "WASM_OOM"
-  | "WASM_NOT_INITIALIZED";
+  | "WASM_NOT_INITIALIZED"
+  | "KEY_LOAD_FAILED";
 
 export class OpenACError extends Error {
   readonly code: ErrorCode;
@@ -78,7 +79,7 @@ export class InputError extends OpenACError {
 
 export class WasmError extends OpenACError {
   constructor(
-    code: "WASM_LOAD_FAILED" | "WASM_OOM" | "WASM_NOT_INITIALIZED",
+    code: "WASM_LOAD_FAILED" | "WASM_OOM" | "WASM_NOT_INITIALIZED" | "KEY_LOAD_FAILED",
     message: string,
     cause?: unknown
   ) {

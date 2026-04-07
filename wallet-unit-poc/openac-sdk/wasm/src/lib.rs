@@ -1,18 +1,24 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use ecdsa_spartan2::{prove_circuit_in_memory, reblind_in_memory, PrepareCircuit, ShowCircuit};
+use ecdsa_spartan2::{
+    parse_witness, prove_circuit_in_memory, reblind_in_memory, PrepareCircuit, Rs256Circuit,
+    ShowCircuit,
+};
 use ecdsa_spartan2::{Scalar, E};
 
 use spartan2::{traits::snark::R1CSSNARKTrait, zk_spartan::R1CSSNARK};
 
 use ff::Field;
 
+// Re-export wasm-bindgen-rayon's thread pool initializer for multi-threaded WASM.
+// JS calls: `await wasm.initThreadPool(navigator.hardwareConcurrency)`
+pub use wasm_bindgen_rayon::init_thread_pool;
+
 // ==========================================================================
 // Result types for JS interop
 // ==========================================================================
 
-/// Combined setup result for both circuits
 #[derive(Serialize, Deserialize)]
 pub struct SetupResult {
     pub prepare_pk: Vec<u8>,
@@ -21,14 +27,12 @@ pub struct SetupResult {
     pub show_vk: Vec<u8>,
 }
 
-/// Individual circuit setup result (for backward compatibility)
 #[derive(Serialize, Deserialize)]
 pub struct SingleSetupResult {
     pub pk: Vec<u8>,
     pub vk: Vec<u8>,
 }
 
-/// Result from precompute (proving the Prepare circuit)
 #[derive(Serialize, Deserialize)]
 pub struct PrecomputeResult {
     pub proof: Vec<u8>,
@@ -36,7 +40,6 @@ pub struct PrecomputeResult {
     pub witness: Vec<u8>,
 }
 
-/// Result from present (reblind Prepare + prove Show + reblind Show)
 #[derive(Serialize, Deserialize)]
 pub struct PresentResult {
     pub prepare_proof: Vec<u8>,
@@ -45,7 +48,6 @@ pub struct PresentResult {
     pub show_instance: Vec<u8>,
 }
 
-/// Combined verification result
 #[derive(Serialize, Deserialize)]
 pub struct VerifyResult {
     pub valid: bool,
@@ -54,31 +56,25 @@ pub struct VerifyResult {
     pub error: Option<String>,
 }
 
-/// Initialize panic hook for better error messages in WASM
 #[wasm_bindgen(start)]
 pub fn init() {
     console_error_panic_hook::set_once();
 }
 
 // ==========================================================================
-// 1. SETUP — Generate keys for both circuits (one-time)
+// 1. SETUP
 // ==========================================================================
 
-/// Setup both Prepare and Show circuit keys in a single call.
-/// Returns serialized SetupResult with proving and verifying keys for both circuits.
 #[wasm_bindgen]
 pub fn setup() -> Result<JsValue, JsError> {
-    // Setup Prepare circuit
     let prepare_circuit = PrepareCircuit::default();
     let (prepare_pk, prepare_vk) = R1CSSNARK::<E>::setup(prepare_circuit)
         .map_err(|e| JsError::new(&format!("Prepare setup failed: {:?}", e)))?;
 
-    // Setup Show circuit
     let show_circuit = ShowCircuit::default();
     let (show_pk, show_vk) = R1CSSNARK::<E>::setup(show_circuit)
         .map_err(|e| JsError::new(&format!("Show setup failed: {:?}", e)))?;
 
-    // Serialize all keys
     let result = SetupResult {
         prepare_pk: bincode::serialize(&prepare_pk)
             .map_err(|e| JsError::new(&format!("Prepare PK serialization failed: {}", e)))?,
@@ -95,31 +91,19 @@ pub fn setup() -> Result<JsValue, JsError> {
 }
 
 // ==========================================================================
-// 2. PRECOMPUTE — Prove Prepare circuit (once per credential)
+// 2. PRECOMPUTE
 // ==========================================================================
 
-/// Prove the Prepare circuit and return proof/instance/witness for storage.
-/// This is called once when a credential is added to the wallet.
-/// The results should be stored and reused for each presentation via `present()`.
-///
-/// Arguments:
-/// - `pk_bytes`: Serialized Prepare proving key (from setup())
-///
-/// Returns: PrecomputeResult { proof, instance, witness } — all as serialized bytes
 #[wasm_bindgen]
 pub fn precompute(pk_bytes: &[u8]) -> Result<JsValue, JsError> {
-    // Deserialize the proving key
     let pk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey = bincode::deserialize(pk_bytes)
         .map_err(|e| JsError::new(&format!("PK deserialization failed: {}", e)))?;
 
-    // Create the Prepare circuit
     let circuit = PrepareCircuit::default();
 
-    // Prove in memory (no file I/O)
     let (proof, instance, witness) = prove_circuit_in_memory(circuit, &pk)
         .map_err(|e| JsError::new(&format!("Prepare proving failed: {:?}", e)))?;
 
-    // Serialize results
     let result = PrecomputeResult {
         proof: bincode::serialize(&proof)
             .map_err(|e| JsError::new(&format!("Proof serialization failed: {}", e)))?,
@@ -134,32 +118,71 @@ pub fn precompute(pk_bytes: &[u8]) -> Result<JsValue, JsError> {
 }
 
 // ==========================================================================
-// 2. PRECOMPUTE — kept for backward compatibility but currently a no-op
-//    (Proving requires real witness data which comes from the TypeScript
-//     WitnessCalculator. Use prove_prepare/prove_show + present() instead.)
+// 2b. PRECOMPUTE FROM WITNESS
 // ==========================================================================
 
+#[wasm_bindgen]
+pub fn precompute_from_witness(
+    pk_bytes: &[u8],
+    witness_wtns_bytes: &[u8],
+) -> Result<JsValue, JsError> {
+    let pk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey = bincode::deserialize(pk_bytes)
+        .map_err(|e| JsError::new(&format!("PK deserialization failed: {}", e)))?;
+
+    let witness_scalars = parse_witness(witness_wtns_bytes)
+        .map_err(|e| JsError::new(&format!("Witness parsing failed: {:?}", e)))?;
+
+    let circuit = PrepareCircuit::with_witness(witness_scalars);
+
+    let (proof, instance, witness) = prove_circuit_in_memory(circuit, &pk)
+        .map_err(|e| JsError::new(&format!("Prepare proving failed: {:?}", e)))?;
+
+    let result = PrecomputeResult {
+        proof: bincode::serialize(&proof)
+            .map_err(|e| JsError::new(&format!("Proof serialization failed: {}", e)))?,
+        instance: bincode::serialize(&instance)
+            .map_err(|e| JsError::new(&format!("Instance serialization failed: {}", e)))?,
+        witness: bincode::serialize(&witness)
+            .map_err(|e| JsError::new(&format!("Witness serialization failed: {}", e)))?,
+    };
+
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|e| JsError::new(&format!("JS conversion failed: {}", e)))
+}
+
+#[wasm_bindgen]
+pub fn precompute_show_from_witness(
+    pk_bytes: &[u8],
+    witness_wtns_bytes: &[u8],
+) -> Result<JsValue, JsError> {
+    let pk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey = bincode::deserialize(pk_bytes)
+        .map_err(|e| JsError::new(&format!("PK deserialization failed: {}", e)))?;
+
+    let witness_scalars = parse_witness(witness_wtns_bytes)
+        .map_err(|e| JsError::new(&format!("Witness parsing failed: {:?}", e)))?;
+
+    let circuit = ShowCircuit::with_witness(witness_scalars);
+
+    let (proof, instance, witness) = prove_circuit_in_memory(circuit, &pk)
+        .map_err(|e| JsError::new(&format!("Show proving failed: {:?}", e)))?;
+
+    let result = PrecomputeResult {
+        proof: bincode::serialize(&proof)
+            .map_err(|e| JsError::new(&format!("Proof serialization failed: {}", e)))?,
+        instance: bincode::serialize(&instance)
+            .map_err(|e| JsError::new(&format!("Instance serialization failed: {}", e)))?,
+        witness: bincode::serialize(&witness)
+            .map_err(|e| JsError::new(&format!("Witness serialization failed: {}", e)))?,
+    };
+
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|e| JsError::new(&format!("JS conversion failed: {}", e)))
+}
+
 // ==========================================================================
-// 3. PRESENT — Reblind both pre-proved circuits with shared randomness
+// 3. PRESENT
 // ==========================================================================
 
-/// Execute a full presentation: generate shared blinds and reblind both the
-/// Prepare and Show proofs using the same randomness.
-///
-/// This is called each time the holder presents to a verifier. Both circuits
-/// must already be proved (via the TypeScript WitnessCalculator + prove path).
-/// This function generates fresh shared blinds and reblinds both proofs to
-/// ensure unlinkability while maintaining cryptographic linkage (comm_W_shared).
-///
-/// Arguments:
-/// - `prepare_pk_bytes`:       Serialized Prepare proving key
-/// - `prepare_instance_bytes`: Serialized Prepare instance (from prove step)
-/// - `prepare_witness_bytes`:  Serialized Prepare witness (from prove step)
-/// - `show_pk_bytes`:          Serialized Show proving key
-/// - `show_instance_bytes`:    Serialized Show instance (from prove step)
-/// - `show_witness_bytes`:     Serialized Show witness (from prove step)
-///
-/// Returns: PresentResult { prepare_proof, prepare_instance, show_proof, show_instance }
 #[wasm_bindgen]
 pub fn present(
     prepare_pk_bytes: &[u8],
@@ -169,7 +192,6 @@ pub fn present(
     show_instance_bytes: &[u8],
     show_witness_bytes: &[u8],
 ) -> Result<JsValue, JsError> {
-    // Deserialize Prepare components
     let prepare_pk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey =
         bincode::deserialize(prepare_pk_bytes)
             .map_err(|e| JsError::new(&format!("Prepare PK deserialization failed: {}", e)))?;
@@ -181,7 +203,6 @@ pub fn present(
         bincode::deserialize(prepare_witness_bytes)
             .map_err(|e| JsError::new(&format!("Prepare witness deserialization failed: {}", e)))?;
 
-    // Deserialize Show components
     let show_pk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey =
         bincode::deserialize(show_pk_bytes)
             .map_err(|e| JsError::new(&format!("Show PK deserialization failed: {}", e)))?;
@@ -191,18 +212,15 @@ pub fn present(
     let show_witness: spartan2::r1cs::R1CSWitness<E> = bincode::deserialize(show_witness_bytes)
         .map_err(|e| JsError::new(&format!("Show witness deserialization failed: {}", e)))?;
 
-    // Step A: Generate shared blinds
+    // Generate shared blinds
     let num_shared = prepare_instance.num_shared_rows();
     let shared_blinds: Vec<Scalar> = (0..num_shared)
         .map(|_| Scalar::random(&mut rand::thread_rng()))
         .collect();
 
-    // Step B: Reblind Prepare proof with shared blinds
-    // (PrepareCircuit::default() is fine — reblinding only needs public_values() and shared())
-    let prepare_circuit = PrepareCircuit::default();
+    // Reblind Prepare proof
     let (reblinded_prepare_proof, reblinded_prepare_instance, _reblinded_prepare_witness) =
         reblind_in_memory(
-            prepare_circuit,
             &prepare_pk,
             prepare_instance,
             prepare_witness,
@@ -210,19 +228,11 @@ pub fn present(
         )
         .map_err(|e| JsError::new(&format!("Prepare reblind failed: {:?}", e)))?;
 
-    // Step C: Reblind Show proof with the same shared blinds
-    let show_circuit = ShowCircuit::default();
+    // Reblind Show proof with same shared blinds
     let (reblinded_show_proof, reblinded_show_instance, _reblinded_show_witness) =
-        reblind_in_memory(
-            show_circuit,
-            &show_pk,
-            show_instance,
-            show_witness,
-            &shared_blinds,
-        )
-        .map_err(|e| JsError::new(&format!("Show reblind failed: {:?}", e)))?;
+        reblind_in_memory(&show_pk, show_instance, show_witness, &shared_blinds)
+            .map_err(|e| JsError::new(&format!("Show reblind failed: {:?}", e)))?;
 
-    // Serialize results (blinds are NOT returned — they're ephemeral)
     let result = PresentResult {
         prepare_proof: bincode::serialize(&reblinded_prepare_proof)
             .map_err(|e| JsError::new(&format!("Prepare proof serialization failed: {}", e)))?,
@@ -239,21 +249,9 @@ pub fn present(
 }
 
 // ==========================================================================
-// 4. VERIFY — Verify both proofs + commitment check (per presentation)
+// 4. VERIFY
 // ==========================================================================
 
-/// Complete verification: verify both Prepare and Show proofs and compare their
-/// shared commitments (comm_W_shared) to ensure they use the same private data.
-///
-/// Arguments:
-/// - `prepare_proof_bytes`:    Serialized Prepare proof (from present())
-/// - `prepare_vk_bytes`:       Serialized Prepare verifying key (from setup())
-/// - `prepare_instance_bytes`: Serialized Prepare instance (from present())
-/// - `show_proof_bytes`:       Serialized Show proof (from present())
-/// - `show_vk_bytes`:          Serialized Show verifying key (from setup())
-/// - `show_instance_bytes`:    Serialized Show instance (from present())
-///
-/// Returns: VerifyResult { valid, prepare_public_values, show_public_values, error? }
 #[wasm_bindgen]
 pub fn verify(
     prepare_proof_bytes: &[u8],
@@ -263,7 +261,6 @@ pub fn verify(
     show_vk_bytes: &[u8],
     show_instance_bytes: &[u8],
 ) -> Result<JsValue, JsError> {
-    // Deserialize all components
     let prepare_proof: R1CSSNARK<E> = bincode::deserialize(prepare_proof_bytes)
         .map_err(|e| JsError::new(&format!("Prepare proof deserialization failed: {}", e)))?;
     let prepare_vk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::VerifierKey =
@@ -283,7 +280,7 @@ pub fn verify(
         bincode::deserialize(show_instance_bytes)
             .map_err(|e| JsError::new(&format!("Show instance deserialization failed: {}", e)))?;
 
-    // Step A: Compare shared commitments
+    // Compare shared commitments
     let commitment_valid = prepare_instance.comm_W_shared == show_instance.comm_W_shared;
     if !commitment_valid {
         let result = VerifyResult {
@@ -296,7 +293,7 @@ pub fn verify(
             .map_err(|e| JsError::new(&format!("JS conversion failed: {}", e)));
     }
 
-    // Step B: Verify Prepare proof
+    // Verify Prepare proof
     let prepare_pv = match prepare_proof.verify(&prepare_vk) {
         Ok(pv) => pv,
         Err(e) => {
@@ -311,7 +308,7 @@ pub fn verify(
         }
     };
 
-    // Step C: Verify Show proof
+    // Verify Show proof
     let show_pv = match show_proof.verify(&show_vk) {
         Ok(pv) => pv,
         Err(e) => {
@@ -326,7 +323,6 @@ pub fn verify(
         }
     };
 
-    // All checks passed
     let result = VerifyResult {
         valid: true,
         prepare_public_values: prepare_pv.iter().map(|s| format!("{:?}", s)).collect(),
@@ -338,10 +334,9 @@ pub fn verify(
 }
 
 // ==========================================================================
-// Backward-compatible individual functions (deprecated — use above instead)
+// Backward-compatible functions
 // ==========================================================================
 
-/// Setup Prepare circuit keys only (use setup() instead)
 #[wasm_bindgen]
 pub fn setup_prepare() -> Result<JsValue, JsError> {
     let circuit = PrepareCircuit::default();
@@ -358,7 +353,6 @@ pub fn setup_prepare() -> Result<JsValue, JsError> {
         .map_err(|e| JsError::new(&format!("JS conversion failed: {}", e)))
 }
 
-/// Setup Show circuit keys only (use setup() instead)
 #[wasm_bindgen]
 pub fn setup_show() -> Result<JsValue, JsError> {
     let circuit = ShowCircuit::default();
@@ -375,7 +369,6 @@ pub fn setup_show() -> Result<JsValue, JsError> {
         .map_err(|e| JsError::new(&format!("JS conversion failed: {}", e)))
 }
 
-/// Verify a single proof (use verify() instead)
 #[wasm_bindgen]
 pub fn verify_single(proof_bytes: &[u8], vk_bytes: &[u8]) -> Result<JsValue, JsError> {
     let proof: R1CSSNARK<E> = bincode::deserialize(proof_bytes)
@@ -405,7 +398,6 @@ pub fn verify_single(proof_bytes: &[u8], vk_bytes: &[u8]) -> Result<JsValue, JsE
     }
 }
 
-/// Compare comm_W_shared between two instances (use verify() instead)
 #[wasm_bindgen]
 pub fn compare_comm_w_shared(
     instance1_bytes: &[u8],
@@ -416,4 +408,118 @@ pub fn compare_comm_w_shared(
     let instance2: spartan2::r1cs::SplitR1CSInstance<E> = bincode::deserialize(instance2_bytes)
         .map_err(|e| JsError::new(&format!("Instance2 deserialization failed: {}", e)))?;
     Ok(instance1.comm_W_shared == instance2.comm_W_shared)
+}
+
+// ==========================================================================
+// RS256 — Single-circuit RSA signature verification
+// ==========================================================================
+
+#[derive(Serialize, Deserialize)]
+pub struct Rs256SetupResult {
+    pub pk: Vec<u8>,
+    pub vk: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Rs256ProveResult {
+    pub proof: Vec<u8>,
+    pub instance: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Rs256VerifyResult {
+    pub valid: bool,
+    pub public_values: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// Setup RS256 circuit keys.
+#[wasm_bindgen]
+pub fn setup_rs256() -> Result<JsValue, JsError> {
+    let circuit = Rs256Circuit::default();
+    let (pk, vk) = R1CSSNARK::<E>::setup(circuit)
+        .map_err(|e| JsError::new(&format!("RS256 setup failed: {:?}", e)))?;
+
+    let result = Rs256SetupResult {
+        pk: bincode::serialize(&pk)
+            .map_err(|e| JsError::new(&format!("PK serialization failed: {}", e)))?,
+        vk: bincode::serialize(&vk)
+            .map_err(|e| JsError::new(&format!("VK serialization failed: {}", e)))?,
+    };
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|e| JsError::new(&format!("JS conversion failed: {}", e)))
+}
+
+// Global storage for the RS256 proving key to avoid re-deserializing 744MB on every prove call
+// and to allow freeing the input byte buffer before proving starts.
+use std::sync::Mutex;
+static RS256_PK: Mutex<Option<<R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey>> =
+    Mutex::new(None);
+
+/// Load and deserialize the RS256 proving key into WASM memory.
+/// Call this once during init. The PK bytes can then be freed on the JS side.
+#[wasm_bindgen]
+pub fn load_rs256_pk(pk_bytes: &[u8]) -> Result<(), JsError> {
+    let pk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey = bincode::deserialize(pk_bytes)
+        .map_err(|e| JsError::new(&format!("PK deserialization failed: {}", e)))?;
+    let mut guard = RS256_PK.lock().unwrap();
+    *guard = Some(pk);
+    Ok(())
+}
+
+/// Prove RS256 circuit with externally generated witness.
+/// Requires load_rs256_pk() to be called first.
+#[wasm_bindgen]
+pub fn prove_rs256(witness_wtns_bytes: &[u8]) -> Result<JsValue, JsError> {
+    let guard = RS256_PK.lock().unwrap();
+    let pk = guard
+        .as_ref()
+        .ok_or_else(|| JsError::new("RS256 PK not loaded. Call load_rs256_pk() first."))?;
+
+    let witness_scalars = parse_witness(witness_wtns_bytes)
+        .map_err(|e| JsError::new(&format!("Witness parsing failed: {:?}", e)))?;
+
+    let circuit = Rs256Circuit::with_witness(witness_scalars);
+
+    let (proof, instance, _witness) = prove_circuit_in_memory(circuit, pk)
+        .map_err(|e| JsError::new(&format!("RS256 proving failed: {:?}", e)))?;
+
+    let result = Rs256ProveResult {
+        proof: bincode::serialize(&proof)
+            .map_err(|e| JsError::new(&format!("Proof serialization failed: {}", e)))?,
+        instance: bincode::serialize(&instance)
+            .map_err(|e| JsError::new(&format!("Instance serialization failed: {}", e)))?,
+    };
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|e| JsError::new(&format!("JS conversion failed: {}", e)))
+}
+
+/// Verify RS256 proof.
+#[wasm_bindgen]
+pub fn verify_rs256(proof_bytes: &[u8], vk_bytes: &[u8]) -> Result<JsValue, JsError> {
+    let proof: R1CSSNARK<E> = bincode::deserialize(proof_bytes)
+        .map_err(|e| JsError::new(&format!("Proof deserialization failed: {}", e)))?;
+    let vk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::VerifierKey = bincode::deserialize(vk_bytes)
+        .map_err(|e| JsError::new(&format!("VK deserialization failed: {}", e)))?;
+
+    match proof.verify(&vk) {
+        Ok(public_values) => {
+            let result = Rs256VerifyResult {
+                valid: true,
+                public_values: public_values.iter().map(|s| format!("{:?}", s)).collect(),
+                error: None,
+            };
+            serde_wasm_bindgen::to_value(&result)
+                .map_err(|e| JsError::new(&format!("JS conversion failed: {}", e)))
+        }
+        Err(e) => {
+            let result = Rs256VerifyResult {
+                valid: false,
+                public_values: vec![],
+                error: Some(format!("Verification failed: {:?}", e)),
+            };
+            serde_wasm_bindgen::to_value(&result)
+                .map_err(|e| JsError::new(&format!("JS conversion failed: {}", e)))
+        }
+    }
 }
