@@ -148,6 +148,11 @@ jobs:
                   cp ../openac-sdk/wasm/pkg/openac_wasm_bg.wasm.d.ts src/wasm/ 2>/dev/null || true
                   cp ../openac-sdk/wasm/pkg/openac_wasm_bg.wasm public/
 
+                  # wasm-bindgen-rayon worker helpers (snippets dir)
+                  if [ -d ../openac-sdk/wasm/pkg/snippets ]; then
+                    cp -r ../openac-sdk/wasm/pkg/snippets src/wasm/
+                  fi
+
                   # Witness calculator (CJS → ESM patch)
                   cp ../circom/build/rs256/rs256_js/witness_calculator.js src/assets/
                   sed -i 's/module\.exports = async function builder/export default async function builder/' \
