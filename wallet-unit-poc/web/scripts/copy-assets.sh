@@ -17,6 +17,10 @@ cp "$SDK_DIR/wasm/pkg/openac_wasm.js"      "$WEB_DEMO/src/wasm/"
 cp "$SDK_DIR/wasm/pkg/openac_wasm.d.ts"    "$WEB_DEMO/src/wasm/"
 cp "$SDK_DIR/wasm/pkg/openac_wasm_bg.wasm.d.ts" "$WEB_DEMO/src/wasm/" 2>/dev/null || true
 cp "$SDK_DIR/wasm/pkg/openac_wasm_bg.wasm" "$WEB_DEMO/public/"
+if [ -d "$SDK_DIR/wasm/pkg/snippets" ]; then
+  cp -r "$SDK_DIR/wasm/pkg/snippets" "$WEB_DEMO/src/wasm/"
+  echo "   ✓ snippets/ → src/wasm/snippets/"
+fi
 echo "   ✓ openac_wasm.js → src/wasm/"
 echo "   ✓ openac_wasm_bg.wasm → public/"
 
@@ -31,7 +35,7 @@ sed -i '' 's/module\.exports = async function builder/export default async funct
   "$WEB_DEMO/src/assets/witness_calculator.js"
 echo "   ✓ witness_calculator.js → src/assets/ (ESM patched)"
 
-# 3. Symlink keys directory
+# 3. Set up keys directory (local symlink or download from GitHub release)
 echo ""
 echo "3. Setting up keys directory..."
 if [ -d "$SPARTAN_DIR/keys" ]; then
@@ -39,8 +43,19 @@ if [ -d "$SPARTAN_DIR/keys" ]; then
   ln -s "$SPARTAN_DIR/keys" "$WEB_DEMO/public/keys"
   echo "   ✓ keys/ → public/keys (symlink)"
 else
-  echo "   ⚠ Keys directory not found at $SPARTAN_DIR/keys"
-  echo "     Run 'cargo run -- rs256 setup' in ecdsa-spartan2/ first"
+  echo "   Keys not found locally, downloading from GitHub release..."
+  mkdir -p "$WEB_DEMO/public/keys"
+  RELEASE_URL="https://github.com/zkmopro/zkID/releases/download/latest/ecdsa-spartan2-keys.zip"
+  TMPZIP="$(mktemp)"
+  TMPDIR_EXTRACT="$(mktemp -d)"
+  curl -L --fail -o "$TMPZIP" "$RELEASE_URL"
+  unzip -o "$TMPZIP" \
+    'wallet-unit-poc/ecdsa-spartan2/keys/rs256_proving.key' \
+    'wallet-unit-poc/ecdsa-spartan2/keys/rs256_verifying.key' \
+    -d "$TMPDIR_EXTRACT"
+  cp "$TMPDIR_EXTRACT/wallet-unit-poc/ecdsa-spartan2/keys/"*.key "$WEB_DEMO/public/keys/"
+  rm -rf "$TMPZIP" "$TMPDIR_EXTRACT"
+  echo "   ✓ Keys downloaded from GitHub release to public/keys/"
 fi
 
 echo ""

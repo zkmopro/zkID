@@ -125,7 +125,7 @@ export async function initWasm(
   // 3. Load RS256 verifying key (small, kept in JS)
   onProgress?.("Loading RS256 verifying key...");
   t = performance.now();
-  const vkResp = await fetch("/keys/default_rs256_verifying.key");
+  const vkResp = await fetch("/keys/rs256_verifying.key");
   if (!vkResp.ok) {
     throw new Error(`Failed to load VK: ${vkResp.status}`);
   }
@@ -140,7 +140,7 @@ export async function initWasm(
   //    then release the JS buffer to save memory.
   onProgress?.("Loading RS256 proving key (~744MB)...");
   t = performance.now();
-  const pkResp = await fetch("/keys/default_rs256_proving.key");
+  const pkResp = await fetch("/keys/rs256_proving.key");
   if (!pkResp.ok) {
     throw new Error(
       `Failed to load PK: ${pkResp.status}. ` +
