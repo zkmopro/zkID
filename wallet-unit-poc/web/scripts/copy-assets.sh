@@ -17,7 +17,8 @@ cp "$SDK_DIR/wasm/pkg/openac_wasm.js"      "$WEB_DEMO/src/wasm/"
 cp "$SDK_DIR/wasm/pkg/openac_wasm.d.ts"    "$WEB_DEMO/src/wasm/"
 cp "$SDK_DIR/wasm/pkg/openac_wasm_bg.wasm.d.ts" "$WEB_DEMO/src/wasm/" 2>/dev/null || true
 cp "$SDK_DIR/wasm/pkg/openac_wasm_bg.wasm" "$WEB_DEMO/public/"
-cp "$SDK_DIR/wasm/pkg/package.json"        "$WEB_DEMO/src/wasm/"
+# package.json needed for workerHelpers.js import('../../..') resolution
+echo '{"type":"module","main":"openac_wasm.js","sideEffects":["./snippets/*"]}' > "$WEB_DEMO/src/wasm/package.json"
 if [ -d "$SDK_DIR/wasm/pkg/snippets" ]; then
   cp -r "$SDK_DIR/wasm/pkg/snippets" "$WEB_DEMO/src/wasm/"
   echo "   ✓ snippets/ → src/wasm/snippets/"
