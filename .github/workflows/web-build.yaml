@@ -1,0 +1,164 @@
+name: web-build
+
+on:
+    push:
+        branches:
+            - main
+        paths:
+            - "wallet-unit-poc/web/**"
+            - "wallet-unit-poc/openac-sdk/wasm/**"
+            - "wallet-unit-poc/ecdsa-spartan2/**"
+            - "wallet-unit-poc/circom/circuits/**"
+            - ".github/workflows/web-build.yaml"
+    pull_request:
+        paths:
+            - "wallet-unit-poc/web/**"
+            - "wallet-unit-poc/openac-sdk/wasm/**"
+            - "wallet-unit-poc/ecdsa-spartan2/**"
+            - "wallet-unit-poc/circom/circuits/**"
+            - ".github/workflows/web-build.yaml"
+    workflow_dispatch:
+
+jobs:
+    compile-circuits:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install system dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install --yes \
+                    build-essential \
+                    libgmp-dev \
+                    libsodium-dev \
+                    nasm \
+                    nlohmann-json3-dev
+
+            - name: Download Circom Binary v2.2.3
+              run: |
+                  wget -qO /home/runner/work/circom https://github.com/iden3/circom/releases/download/v2.2.3/circom-linux-amd64
+                  chmod +x /home/runner/work/circom
+                  sudo mv /home/runner/work/circom /bin/circom
+
+            - name: Install JS dependencies
+              run: cd wallet-unit-poc/circom && yarn
+
+            - name: Compile RS256 circuit
+              run: cd wallet-unit-poc/circom && yarn compile:rs256
+
+            - name: Upload circom WASM artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: circom-wasm
+                  path: |
+                      wallet-unit-poc/circom/build/rs256/rs256_js/rs256.wasm
+                      wallet-unit-poc/circom/build/rs256/rs256_js/witness_calculator.js
+                  retention-days: 1
+
+    build-wasm:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Set up Rust nightly
+              uses: dtolnay/rust-toolchain@nightly
+              with:
+                  targets: wasm32-unknown-unknown
+                  components: rust-src
+
+            - name: Cache Cargo registry and git
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                  key: wasm-cargo-${{ hashFiles('wallet-unit-poc/openac-sdk/wasm/Cargo.toml', 'wallet-unit-poc/ecdsa-spartan2/Cargo.toml') }}
+                  restore-keys: |
+                      wasm-cargo-
+
+            - name: Cache wasm-bindgen-cli
+              uses: actions/cache@v4
+              with:
+                  path: ~/.cargo/bin/wasm-bindgen
+                  key: wasm-bindgen-cli-0.2
+
+            - name: Install wasm-bindgen-cli
+              run: command -v wasm-bindgen || cargo install wasm-bindgen-cli
+
+            - name: Build WASM
+              run: |
+                  cd wallet-unit-poc/openac-sdk/wasm
+                  cargo +nightly build --target wasm32-unknown-unknown --release -Z build-std=panic_abort,std
+
+            - name: Generate JS bindings
+              run: |
+                  cd wallet-unit-poc/openac-sdk/wasm
+                  wasm-bindgen --target web --out-dir pkg \
+                    target/wasm32-unknown-unknown/release/openac_wasm.wasm
+
+            - name: Upload WASM package
+              uses: actions/upload-artifact@v4
+              with:
+                  name: wasm-pkg
+                  path: wallet-unit-poc/openac-sdk/wasm/pkg/
+                  retention-days: 1
+
+    build-web:
+        needs: [compile-circuits, build-wasm]
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 9
+
+            - name: Download WASM package
+              uses: actions/download-artifact@v4
+              with:
+                  name: wasm-pkg
+                  path: wallet-unit-poc/openac-sdk/wasm/pkg/
+
+            - name: Download circom WASM artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  name: circom-wasm
+                  path: wallet-unit-poc/circom/build/rs256/rs256_js/
+
+            - name: Copy WASM assets to web app
+              run: |
+                  cd wallet-unit-poc/web
+                  mkdir -p src/wasm src/assets public
+
+                  # WASM module
+                  cp ../openac-sdk/wasm/pkg/openac_wasm.js      src/wasm/
+                  cp ../openac-sdk/wasm/pkg/openac_wasm.d.ts    src/wasm/
+                  cp ../openac-sdk/wasm/pkg/openac_wasm_bg.wasm.d.ts src/wasm/ 2>/dev/null || true
+                  cp ../openac-sdk/wasm/pkg/openac_wasm_bg.wasm public/
+
+                  # Witness calculator (CJS → ESM patch)
+                  cp ../circom/build/rs256/rs256_js/witness_calculator.js src/assets/
+                  sed -i 's/module\.exports = async function builder/export default async function builder/' \
+                    src/assets/witness_calculator.js
+
+                  # Circom WASM for browser witness generation
+                  cp ../circom/build/rs256/rs256_js/rs256.wasm public/assets/rs256.wasm || \
+                    (mkdir -p public/assets && cp ../circom/build/rs256/rs256_js/rs256.wasm public/assets/)
+
+            - name: Install dependencies
+              run: cd wallet-unit-poc/web && pnpm install
+
+            - name: Build web app
+              run: cd wallet-unit-poc/web && pnpm build
