@@ -4,39 +4,61 @@
 //! using RSA-SHA256 signatures, extracts the user's public key from the cert DER
 //! in-circuit, and proves non-revocation via a Sparse Merkle Tree.
 
-use crate::{paths::PathConfig, utils::parse_witness, Scalar, E};
-use base64::Engine;
+use super::synthesize_witness_only;
+use crate::{paths::PathConfig, Scalar, E};
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use circom_scotia::{reader::load_r1cs, synthesize};
+use ff::Field;
+use spartan2::traits::circuit::SpartanCircuit;
+use std::{
+    any::type_name,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
+
+#[cfg(feature = "native")]
+use crate::utils::parse_witness;
+#[cfg(feature = "native")]
+use base64::Engine;
+#[cfg(feature = "native")]
 use const_oid::db::rfc4519::*;
+#[cfg(feature = "native")]
 use der::Encode;
+#[cfg(feature = "native")]
 use der::{
     asn1::{PrintableStringRef, Utf8StringRef},
     Decode,
 };
-use ff::Field;
+#[cfg(feature = "native")]
 use num_bigint::BigUint;
+#[cfg(feature = "native")]
 use rsa::pkcs8::DecodePublicKey;
+#[cfg(feature = "native")]
 use rsa::signature::Verifier;
+#[cfg(feature = "native")]
 use rsa::traits::PublicKeyParts;
+#[cfg(feature = "native")]
 use rsa::{pkcs1v15::VerifyingKey, RsaPublicKey};
+#[cfg(feature = "native")]
 use serde::Deserialize;
+#[cfg(feature = "native")]
 use sha2::Sha256;
-use spartan2::traits::circuit::SpartanCircuit;
+#[cfg(feature = "native")]
 use std::{
-    any::type_name,
     fs::File,
     io::Read,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    path::Path,
     time::Instant,
 };
+#[cfg(feature = "native")]
 use tracing::info;
+#[cfg(feature = "native")]
 use x509_cert::{
     der::{Reader, SliceReader, Tag, TagNumber},
     Certificate,
 };
 
+#[cfg(feature = "native")]
 witnesscalc_adapter::witness!(rs256);
 
 /// RS256 Circuit for single-stage RSA signature verification and age proof.
@@ -56,6 +78,7 @@ pub struct Rs256Circuit {
     cached_witness: Arc<Mutex<Option<Vec<Scalar>>>>,
 }
 
+#[cfg(feature = "native")]
 /// Response from HiPKI `/sign` API with `signatureType: "PKCS1"`.
 #[derive(Deserialize)]
 pub struct CardSignResponse {
@@ -73,6 +96,7 @@ pub struct CardSignResponse {
     _version: String,
 }
 
+#[cfg(feature = "native")]
 /// Intermediate result from per-certificate RSA input generation.
 struct RsaCircuitInput {
     message: Vec<String>,
@@ -81,8 +105,8 @@ struct RsaCircuitInput {
     rsa_signature: Vec<String>,
 }
 
+#[cfg(feature = "native")]
 /// DER byte offsets for in-circuit modulus extraction.
-
 #[derive(Debug)]
 struct CertOffsets {
     modulus_offset: usize,     // first real modulus byte (after sign byte)
@@ -91,6 +115,8 @@ struct CertOffsets {
     subject_dn_length: usize,  // length of subject DN
     serial_number_offset: usize, // where serial number starts
 }
+
+#[cfg(feature = "native")]
 // === HiPKI /pkcs11info?withcert=true response structs ===
 
 /// A certificate entry from the PKCS#11 token.
@@ -108,6 +134,7 @@ pub struct Pkcs11CertEntry {
     pub issuer_dn: Option<String>,
 }
 
+#[cfg(feature = "native")]
 /// Token info containing certificates and keys.
 #[derive(Deserialize, Debug)]
 pub struct Pkcs11TokenInfo {
@@ -117,6 +144,7 @@ pub struct Pkcs11TokenInfo {
     pub serial_number: Option<String>,
 }
 
+#[cfg(feature = "native")]
 /// A PKCS#11 slot with optional token.
 #[derive(Deserialize, Debug)]
 pub struct Pkcs11Slot {
@@ -124,6 +152,7 @@ pub struct Pkcs11Slot {
     pub token: Option<Pkcs11TokenInfo>,
 }
 
+#[cfg(feature = "native")]
 /// Response from HiPKI `/pkcs11info?withcert=true` API.
 #[derive(Deserialize, Debug)]
 pub struct Pkcs11InfoResponse {
@@ -160,17 +189,40 @@ impl Rs256Circuit {
         }
     }
 
+    /// Create with pre-computed witness (for WASM usage where witness is generated externally).
+    pub fn with_witness(witness: Vec<Scalar>) -> Self {
+        Self {
+            path_config: PathConfig::default(),
+            input_path: None,
+            cached_witness: Arc::new(Mutex::new(Some(witness))),
+        }
+    }
+
+    /// Get the R1CS file path.
+    fn r1cs_path(&self) -> PathBuf {
+        self.path_config.r1cs_path("rs256")
+    }
+
+    /// Get cached witness (returns AssignmentMissing if no witness is cached).
+    /// In WASM builds, witness must be provided via `with_witness()`.
+    #[cfg(not(feature = "native"))]
+    fn get_or_generate_witness(&self) -> Result<Vec<Scalar>, SynthesisError> {
+        let cache = self.cached_witness.lock().unwrap();
+        if let Some(ref witness) = *cache {
+            return Ok(witness.clone());
+        }
+        Err(SynthesisError::AssignmentMissing)
+    }
+}
+
+#[cfg(feature = "native")]
+impl Rs256Circuit {
     /// Resolve the input JSON path using PathConfig.
     fn resolve_input_json(&self) -> PathBuf {
         self.input_path
             .as_ref()
             .map(|p| self.path_config.resolve(p))
             .unwrap_or_else(|| self.path_config.input_json("rs256"))
-    }
-
-    /// Get the R1CS file path.
-    fn r1cs_path(&self) -> PathBuf {
-        self.path_config.r1cs_path("rs256")
     }
 
     // === Certificate extraction from PKCS#11 response ===
@@ -700,6 +752,9 @@ impl Rs256Circuit {
     }
 }
 
+/// 17 rsaModulus limbs + smtRoot + serialNumber + subjectDNHash + TBS
+const RS256_NUM_PUBLIC: usize = 21;
+
 impl SpartanCircuit<E> for Rs256Circuit {
     fn synthesize<CS: ConstraintSystem<Scalar>>(
         &self,
@@ -725,8 +780,15 @@ impl SpartanCircuit<E> for Rs256Circuit {
         // Generate witness for prove phase
         let witness = self.get_or_generate_witness()?;
 
-        let r1cs = load_r1cs(&r1cs_path);
-        synthesize(cs, r1cs.unwrap(), Some(witness))?;
+        // Try to load R1CS; fall back to witness-only mode (for WASM where R1CS is unavailable)
+        match load_r1cs::<Scalar>(&r1cs_path) {
+            Ok(r1cs) => {
+                synthesize(cs, r1cs, Some(witness))?;
+            }
+            Err(_) => {
+                synthesize_witness_only(cs, &witness, RS256_NUM_PUBLIC)?;
+            }
+        }
         Ok(())
     }
 
@@ -741,7 +803,7 @@ impl SpartanCircuit<E> for Rs256Circuit {
 
     /// RS256 circuit public inputs
     fn public_values(&self) -> Result<Vec<Scalar>, SynthesisError> {
-        let num_public = 21; // 17 (rsaModulus limbs) + 1 (smtRoot) + 1 (serialNumber) + 1 (subjectDNHash) + 1 (TBS)
+        let num_public = RS256_NUM_PUBLIC;
         let witness = self.get_or_generate_witness().ok();
 
         let mut values = Vec::with_capacity(num_public);
@@ -764,7 +826,7 @@ impl SpartanCircuit<E> for Rs256Circuit {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
 

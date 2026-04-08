@@ -1,9 +1,12 @@
 use bellpepper_core::SynthesisError;
-use num_bigint::BigInt;
 
 use crate::Scalar;
 
+#[cfg(feature = "native")]
+use num_bigint::BigInt;
+
 /// Convert a single BigInt to Scalar
+#[cfg(feature = "native")]
 pub fn bigint_to_scalar(bigint_val: BigInt) -> Result<Scalar, SynthesisError> {
     let bytes = bigint_val.to_bytes_le().1;
 
@@ -20,6 +23,7 @@ pub fn bigint_to_scalar(bigint_val: BigInt) -> Result<Scalar, SynthesisError> {
         .ok_or(SynthesisError::Unsatisfiable)
 }
 
+#[cfg(feature = "native")]
 pub fn convert_bigint_to_scalar(
     bigint_witness: Vec<BigInt>,
 ) -> Result<Vec<Scalar>, SynthesisError> {

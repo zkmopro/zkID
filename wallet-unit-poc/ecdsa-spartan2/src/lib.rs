@@ -10,11 +10,14 @@ use spartan2::{provider::T256HyraxEngine, traits::Engine};
 pub type E = T256HyraxEngine;
 pub type Scalar = <E as Engine>::Scalar;
 
+pub mod circuit_size;
 pub mod circuits;
+#[cfg(feature = "native")]
 pub mod hipki_client;
 pub mod paths;
 pub mod prover;
 pub mod setup;
+#[cfg(feature = "native")]
 pub mod smt_client;
 pub mod utils;
 
@@ -29,4 +32,6 @@ pub use setup::{
     load_instance, load_proof, load_proving_key, load_shared_blinds, load_verifying_key,
     load_witness, save_keys, setup_circuit_keys, setup_circuit_keys_no_save,
 };
+pub use utils::parse_witness;
+#[cfg(feature = "native")]
 pub use utils::{bigint_to_scalar, convert_bigint_to_scalar};

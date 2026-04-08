@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WEB_DEMO="$(dirname "$SCRIPT_DIR")"
 SDK_DIR="$WEB_DEMO/../openac-sdk"
-SPARTAN_DIR="$WEB_DEMO/../ecdsa-spartan2-jwt"
+SPARTAN_DIR="$WEB_DEMO/../ecdsa-spartan2"
 
 echo "=== zkID Web Demo (WASM) — Asset Setup ==="
 echo ""
@@ -40,7 +40,7 @@ if [ -d "$SPARTAN_DIR/keys" ]; then
   echo "   ✓ keys/ → public/keys (symlink)"
 else
   echo "   ⚠ Keys directory not found at $SPARTAN_DIR/keys"
-  echo "     Run 'cargo run -- rs256 setup' in ecdsa-spartan2-jwt/ first"
+  echo "     Run 'cargo run -- rs256 setup' in ecdsa-spartan2/ first"
 fi
 
 echo ""

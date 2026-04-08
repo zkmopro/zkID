@@ -1,9 +1,11 @@
 use std::{
     fs::{create_dir_all, File},
-    io::{BufReader, Cursor, Write},
+    io::{BufReader, Write},
     path::Path,
     time::Instant,
 };
+#[cfg(feature = "native")]
+use std::io::Cursor;
 
 use spartan2::{
     r1cs::{R1CSWitness, SplitR1CSInstance},
@@ -13,6 +15,7 @@ use spartan2::{
 use tracing::info;
 
 use crate::E;
+#[cfg(feature = "native")]
 use memmap2::MmapOptions;
 
 // Re-export key constants from paths module for convenience
@@ -77,6 +80,7 @@ pub fn load_keys(
     Ok((pk, vk))
 }
 
+#[cfg(feature = "native")]
 pub fn load_proving_key(
     pk_path: impl AsRef<Path>,
 ) -> Result<<R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey, Box<dyn std::error::Error>> {
@@ -87,6 +91,17 @@ pub fn load_proving_key(
     Ok(pk)
 }
 
+#[cfg(not(feature = "native"))]
+pub fn load_proving_key(
+    pk_path: impl AsRef<Path>,
+) -> Result<<R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey, Box<dyn std::error::Error>> {
+    let pk_file = File::open(pk_path.as_ref())?;
+    let pk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey =
+        bincode::deserialize_from(&mut BufReader::new(pk_file))?;
+    Ok(pk)
+}
+
+#[cfg(feature = "native")]
 pub fn load_verifying_key(
     vk_path: impl AsRef<Path>,
 ) -> Result<<R1CSSNARK<E> as R1CSSNARKTrait<E>>::VerifierKey, Box<dyn std::error::Error>> {
@@ -94,6 +109,16 @@ pub fn load_verifying_key(
     let vk_mmap = unsafe { MmapOptions::new().map(&vk_file)? };
     let vk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::VerifierKey =
         bincode::deserialize_from(Cursor::new(&vk_mmap[..]))?;
+    Ok(vk)
+}
+
+#[cfg(not(feature = "native"))]
+pub fn load_verifying_key(
+    vk_path: impl AsRef<Path>,
+) -> Result<<R1CSSNARK<E> as R1CSSNARKTrait<E>>::VerifierKey, Box<dyn std::error::Error>> {
+    let vk_file = File::open(vk_path.as_ref())?;
+    let vk: <R1CSSNARK<E> as R1CSSNARKTrait<E>>::VerifierKey =
+        bincode::deserialize_from(&mut BufReader::new(vk_file))?;
     Ok(vk)
 }
 
