@@ -163,6 +163,7 @@ jobs:
                   cp ../openac-sdk/wasm/pkg/openac_wasm.d.ts    src/wasm/
                   cp ../openac-sdk/wasm/pkg/openac_wasm_bg.wasm.d.ts src/wasm/ 2>/dev/null || true
                   cp ../openac-sdk/wasm/pkg/openac_wasm_bg.wasm public/
+                  cp ../openac-sdk/wasm/pkg/package.json         src/wasm/
 
                   # wasm-bindgen-rayon worker helpers (snippets dir)
                   if [ -d ../openac-sdk/wasm/pkg/snippets ]; then
