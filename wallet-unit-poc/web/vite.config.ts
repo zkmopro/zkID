@@ -5,6 +5,9 @@ export default defineConfig({
   build: {
     target: "es2020",
   },
+  worker: {
+    format: "es",
+  },
   optimizeDeps: {
     esbuildOptions: {
       target: "es2020",
