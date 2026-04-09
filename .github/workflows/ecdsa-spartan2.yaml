@@ -69,28 +69,29 @@ jobs:
                   cd wallet-unit-poc/mobile
                   cargo test --release --no-default-features --lib
 
-            - name: Create ZIP of keys
-              run: zip -r ecdsa-spartan2-keys.zip wallet-unit-poc/ecdsa-spartan2/keys
-            
+            - name: Create ZIP of proving key
+              run: |
+                cd wallet-unit-poc/ecdsa-spartan2/keys
+                zip rs256_proving.key.zip rs256_proving.key
+
+            - name: Create ZIP of verifying key
+              run: |
+                cd wallet-unit-poc/ecdsa-spartan2/keys
+                zip rs256_verifying.key.zip rs256_verifying.key
+
             - name: Create ZIP of R1CS artifact
               run: |
                 cd wallet-unit-poc/circom/build/rs256/rs256_js
                 zip -r rs256.r1cs.zip rs256.r1cs
 
-            - name: Upload keys ZIP to GitHub Release
+            - name: Upload release artifacts
               if: github.event_name == 'push' && github.ref == 'refs/heads/main'
               uses: softprops/action-gh-release@v2
               with:
                   tag_name: latest
-                  files: ./ecdsa-spartan2-keys.zip
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            
-            - name: Upload R1CS artifact to GitHub Release
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-              uses: softprops/action-gh-release@v2
-              with:
-                  tag_name: latest
-                  files: wallet-unit-poc/circom/build/rs256/rs256_js/rs256.r1cs.zip
+                  files: |
+                    wallet-unit-poc/ecdsa-spartan2/keys/rs256_proving.key.zip
+                    wallet-unit-poc/ecdsa-spartan2/keys/rs256_verifying.key.zip
+                    wallet-unit-poc/circom/build/rs256/rs256_js/rs256.r1cs.zip
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
