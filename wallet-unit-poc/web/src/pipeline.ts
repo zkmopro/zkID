@@ -122,43 +122,25 @@ export async function initWasm(
     durationMs: performance.now() - t,
   });
 
-  // 3. Load RS256 verifying key (small, kept in JS)
-  onProgress?.("Loading RS256 verifying key...");
+  // 3. Generate RS256 keys (setup) in WASM
+  //    Keys depend on the circuit structure and must be generated per session.
+  onProgress?.("Generating RS256 keys (setup)...");
   t = performance.now();
-  const vkResp = await fetch("/keys/rs256_verifying.key");
-  if (!vkResp.ok) {
-    throw new Error(`Failed to load VK: ${vkResp.status}`);
-  }
-  rs256Vk = new Uint8Array(await vkResp.arrayBuffer());
+  const setupResult = wasmModule.setup_rs256();
+  const pkBytes = new Uint8Array(setupResult.pk);
+  rs256Vk = new Uint8Array(setupResult.vk);
   logs.push({
-    label: `Load VK (${formatBytes(rs256Vk.length)})`,
+    label: `Setup keys (PK: ${formatBytes(pkBytes.length)}, VK: ${formatBytes(rs256Vk.length)})`,
     durationMs: performance.now() - t,
   });
 
-  // 4. Load and deserialize RS256 proving key into WASM memory
-  //    This is ~744MB — we fetch it, pass to WASM for deserialization,
-  //    then release the JS buffer to save memory.
-  onProgress?.("Loading RS256 proving key (~744MB)...");
-  t = performance.now();
-  const pkResp = await fetch("/keys/rs256_proving.key");
-  if (!pkResp.ok) {
-    throw new Error(
-      `Failed to load PK: ${pkResp.status}. ` +
-        "Run 'cargo run --release --no-default-features' in ecdsa-spartan2-jwt/ first."
-    );
-  }
-  const pkBytes = new Uint8Array(await pkResp.arrayBuffer());
-  logs.push({
-    label: `Fetch PK (${formatBytes(pkBytes.length)})`,
-    durationMs: performance.now() - t,
-  });
-
-  onProgress?.("Deserializing proving key in WASM...");
+  // 4. Load proving key into WASM memory for reuse across prove calls
+  onProgress?.("Loading proving key into WASM memory...");
   t = performance.now();
   wasmModule.load_rs256_pk(pkBytes);
   rs256Pk = true as unknown as Uint8Array; // sentinel — PK is stored in WASM
   logs.push({
-    label: "Deserialize PK in WASM",
+    label: "Load PK into WASM",
     durationMs: performance.now() - t,
   });
 

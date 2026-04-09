@@ -37,27 +37,15 @@ sed -i '' 's/module\.exports = async function builder/export default async funct
   "$WEB_DEMO/src/assets/witness_calculator.js"
 echo "   ✓ witness_calculator.js → src/assets/ (ESM patched)"
 
-# 3. Set up keys directory (local symlink or download from GitHub release)
+# 3. Set up keys directory (optional — keys are generated at runtime in the browser)
 echo ""
-echo "3. Setting up keys directory..."
+echo "3. Checking for local keys..."
 if [ -d "$SPARTAN_DIR/keys" ]; then
   rm -rf "$WEB_DEMO/public/keys"
   ln -s "$SPARTAN_DIR/keys" "$WEB_DEMO/public/keys"
-  echo "   ✓ keys/ → public/keys (symlink)"
+  echo "   ✓ keys/ → public/keys (symlink, for local dev)"
 else
-  echo "   Keys not found locally, downloading from GitHub release..."
-  mkdir -p "$WEB_DEMO/public/keys"
-  RELEASE_URL="https://github.com/zkmopro/zkID/releases/download/latest/ecdsa-spartan2-keys.zip"
-  TMPZIP="$(mktemp)"
-  TMPDIR_EXTRACT="$(mktemp -d)"
-  curl -L --fail -o "$TMPZIP" "$RELEASE_URL"
-  unzip -o "$TMPZIP" \
-    'wallet-unit-poc/ecdsa-spartan2/keys/rs256_proving.key' \
-    'wallet-unit-poc/ecdsa-spartan2/keys/rs256_verifying.key' \
-    -d "$TMPDIR_EXTRACT"
-  cp "$TMPDIR_EXTRACT/wallet-unit-poc/ecdsa-spartan2/keys/"*.key "$WEB_DEMO/public/keys/"
-  rm -rf "$TMPZIP" "$TMPDIR_EXTRACT"
-  echo "   ✓ Keys downloaded from GitHub release to public/keys/"
+  echo "   ℹ No local keys found. Keys will be generated at runtime via setup_rs256() in the browser."
 fi
 
 echo ""

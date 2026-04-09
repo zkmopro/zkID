@@ -137,22 +137,6 @@ jobs:
                   name: circom-wasm
                   path: wallet-unit-poc/circom/build/rs256/rs256_js/
 
-            - name: Download proving keys from GitHub Release
-              run: |
-                  mkdir -p wallet-unit-poc/web/public/keys
-                  gh release download latest \
-                    --repo ${{ github.repository }} \
-                    --pattern 'ecdsa-spartan2-keys.zip' \
-                    --dir /tmp
-                  unzip -o /tmp/ecdsa-spartan2-keys.zip \
-                    'wallet-unit-poc/ecdsa-spartan2/keys/rs256_proving.key' \
-                    'wallet-unit-poc/ecdsa-spartan2/keys/rs256_verifying.key' \
-                    -d /tmp/keys-extract
-                  cp /tmp/keys-extract/wallet-unit-poc/ecdsa-spartan2/keys/*.key \
-                     wallet-unit-poc/web/public/keys/
-              env:
-                  GH_TOKEN: ${{ github.token }}
-
             - name: Copy WASM assets to web app
               run: |
                   cd wallet-unit-poc/web
