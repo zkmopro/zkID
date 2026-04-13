@@ -4,7 +4,6 @@ Spartan2-based proving tooling for the zkID wallet proof of concept.
 
 Provides CLI subcommands for:
 - **RS256 certificate chain verification** — generates circuit inputs from Taiwan Citizen Digital Certificate (自然人憑證) via HiPKI LocalSignServer, then runs setup/prove/verify
-- **JWT-RS256 single-stage circuit** — setup, prove, and verify against Circom inputs
 
 ## RS256 Certificate Chain Flow
 
@@ -53,8 +52,8 @@ The output directory (`../circom/inputs/sha256rsa2048/` or `../circom/inputs/sha
 ### 2. Setup, prove, verify
 
 ```sh
-# Compile the circom circuit first (if not already done)
-cd ../circom && yarn compile:rs256 && cd ../ecdsa-spartan2
+# Compile the circom circuits first (if not already done)
+cd ../circom && yarn compile:all && cd ../ecdsa-spartan2
 ```
 
 #### RSA-2048
@@ -81,22 +80,6 @@ RUST_LOG=info cargo run --release --features sha256rsa2048 -- rs256 benchmark --
 
 # RSA-4096 (FIDO)
 RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 benchmark --fido --input ../circom/inputs/sha256rsa4096/input.json
-```
-
-## JWT-RS256 Flow
-
-```sh
-# Setup
-RUST_LOG=info cargo run --release -- jwt_rs256 setup --input ../circom/inputs/jwt_rs256/default.json
-
-# Prove
-RUST_LOG=info cargo run --release -- jwt_rs256 prove --input ../circom/inputs/jwt_rs256/default.json
-
-# Verify
-RUST_LOG=info cargo run --release -- jwt_rs256 verify
-
-# Benchmark
-RUST_LOG=info cargo run --release -- jwt_rs256 benchmark --input ../circom/inputs/jwt_rs256/default.json
 ```
 
 ## Tests
