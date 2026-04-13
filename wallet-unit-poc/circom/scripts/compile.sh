@@ -1,8 +1,7 @@
 #!/bin/bash
 
 usage() {
-    echo "Usage: $0 {jwt_rs256|sha256rsa2048|sha256rsa4096|all}"
-    echo "  jwt_rs256: Compile files for JWT-RS256."
+    echo "Usage: $0 {sha256rsa2048|sha256rsa4096|all}"
     echo "  sha256rsa2048: Compile files for SHA256RSA2048."
     echo "  sha256rsa4096: Compile files for SHA256RSA4096."
     echo "  all: Compile all circuits."
@@ -28,9 +27,6 @@ function compile() {
 
 
 case "$1" in
-    jwt_rs256)
-       compile jwt_rs256
-    ;;
     sha256rsa2048)
         compile sha256rsa2048
     ;;
@@ -38,7 +34,6 @@ case "$1" in
         compile sha256rsa4096
     ;;
     all)
-        compile jwt_rs256
         compile sha256rsa2048
         compile sha256rsa4096
     ;;

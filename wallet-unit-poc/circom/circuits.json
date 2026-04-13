@@ -1,10 +1,4 @@
 {
-  "jwt_rs256": {
-    "file": "jwt_rs256",
-    "template": "JWTRS256",
-    "params": [1920, 1900, 4, 50, 128, 121, 17],
-    "pubs": ["rsaModulus"]
-  },
   "sha256rsa2048": {
     "file": "rs256",
     "template": "FullCertRSA256VerifyWithRevocation",
