@@ -45,9 +45,9 @@ impl PathConfig {
     /// Create config for development environment.
     ///
     /// Development uses nested paths relative to the current working directory:
-    /// - `../circom/inputs/jwt_rs256/default.json`
+    /// - `../circom/inputs/sha256rsa2048/default.json`
     /// - `keys/*.key`
-    /// - `../circom/build/jwt_rs256/jwt_rs256_js/jwt_rs256.r1cs`
+    /// - `../circom/build/sha256rsa2048/sha256rsa2048_js/sha256rsa2048.r1cs`
     pub fn development() -> Self {
         Self {
             base_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -58,7 +58,7 @@ impl PathConfig {
     /// Resolve the input JSON path for a circuit.
     ///
     /// # Arguments
-    /// * `circuit` - Circuit name (e.g., "jwt_rs256")
+    /// * `circuit` - Circuit name (e.g., "sha256rsa2048")
     ///
     /// # Returns
     /// Full path to the input JSON file.
@@ -76,7 +76,7 @@ impl PathConfig {
     /// Resolve the R1CS file path for a circuit.
     ///
     /// # Arguments
-    /// * `circuit` - Circuit name (e.g., "jwt_rs256")
+    /// * `circuit` - Circuit name (e.g., "sha256rsa2048")
     ///
     /// # Returns
     /// Full path to the R1CS file.
@@ -97,7 +97,7 @@ impl PathConfig {
     /// Resolve a key file path (proving/verifying keys).
     ///
     /// # Arguments
-    /// * `name` - Key filename (e.g., "jwt_rs256_proving.key")
+    /// * `name` - Key filename (e.g., "rs256_proving.key")
     ///
     /// # Returns
     /// Full path to the key file.
@@ -108,7 +108,7 @@ impl PathConfig {
     /// Resolve an artifact file path (proofs, witnesses, instances).
     ///
     /// # Arguments
-    /// * `name` - Artifact filename (e.g., "jwt_rs256_proof.bin")
+    /// * `name` - Artifact filename (e.g., "rs256_proof.bin")
     ///
     /// # Returns
     /// Full path to the artifact file.
@@ -155,16 +155,16 @@ mod tests {
         let config = PathConfig::mobile("/app/Documents");
 
         assert_eq!(
-            config.input_json("jwt_rs256"),
-            PathBuf::from("/app/Documents/jwt_rs256_input.json")
+            config.input_json("sha256rsa2048"),
+            PathBuf::from("/app/Documents/sha256rsa2048_input.json")
         );
         assert_eq!(
-            config.r1cs_path("jwt_rs256"),
-            PathBuf::from("/app/Documents/jwt_rs256.r1cs")
+            config.r1cs_path("sha256rsa2048"),
+            PathBuf::from("/app/Documents/sha256rsa2048.r1cs")
         );
         assert_eq!(
-            config.key_path("jwt_rs256_proving.key"),
-            PathBuf::from("/app/Documents/keys/jwt_rs256_proving.key")
+            config.key_path("rs256_proving.key"),
+            PathBuf::from("/app/Documents/keys/rs256_proving.key")
         );
     }
 
@@ -173,8 +173,8 @@ mod tests {
         let config = PathConfig::new("/project", false);
 
         assert_eq!(
-            config.input_json("jwt_rs256"),
-            PathBuf::from("/project/../circom/inputs/jwt_rs256/default.json")
+            config.input_json("sha256rsa2048"),
+            PathBuf::from("/project/../circom/inputs/sha256rsa2048/default.json")
         );
     }
 
