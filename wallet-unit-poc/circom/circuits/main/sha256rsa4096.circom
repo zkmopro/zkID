@@ -3,4 +3,4 @@ pragma circom 2.2.3;
 
 include "../rs256.circom";
 
-component main {public[issuer_rsa_modulus, smtRoot, serialNumber]} = FullCertRSA256VerifyWithRevocation(1536, 121, 34, 2048, 128, 128, 17);
+component main {public[issuer_rsa_modulus, smtRoot, serialNumber]} = FullCertRSA256VerifyWithRevocation(1536, 121, 34, 4096, 128, 128, 17);
