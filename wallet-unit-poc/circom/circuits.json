@@ -1,10 +1,4 @@
 {
-  "jwt_rs256": {
-    "file": "jwt_rs256",
-    "template": "JWTRS256",
-    "params": [1920, 1900, 4, 50, 128, 121, 17],
-    "pubs": ["rsaModulus"]
-  },
   "sha256rsa2048": {
     "file": "rs256",
     "template": "FullCertRSA256VerifyWithRevocation",
@@ -14,7 +8,7 @@
   "sha256rsa4096": {
     "file": "rs256",
     "template": "FullCertRSA256VerifyWithRevocation",
-    "params": [1536, 121, 34, 2048, 128, 128, 17],
+    "params": [1536, 121, 34, 4096, 128, 128, 17],
     "pubs": ["issuer_rsa_modulus", "smtRoot", "serialNumber"]
   }
 }

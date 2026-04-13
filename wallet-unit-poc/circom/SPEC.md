@@ -1,123 +1,73 @@
-# ZK-ID Circuit Specification
+# zkID Circuit Specification
+
+This document describes the Circom circuits in this directory.
 
 ## Overview
 
-This document describes the circuits used for privacy-preserving identity verification using zero-knowledge proofs (ZKPs). These circuits enable verification of JWT claims without revealing sensitive personal data.
+The circuits verify Taiwan Citizen Digital Certificate (MOICA) X.509
+certificates signed with RSA-SHA256, plus a per-session user-device signature
+over arbitrary data (the "TBS" sent to the HiPKI card). They also assert
+non-revocation against a Sparse Merkle Tree (SMT).
 
-### List of Circuits
+## Active circuits
 
-- `jwt` - Validates a JWT using ES256 and exposes decoded claims
+| Circuit         | Template                                | Description                                  |
+| --------------- | --------------------------------------- | -------------------------------------------- |
+| `sha256rsa2048` | `FullCertRSA256VerifyWithRevocation`    | RSA-2048 cert chain (MOICA-G2)               |
+| `sha256rsa4096` | `FullCertRSA256VerifyWithRevocation`    | RSA-4096 cert chain (MOICA-G3 / FIDO)        |
 
-- `claim-decoder` - Decodes Base64 encoded claims
+Both share the same template with different `(n, k)` parameters for RSA limb
+size and count. See `circuits/main/sha256rsa{2048,4096}.circom` for entry
+points and `circuits/rs256.circom` for the template definition.
 
-- `utils` - Helper templates for selective disclosure
+## What the circuit proves
 
-- `age-verifier` - Checks if a birth date claim represents a user over 18
+For both variants, the circuit currently performs **two independent
+RSA-SHA256 verifications** in one proof:
 
-- `es256` - ES256 (ECDSA) signature verification circuit
+1. **Cert chain verify** — `issuer_rsa_modulus` (MOICA) verifies
+   `issuer_rsa_signature` over `issuer_tbs` (the TBS portion of the user's
+   cert). Proves that MOICA certified the user's public key.
+2. **Device signature verify** — `user_rsa_extracted_modulus` (the user's pk
+   pulled out of their cert via `ExtractModulus`) verifies
+   `user_rsa_signature` over `tbs` (arbitrary bytes the HiPKI card signs via
+   `/sign`). Proves that the holder of the user's private key signed `tbs`.
 
----
+Plus:
+- `VerifyTBSinCert`, `VerifySubjectDN`, `VerifySerialNumber` — DER-level
+  parsing checks that the user cert contains the claimed TBS, subject DN, and
+  serial number at the prover-supplied offsets.
+- `SMTNonMembershipVerifier` — proves `serialNumber` is **not** in the
+  revocation tree rooted at `smtRoot`.
+- `PoseidonBytes(subject_dn) → subject_dn_hash` — public-output commitment to
+  the subject DN (private bytes; only the hash is revealed).
+- `PackBytes(tbs) → packed_tbs` — public-output commitment to what the user
+  signed.
 
-## JWT Circuit Parameters
+## Public inputs / outputs
 
-| Parameter             | Description                                                |
-| --------------------- | ---------------------------------------------------------- |
-| `n, k`                | Parameters defining ES256 signature size and field chunks. |
-| `maxMessageLength`    | Maximum length of JWT message (header + payload).          |
-| `maxB64HeaderLength`  | Maximum Base64-encoded JWT header length.                  |
-| `maxB64PayloadLength` | Maximum Base64-encoded JWT payload length.                 |
-| `maxMatches`          | Maximum number of claims/substrings to check.              |
-| `maxSubstringLength`  | Maximum length for substring matches.                      |
-| `maxClaimsLength`     | Maximum length for individual claims.                      |
+| Signal              | Visibility | Notes                                             |
+| ------------------- | ---------- | ------------------------------------------------- |
+| `issuer_rsa_modulus[k]` | public input  | MOICA's RSA public key (trust anchor)         |
+| `smtRoot`           | public input  | Revocation SMT root                            |
+| `serialNumber`      | public input  | Cert serial; planned to become private once the [`moica-revocation-smt`](https://github.com/moven0831/moica-revocation-smt) client-side WASM SMT lands |
+| `subject_dn_hash`   | public output | `Poseidon(packed subject_dn)`                  |
+| `packed_tbs`        | public output | `PackBytes(31, …)(tbs)` — commitment to the user-signed bytes |
 
----
+All other signals (user cert bytes, both RSA signatures, SMT proof path,
+`subject_dn`, `tbs`) are private.
 
-## JWT Circuit Inputs
+## Revocation
 
-| Input            | Description                                              |
-| ---------------- | -------------------------------------------------------- |
-| `message`        | JWT message containing header and payload                |
-| `messageLength`  | Length of the JWT message                                |
-| `periodIndex`    | Index of the period separating header and payload in JWT |
-| `sig_r`, `sig_s` | Components of JWT ES256 signature                        |
-| `pubkey`         | Public key used for JWT signature verification           |
-| `matchesCount`   | Number of substring matches provided                     |
-| `matchSubstring` | Array of substrings (hashed claims)                      |
-| `matchLength`    | Length of each substring                                 |
-| `matchIndex`     | Starting index of each substring within the payload      |
-| `claims`         | Array of raw Base64-encoded claims                       |
-| `claimLengths`   | Length of each claim                                     |
-| `decodeFlags`    | Flags indicating which claims should be decoded (0/1)     |
+Revocation uses a Sparse Merkle Tree non-membership proof against the SMT
+maintained by the
+[`moica-revocation-smt`](https://github.com/moven0831/moica-revocation-smt)
+service. The circuit verifies that the cert's `serialNumber` is not present in
+the tree rooted at `smtRoot`.
 
----
+## See also
 
-## JWT Circuit Outputs
-
-| Output       | Description                                                  |
-| ------------ | ------------------------------------------------------------ |
-| `jwtClaims` | Array of decoded claims returned by `ClaimDecoder` |
-
----
-
-## Constraints
-
-1.  **ES256 Signature Verification**
-
-    - Validate the ECDSA signature (ES256) of the JWT header and payload using the provided public key.
-
-    - Hash the JWT payload using SHA-256.
-
-2.  **ClaimDecoder**
-
-    - Decode JWT claims from Base64 format only when the corresponding `decodeFlags[i]` is `1`.
-
-    - Claims with `decodeFlags[i]` set to `0` are replaced with a padded Base64 string of `'A'` characters so that decoding always succeeds.
-
-    - Hash decoded raw claims using SHA-256.
-
-3.  **ClaimComparator**
-
-    - Compute hashes of decoded raw claims.
-
-    - Decode existing hashed claims from selective disclosure inputs.
-
-    - Ensure claims with non-zero length (`claimLengths[i] > 0`) match the provided hashed claims.
-
-4.  **HeaderPayloadExtractor**
-
-    - Decode JWT header from Base64.
-
-    - Decode JWT payload from Base64.
-
-5.  **SubString Inclusion Check**
-
-    - Verify if hashed claims (`matchSubstring`) match values in `_sd[]` in the decoded JWT payload.
-
----
-
-## Workflow
-
-1.  **JWT Signature Verification:** Validate JWT signature and hash payload.
-
-2.  **Claims Decoding:** Decode claims from JWT payload and hash them.
-
-3.  **Claims Matching:** Compare decoded and hashed claims against selective disclosure data.
-
-## AgeVerifier Circuit
-
-This circuit operates separately from `JWT`. It checks whether a birth date claim corresponds to a user who is 18 years or older.
-
-### Inputs
-
-| Input | Description |
-| --- | --- |
-| `claim` | Decoded claim bytes containing a YYMMDD birth date |
-| `currentYear` | Current year |
-| `currentMonth` | Current month |
-| `currentDay` | Current day |
-
-### Output
-
-| Output | Description |
-| --- | --- |
-| `ageAbove18` | `1` if the extracted age is at least 18, otherwise `0` |
+- [`../ecdsa-spartan2/README.md`](../ecdsa-spartan2/README.md) — Rust prover CLI
+- `circuits/components/smt-nonmembership.circom` — SMT verification template
+- `circuits/components/poseidon_p256.circom` — Poseidon hash over secq256r1
+- `circuits/utils/utils.circom` — cert parsing helpers (`VerifyTBSinCert`, `VerifySubjectDN`, `VerifySerialNumber`, `ExtractModulus`, `PackBytes`, `PoseidonBytes`)
