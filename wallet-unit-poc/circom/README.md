@@ -12,11 +12,12 @@ secq256r1 prime field; proven by the Rust prover in
 ```sh
 yarn install
 
-# Compile a single circuit (RSA-2048 or RSA-4096 variant)
-yarn compile:sha256rsa2048
-yarn compile:sha256rsa4096
+# Compile a single circuit
+yarn compile:cert_chain_rs2048
+yarn compile:cert_chain_rs4096
+yarn compile:device_sig_rs2048
 
-# Compile both
+# Compile all
 yarn compile:all
 ```
 
@@ -37,7 +38,9 @@ memory-heavy.
 ## Layout
 
 - `circuits/main/` — top-level circuit entry points (one file per build target)
-- `circuits/rs256.circom` — RS256 cert verification template (`FullCertRSA256VerifyWithRevocation`)
+- `circuits/rs256.circom` — RS256 cert verification and shared templates
+- `circuits/cert_chain.circom` — CertChain circuit (Circuit A: cert chain + revocation + pk_commit)
+- `circuits/device_sig.circom` — DeviceSig circuit (Circuit B: device signature + pk_commit)
 - `circuits/components/` — reusable templates: SMT non-membership, Poseidon over P256
 - `circuits/utils/utils.circom` — DER-level cert helpers (TBS / subject / serial extraction, modulus extraction, byte packing, Poseidon-over-bytes)
 
