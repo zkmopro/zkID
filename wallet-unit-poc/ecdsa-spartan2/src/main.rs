@@ -37,10 +37,10 @@
 //!   cargo run --release --features sha256rsa4096 -- rs256 benchmark --fido
 
 use ecdsa_spartan2::{
-    hipki_client, load_proof,
-    prove_circuit, prove_circuit_with_pk, run_circuit, save_keys, setup_circuit_keys,
-    setup_circuit_keys_no_save, verify_circuit, verify_circuit_with_loaded_data, PathConfig,
-    Rsa2048, Rsa4096, RsaKeySize, Rs256FidoCircuit, Rs256Circuit, Sha256RsaCircuit,
+    generate_split_inputs, hipki_client, load_proof, prove_circuit, prove_circuit_with_pk,
+    run_circuit, save_keys, setup_circuit_keys, setup_circuit_keys_no_save, verify_circuit,
+    verify_circuit_with_loaded_data, CertChainRsa2048, CertChainRsa4096, DeviceSigRsa2048,
+    PathConfig, Rsa2048, Rsa4096, Rs256Circuit, Rs256FidoCircuit, RsaKeySize, Sha256RsaCircuit,
 };
 use std::{env::args, fs, path::PathBuf, process, time::Instant};
 use tracing::info;
@@ -94,6 +94,110 @@ fn main() {
     let args: Vec<String> = args().collect();
     let command_args: &[String] = if args.len() > 1 { &args[1..] } else { &[] };
 
+    // ── generate-split-input: produces per-circuit JSONs for CertChain + DeviceSig ──
+    if command_args.contains(&"generate-split-input".to_string()) {
+        let mut fido = false;
+        let mut smt_server: Option<String> = None;
+        let mut issuer = "g2".to_string();
+        let mut cert_chain_output = "../circom/inputs/cert_chain_rs2048/input.json".to_string();
+        let device_sig_output = "../circom/inputs/device_sig_rs2048/input.json".to_string();
+
+        let mut i = 2;
+        while i < command_args.len() {
+            match command_args[i].as_str() {
+                "--fido" => {
+                    fido = true;
+                    cert_chain_output = "../circom/inputs/cert_chain_rs4096/input.json".to_string();
+                    issuer = "g3".to_string();
+                }
+                "--smt-server" => {
+                    i += 1;
+                    smt_server = Some(command_args.get(i).cloned().unwrap_or_else(|| {
+                        eprintln!("Missing value for --smt-server");
+                        process::exit(1);
+                    }));
+                }
+                "--issuer" => {
+                    i += 1;
+                    issuer = command_args.get(i).cloned().unwrap_or_else(|| {
+                        eprintln!("Missing value for --issuer");
+                        process::exit(1);
+                    });
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+
+        let (k_issuer, k_user) = if fido { (34, 17) } else { (17, 17) };
+
+        // Load test fixtures (default mode — bundled certs + signatures)
+        let default_tbs = b"e775f2805fb993e05a208dbff15d1c1";
+        let (user_cert, user_sig_b64, issuer_cert, serial_hex) = if fido {
+            let response_path = std::path::Path::new("tests/testdata/fido_response_sign.json");
+            let issuer_cert = Rs256FidoCircuit::fetch_cert_from_file("tests/testdata/MOICA-G3.cer")
+                .expect("Failed to load MOICA-G3 cert");
+            let response_str = std::fs::read_to_string(response_path)
+                .expect("Failed to read FIDO sign response");
+            let response: ecdsa_spartan2::circuits::sha256rsa_circuit::FidoSignResponse =
+                serde_json::from_str(&response_str).expect("Failed to parse FIDO response");
+            let user_cert = Rs256FidoCircuit::generate_user_cert_from_certb64(&response.result.cert)
+                .expect("Failed to parse user cert");
+            let serial_bytes = user_cert.tbs_certificate.serial_number.as_bytes();
+            let trimmed: Vec<u8> = serial_bytes.iter().skip_while(|&&b| b == 0).copied().collect();
+            let serial_hex = hex::encode(if trimmed.is_empty() { serial_bytes } else { &trimmed });
+            (user_cert, response.result.signed_response, issuer_cert, serial_hex)
+        } else {
+            let response_path = std::path::Path::new("tests/testdata/response_sign_test.json");
+            let pkcs11_path = std::path::Path::new("tests/testdata/pkcs11info_test.json");
+            let pkcs11_str = std::fs::read_to_string(pkcs11_path)
+                .expect("Failed to read pkcs11 response");
+            let pkcs11: ecdsa_spartan2::circuits::sha256rsa_circuit::Pkcs11InfoResponse =
+                serde_json::from_str(&pkcs11_str).expect("Failed to parse pkcs11 response");
+            let issuer_cert = Rs256Circuit::extract_issuer_cert(&pkcs11)
+                .expect("Failed to extract issuer cert");
+            let response_str = std::fs::read_to_string(response_path)
+                .expect("Failed to read sign response");
+            let response: ecdsa_spartan2::circuits::sha256rsa_circuit::CardSignResponse =
+                serde_json::from_str(&response_str).expect("Failed to parse sign response");
+            let user_cert = Rs256Circuit::generate_user_cert_from_certb64(&response.certb64)
+                .expect("Failed to parse user cert");
+            let serial_bytes = user_cert.tbs_certificate.serial_number.as_bytes();
+            let trimmed: Vec<u8> = serial_bytes.iter().skip_while(|&&b| b == 0).copied().collect();
+            let serial_hex = hex::encode(if trimmed.is_empty() { serial_bytes } else { &trimmed });
+            (user_cert, response.signature, issuer_cert, serial_hex)
+        };
+
+        let smt_inputs = smt_server.as_ref().map(|url| {
+            ecdsa_spartan2::smt_client::fetch_smt_proof(url, &issuer, &serial_hex, 128)
+                .expect("Failed to fetch SMT proof")
+        });
+
+        info!("Generating split inputs (cert_chain + device_sig)...");
+        let (cert_chain_json, device_sig_json) = generate_split_inputs(
+            &user_cert, &issuer_cert, &user_sig_b64, default_tbs.as_slice(),
+            &serial_hex, smt_inputs.as_ref(), k_issuer, k_user,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("Error generating split inputs: {}", e);
+            process::exit(1);
+        });
+
+        for (path, json) in [(&cert_chain_output, &cert_chain_json), (&device_sig_output, &device_sig_json)] {
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::write(path, serde_json::to_string_pretty(json).unwrap())
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to write {}: {}", path, e);
+                    process::exit(1);
+                });
+            info!(path = %path, "Written split input JSON");
+        }
+        process::exit(0);
+    }
+
+    // ── generate-input: legacy monolithic circuit input ──
     if command_args.contains(&"generate-input".to_string()) {
         let mut tbs_data: Option<String> = None;
         let mut pin: Option<String> = None;
@@ -282,7 +386,48 @@ fn main() {
         }
     };
 
-    execute_rs256(command.action, command.options);
+    // Dispatch based on top-level command
+    let top_command = &command_args[0];
+    match top_command.as_str() {
+        "cert-chain" => execute_cert_chain(command.action, command.options),
+        "device-sig" => execute_device_sig(command.action, command.options),
+        _ => execute_rs256(command.action, command.options),
+    }
+}
+
+/// Execute cert-chain (Circuit A) commands — dispatch by --fido flag.
+fn execute_cert_chain(action: CircuitAction, options: CommandOptions) {
+    if options.fido {
+        if !cfg!(feature = "cert_chain_rs4096") {
+            eprintln!(
+                "Error: --fido requires the `cert_chain_rs4096` feature. \
+                 Rebuild with --features cert_chain_rs4096"
+            );
+            process::exit(1);
+        }
+        execute_rs256_for::<CertChainRsa4096>(action, options);
+    } else {
+        if !cfg!(feature = "cert_chain_rs2048") {
+            eprintln!(
+                "Error: cert-chain commands require the `cert_chain_rs2048` feature. \
+                 Rebuild with --features cert_chain_rs2048"
+            );
+            process::exit(1);
+        }
+        execute_rs256_for::<CertChainRsa2048>(action, options);
+    }
+}
+
+/// Execute device-sig (Circuit B) commands — always RSA-2048.
+fn execute_device_sig(action: CircuitAction, options: CommandOptions) {
+    if !cfg!(feature = "device_sig_rs2048") {
+        eprintln!(
+            "Error: device-sig commands require the `device_sig_rs2048` feature. \
+             Rebuild with --features device_sig_rs2048"
+        );
+        process::exit(1);
+    }
+    execute_rs256_for::<DeviceSigRsa2048>(action, options);
 }
 
 /// Execute RS256 circuit commands — dispatches to the correct key-size variant.
@@ -462,6 +607,8 @@ fn parse_command(args: &[String]) -> Result<ParsedCommand, String> {
             process::exit(0);
         }
         "rs256" => parse_circuit_command(&args[1..]),
+        "cert-chain" => parse_circuit_command(&args[1..]),
+        "device-sig" => parse_circuit_command(&args[1..]),
         other => Err(format!("Unknown command '{other}'")),
     }
 }
