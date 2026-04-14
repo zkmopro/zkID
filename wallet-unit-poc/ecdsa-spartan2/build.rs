@@ -4,6 +4,12 @@ use std::path::Path;
 const SHA256RSA2048_CIRCUIT_NAME: &str = "sha256rsa2048";
 #[cfg(feature = "sha256rsa4096")]
 const SHA256RSA4096_CIRCUIT_NAME: &str = "sha256rsa4096";
+#[cfg(feature = "cert_chain_rs2048")]
+const CERT_CHAIN_RS2048_CIRCUIT_NAME: &str = "cert_chain_rs2048";
+#[cfg(feature = "cert_chain_rs4096")]
+const CERT_CHAIN_RS4096_CIRCUIT_NAME: &str = "cert_chain_rs4096";
+#[cfg(feature = "device_sig_rs2048")]
+const DEVICE_SIG_RS2048_CIRCUIT_NAME: &str = "device_sig_rs2048";
 
 #[allow(unused_variables)]
 fn main() {
@@ -54,6 +60,12 @@ fn main() {
     stage_circuit(&circuits_dir, &staging_dir, SHA256RSA2048_CIRCUIT_NAME);
     #[cfg(feature = "sha256rsa4096")]
     stage_circuit(&circuits_dir, &staging_dir, SHA256RSA4096_CIRCUIT_NAME);
+    #[cfg(feature = "cert_chain_rs2048")]
+    stage_circuit(&circuits_dir, &staging_dir, CERT_CHAIN_RS2048_CIRCUIT_NAME);
+    #[cfg(feature = "cert_chain_rs4096")]
+    stage_circuit(&circuits_dir, &staging_dir, CERT_CHAIN_RS4096_CIRCUIT_NAME);
+    #[cfg(feature = "device_sig_rs2048")]
+    stage_circuit(&circuits_dir, &staging_dir, DEVICE_SIG_RS2048_CIRCUIT_NAME);
 
     witnesscalc_adapter::build_and_link(staging_dir.to_str().unwrap());
 }
