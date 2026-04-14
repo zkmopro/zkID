@@ -26,6 +26,11 @@
 //!   cargo run --release --features device_sig_rs2048 -- device-sig setup --input ../circom/inputs/device_sig_rs2048/input.json
 //!   cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs2048/input.json
 //!   cargo run --release --features device_sig_rs2048 -- device-sig verify
+//!
+//! # Link-verify  (check pk_commit equality across proofs)
+//!
+//!   cargo run --release -- link-verify
+//!   cargo run --release -- link-verify --fido
 
 use ecdsa_spartan2::{
     generate_split_inputs, load_proof, prove_circuit, prove_circuit_with_pk, run_circuit,
@@ -213,6 +218,56 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     process::exit(0);
 }
 
+/// `link-verify` CLI: verify both proofs and check pk_commit equality.
+///
+/// CertChain public values: [subject_dn_hash, pk_commit, issuer_modulus..., smtRoot, serialNumber]
+/// DeviceSig public values: [pk_commit, packed_tbs[0..50]]
+///
+/// The verifier checks `pk_commit_A == pk_commit_B` to bind the two proofs
+/// and prevent proof-mixing attacks.
+fn run_link_verify(command_args: &[String]) -> ! {
+    let fido = command_args.contains(&"--fido".to_string());
+    let path_config = PathConfig::development();
+
+    // Verify cert-chain proof and extract public values
+    let (cc_proof_file, cc_vk_file) = if fido {
+        (CertChainRsa4096::PROOF, CertChainRsa4096::VERIFYING_KEY)
+    } else {
+        (CertChainRsa2048::PROOF, CertChainRsa2048::VERIFYING_KEY)
+    };
+    info!("Verifying cert-chain proof...");
+    let cc_public_values = verify_circuit(
+        path_config.artifact_path(cc_proof_file),
+        path_config.key_path(cc_vk_file),
+    );
+
+    // Verify device-sig proof and extract public values
+    info!("Verifying device-sig proof...");
+    let ds_public_values = verify_circuit(
+        path_config.artifact_path(DeviceSigRsa2048::PROOF),
+        path_config.key_path(DeviceSigRsa2048::VERIFYING_KEY),
+    );
+
+    // pk_commit is at index 1 for cert-chain (after subject_dn_hash output)
+    // pk_commit is at index 0 for device-sig (first output)
+    let pk_commit_a = &cc_public_values[1];
+    let pk_commit_b = &ds_public_values[0];
+
+    if pk_commit_a == pk_commit_b {
+        info!(
+            pk_commit = ?pk_commit_a,
+            "Link verification PASSED: pk_commit_A == pk_commit_B"
+        );
+        process::exit(0);
+    } else {
+        eprintln!(
+            "Link verification FAILED!\n  pk_commit_A (cert-chain): {:?}\n  pk_commit_B (device-sig): {:?}",
+            pk_commit_a, pk_commit_b
+        );
+        process::exit(1);
+    }
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_target(false)
@@ -225,6 +280,10 @@ fn main() {
 
     if command_args.contains(&"generate-split-input".to_string()) {
         run_generate_split_input(command_args);
+    }
+
+    if command_args.contains(&"link-verify".to_string()) {
+        run_link_verify(command_args);
     }
 
     let command = match parse_command(command_args) {
@@ -512,6 +571,7 @@ Commands:
   cert-chain           Certificate chain verification (Circuit A)
   device-sig           Device signature verification (Circuit B)
   generate-split-input Generate split circuit input JSONs
+  link-verify          Verify pk_commit equality across cert-chain and device-sig proofs
 
 Actions:
   run                  Run the complete circuit (setup, prove, verify)
@@ -532,6 +592,8 @@ Examples:
   cargo run --release --features cert_chain_rs2048 -- cert-chain verify
   cargo run --release --features device_sig_rs2048 -- device-sig setup --input ../circom/inputs/device_sig_rs2048/input.json
   cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs2048/input.json
-  cargo run --release --features device_sig_rs2048 -- device-sig verify"
+  cargo run --release --features device_sig_rs2048 -- device-sig verify
+  cargo run --release -- link-verify
+  cargo run --release -- link-verify --fido"
     );
 }
