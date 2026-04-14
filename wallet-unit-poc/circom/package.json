@@ -8,7 +8,7 @@
     "url": "https://github.com/privacy-scaling-explorations/zkID"
   },
   "scripts": {
-    "test": "NODE_OPTIONS=--max-old-space-size=16384 npx mocha --spec",
+    "test": "NODE_OPTIONS=--max-old-space-size=16384 npx mocha",
     "compile:cert_chain_rs2048": "bash scripts/compile.sh cert_chain_rs2048",
     "compile:cert_chain_rs4096": "bash scripts/compile.sh cert_chain_rs4096",
     "compile:device_sig_rs2048": "bash scripts/compile.sh device_sig_rs2048",
