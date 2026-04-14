@@ -23,8 +23,8 @@ pub use circuits::sha256rsa_circuit::{
     Rsa2048, Rsa4096, Rs256Circuit, Rs256FidoCircuit, RsaKeySize, Sha256RsaCircuit,
 };
 pub use circuits::split_circuits::{
-    CertChainCircuit, CertChainFidoCircuit, CertChainRsa2048, CertChainRsa4096,
-    DeviceSigCircuit, DeviceSigRsa2048,
+    generate_split_inputs, CertChainCircuit, CertChainFidoCircuit, CertChainRsa2048,
+    CertChainRsa4096, DeviceSigCircuit, DeviceSigRsa2048,
 };
 pub use paths::PathConfig;
 pub use prover::{

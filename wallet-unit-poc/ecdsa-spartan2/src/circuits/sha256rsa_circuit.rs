@@ -181,22 +181,22 @@ pub struct FidoSignResult {
 }
 
 /// Intermediate result from per-certificate RSA input generation.
-struct RsaCircuitInput {
-    message: Vec<String>,
-    message_length: usize,
-    rsa_modulus: Vec<String>,
-    rsa_signature: Vec<String>,
+pub(crate) struct RsaCircuitInput {
+    pub(crate) message: Vec<String>,
+    pub(crate) message_length: usize,
+    pub(crate) rsa_modulus: Vec<String>,
+    pub(crate) rsa_signature: Vec<String>,
 }
 
 /// DER byte offsets for in-circuit modulus extraction.
 
 #[derive(Debug)]
-struct CertOffsets {
-    modulus_offset: usize,       // first real modulus byte (after sign byte)
-    modulus_tag_offset: usize,   // where 0x02 INTEGER tag is
-    subject_dn_offset: usize,    // where subject DN starts
-    subject_dn_length: usize,    // length of subject DN
-    serial_number_offset: usize, // where serial number starts
+pub(crate) struct CertOffsets {
+    pub(crate) modulus_offset: usize,       // first real modulus byte (after sign byte)
+    pub(crate) modulus_tag_offset: usize,   // where 0x02 INTEGER tag is
+    pub(crate) subject_dn_offset: usize,    // where subject DN starts
+    pub(crate) subject_dn_length: usize,    // length of subject DN
+    pub(crate) serial_number_offset: usize, // where serial number starts
 }
 // === HiPKI /pkcs11info?withcert=true response structs ===
 
@@ -482,7 +482,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
 
     /// Generate RSA circuit input for a single certificate.
     /// Extracts the modulus from the cert and chunks both modulus and signature.
-    fn generate_rsa_circuit_input(
+    pub(crate) fn generate_rsa_circuit_input(
         cert: &Certificate,
         signature_b64: &str,
         original_data: &[u8],
@@ -604,7 +604,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
     // === DER parsing helpers ===
 
     /// Find the RSA modulus and subject DN byte offsets in a DER-encoded certificate.
-    fn parse_cert_offsets(der: &[u8]) -> Result<CertOffsets, Box<dyn std::error::Error>> {
+    pub(crate) fn parse_cert_offsets(der: &[u8]) -> Result<CertOffsets, Box<dyn std::error::Error>> {
         let (modulus_offset, modulus_tag_offset) = Self::find_modulus_offset(der)?;
 
         if der[modulus_tag_offset] != 0x02 {
@@ -764,7 +764,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
 
     // === Utility functions ===
 
-    fn bigint_to_chunks(n: &BigUint, count: usize, chunk_bits: usize) -> Vec<String> {
+    pub(crate) fn bigint_to_chunks(n: &BigUint, count: usize, chunk_bits: usize) -> Vec<String> {
         let mask = (BigUint::from(1u64) << chunk_bits) - BigUint::from(1u64);
         let mut chunks = Vec::new();
         let mut val = n.clone();
@@ -776,7 +776,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         chunks
     }
 
-    fn sha256_pad(msg: &[u8], max_len: usize) -> Vec<u8> {
+    pub(crate) fn sha256_pad(msg: &[u8], max_len: usize) -> Vec<u8> {
         let bit_len = (msg.len() as u64) * 8;
         let mut padded = msg.to_vec();
         padded.push(0x80);
@@ -788,7 +788,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         padded
     }
 
-    fn sha256_padded_length(original_len: usize) -> usize {
+    pub(crate) fn sha256_padded_length(original_len: usize) -> usize {
         let mut len = original_len + 1;
         while len % 64 != 56 {
             len += 1;

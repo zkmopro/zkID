@@ -106,7 +106,7 @@ impl RsaKeySize for DeviceSigRsa2048 {
 
 // ── Type aliases ────────────────────────────────────────────────────────────
 
-use super::sha256rsa_circuit::Sha256RsaCircuit;
+use super::sha256rsa_circuit::{Rsa2048, Sha256RsaCircuit};
 
 /// Cert-chain proof (Circuit A) for MOICA-G2 (RSA-2048 issuer + 2048 user).
 pub type CertChainCircuit = Sha256RsaCircuit<CertChainRsa2048>;
@@ -114,3 +114,174 @@ pub type CertChainCircuit = Sha256RsaCircuit<CertChainRsa2048>;
 pub type CertChainFidoCircuit = Sha256RsaCircuit<CertChainRsa4096>;
 /// Device-signature proof (Circuit B) — always RSA-2048 (user keys).
 pub type DeviceSigCircuit = Sha256RsaCircuit<DeviceSigRsa2048>;
+
+// ── Split input generation ──────────────────────────────────────────────────
+
+use base64::Engine as _;
+use der::Encode;
+use num_bigint::BigUint;
+use rsa::{pkcs8::DecodePublicKey, traits::PublicKeyParts, RsaPublicKey};
+use sha2::{Digest, Sha256};
+use x509_cert::Certificate;
+
+const RSA_N: usize = 121;
+const MAX_MESSAGE_LENGTH: usize = 1536;
+const MAX_SUBJECT_DN_LENGTH: usize = 128;
+const SMT_DEPTH: usize = 128;
+
+/// Generate split circuit input JSONs for CertChain (Circuit A) + DeviceSig
+/// (Circuit B).
+///
+/// Accepts already-parsed cert data (from HiPKI client or test fixtures) and
+/// produces two JSON values. The caller writes them to the appropriate paths.
+///
+/// `pk_blind` is derived deterministically as:
+///   `SHA-256(user_pk_bytes ‖ tbs ‖ "zkID/pk-commit/v1")` (decimal string)
+///
+/// Using `tbs` as the session-specific component ensures per-session freshness
+/// without requiring a separate session_id parameter.
+pub fn generate_split_inputs(
+    user_cert: &Certificate,
+    issuer_cert: &Certificate,
+    user_signature_b64: &str,
+    tbs: &[u8],
+    serial_hex: &str,
+    smt_inputs: Option<&crate::smt_client::SmtCircuitInputs>,
+    k_issuer: usize,
+    k_user: usize,
+) -> Result<(serde_json::Value, serde_json::Value), Box<dyn std::error::Error>> {
+    // Alias for calling pub(crate) static methods (type param is unused by these)
+    type S = Sha256RsaCircuit<Rsa2048>;
+
+    let zero_pad = |bytes: &[u8], length: usize| -> Vec<u64> {
+        assert!(
+            bytes.len() <= length,
+            "Data too large: {} > {}",
+            bytes.len(),
+            length
+        );
+        let mut v: Vec<u64> = bytes.iter().map(|&b| b as u64).collect();
+        v.resize(length, 0);
+        v
+    };
+
+    // --- Parse cert DER data ---
+    let user_cert_der = user_cert.to_der()?;
+    let user_cert_tbs_der = user_cert.tbs_certificate.to_der()?;
+    let user_offsets = S::parse_cert_offsets(&user_cert_der)?;
+    let user_subject_der = user_cert.tbs_certificate.subject.to_der()?;
+
+    // --- Extract user's RSA public key (for DeviceSig input + pk_blind) ---
+    let user_spki_der = user_cert
+        .tbs_certificate
+        .subject_public_key_info
+        .to_der()?;
+    let user_rsa_pub = RsaPublicKey::from_public_key_der(&user_spki_der)?;
+    let user_modulus = BigUint::from_bytes_be(&user_rsa_pub.n().to_bytes_be());
+    let user_pk_limbs = S::bigint_to_chunks(&user_modulus, k_user, RSA_N);
+
+    // --- Extract issuer modulus + issuer's signature on user cert ---
+    let issuer_spki_der = issuer_cert
+        .tbs_certificate
+        .subject_public_key_info
+        .to_der()?;
+    let issuer_rsa_pub = RsaPublicKey::from_public_key_der(&issuer_spki_der)?;
+    let issuer_modulus = BigUint::from_bytes_be(&issuer_rsa_pub.n().to_bytes_be());
+    let issuer_rsa_modulus = S::bigint_to_chunks(&issuer_modulus, k_issuer, RSA_N);
+
+    let issuer_sig_bytes = user_cert.signature.raw_bytes();
+    let issuer_sig_biguint = BigUint::from_bytes_be(issuer_sig_bytes);
+    let issuer_rsa_signature = S::bigint_to_chunks(&issuer_sig_biguint, k_issuer, RSA_N);
+
+    // --- User's device signature on tbs ---
+    let user_sig_bytes =
+        base64::engine::general_purpose::STANDARD.decode(user_signature_b64)?;
+    let user_sig_biguint = BigUint::from_bytes_be(&user_sig_bytes);
+    let user_rsa_signature = S::bigint_to_chunks(&user_sig_biguint, k_user, RSA_N);
+
+    // --- SHA-256 pad the messages ---
+    let tbs_padded: Vec<String> = S::sha256_pad(tbs, MAX_MESSAGE_LENGTH)
+        .iter()
+        .map(|b| b.to_string())
+        .collect();
+    let tbs_padded_len = S::sha256_padded_length(tbs.len());
+    let issuer_tbs_padded: Vec<String> =
+        S::sha256_pad(&user_cert_tbs_der, MAX_MESSAGE_LENGTH)
+            .iter()
+            .map(|b| b.to_string())
+            .collect();
+    let issuer_tbs_padded_len = S::sha256_padded_length(user_cert_tbs_der.len());
+
+    // --- pk_blind = SHA-256(user_pk_bytes ‖ tbs ‖ "zkID/pk-commit/v1") ---
+    let user_pk_bytes = user_rsa_pub.n().to_bytes_be();
+    let mut hasher = Sha256::new();
+    hasher.update(&user_pk_bytes);
+    hasher.update(tbs);
+    hasher.update(b"zkID/pk-commit/v1");
+    let pk_blind_hash = hasher.finalize();
+    let pk_blind = BigUint::from_bytes_be(&pk_blind_hash).to_string();
+
+    // --- Serial number ---
+    let serial_decimal = BigUint::parse_bytes(serial_hex.as_bytes(), 16)
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "0".to_string());
+
+    // --- SMT fields (use provided values or zero defaults) ---
+    let (smt_root, smt_serial, smt_siblings, smt_old_key, smt_old_value, smt_is_old0) =
+        match smt_inputs {
+            Some(smt) => (
+                smt.smt_root.clone(),
+                smt.serial_number.clone(),
+                smt.smt_siblings.clone(),
+                smt.smt_old_key.clone(),
+                smt.smt_old_value.clone(),
+                smt.smt_is_old0.clone(),
+            ),
+            None => {
+                let zeros = vec!["0".to_string(); SMT_DEPTH];
+                (
+                    "0".to_string(),
+                    serial_decimal,
+                    zeros,
+                    "0".to_string(),
+                    "0".to_string(),
+                    "1".to_string(),
+                )
+            }
+        };
+
+    // === CertChain JSON (Circuit A) ===
+    let cert_chain_json = serde_json::json!({
+        "user_cert_zero_padded": zero_pad(&user_cert_der, MAX_MESSAGE_LENGTH),
+        "actual_user_cert_length": user_cert_der.len(),
+        "user_modulus_offset": user_offsets.modulus_offset,
+        "user_modulus_tag_offset": user_offsets.modulus_tag_offset,
+        "subject_dn": zero_pad(&user_subject_der, MAX_SUBJECT_DN_LENGTH),
+        "subject_dn_offset": user_offsets.subject_dn_offset,
+        "subject_dn_length": user_offsets.subject_dn_length,
+        "serial_number_offset": user_offsets.serial_number_offset,
+        "issuer_tbs": issuer_tbs_padded,
+        "issuer_tbs_length": issuer_tbs_padded_len,
+        "actual_issuer_tbs_length": user_cert_tbs_der.len(),
+        "issuer_rsa_modulus": issuer_rsa_modulus,
+        "issuer_rsa_signature": issuer_rsa_signature,
+        "smtRoot": smt_root,
+        "serialNumber": smt_serial,
+        "smtSiblings": smt_siblings,
+        "smtOldKey": smt_old_key,
+        "smtOldValue": smt_old_value,
+        "smtIsOld0": smt_is_old0,
+        "pk_blind": pk_blind.clone(),
+    });
+
+    // === DeviceSig JSON (Circuit B) ===
+    let device_sig_json = serde_json::json!({
+        "tbs": tbs_padded,
+        "tbs_length": tbs_padded_len,
+        "user_pk_limbs": user_pk_limbs,
+        "user_rsa_signature": user_rsa_signature,
+        "pk_blind": pk_blind,
+    });
+
+    Ok((cert_chain_json, device_sig_json))
+}
