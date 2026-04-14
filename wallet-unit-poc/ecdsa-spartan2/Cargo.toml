@@ -13,8 +13,6 @@ path = "src/main.rs"
 
 [features]
 default = []
-sha256rsa2048 = []
-sha256rsa4096 = []
 cert_chain_rs2048 = []
 cert_chain_rs4096 = []
 device_sig_rs2048 = []

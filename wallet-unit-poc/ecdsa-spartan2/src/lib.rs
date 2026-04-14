@@ -1,9 +1,7 @@
-//! JWT-RS256 circuit implementation using Spartan2
+//! RS256 (RSA-SHA256) certificate circuits using Spartan2.
 //!
-//! This library provides zero-knowledge proof circuits for
-//! JWT token validation with selective disclosure using RSA-2048 signatures.
-//!
-//! The circuits use Spartan2's ZK-SNARK protocol with Hyrax polynomial commitment scheme.
+//! Zero-knowledge proofs for X.509 certificate verification (split cert-chain and
+//! device-signature circuits) using Spartan2 with Hyrax polynomial commitments.
 
 use spartan2::{provider::T256HyraxEngine, traits::Engine};
 
@@ -19,9 +17,7 @@ pub mod smt_client;
 pub mod utils;
 
 // Re-export commonly used types and functions
-pub use circuits::sha256rsa_circuit::{
-    Rsa2048, Rsa4096, Rs256Circuit, Rs256FidoCircuit, RsaKeySize, Sha256RsaCircuit,
-};
+pub use circuits::sha256rsa_circuit::{RsaKeySize, Sha256RsaCircuit};
 pub use circuits::split_circuits::{
     generate_split_inputs, CertChainCircuit, CertChainFidoCircuit, CertChainRsa2048,
     CertChainRsa4096, DeviceSigCircuit, DeviceSigRsa2048,

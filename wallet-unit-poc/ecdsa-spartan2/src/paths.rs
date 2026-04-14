@@ -45,9 +45,9 @@ impl PathConfig {
     /// Create config for development environment.
     ///
     /// Development uses nested paths relative to the current working directory:
-    /// - `../circom/inputs/sha256rsa2048/default.json`
+    /// - `../circom/inputs/cert_chain_rs2048/default.json`
     /// - `keys/*.key`
-    /// - `../circom/build/sha256rsa2048/sha256rsa2048_js/sha256rsa2048.r1cs`
+    /// - `../circom/build/cert_chain_rs2048/cert_chain_rs2048_js/cert_chain_rs2048.r1cs`
     pub fn development() -> Self {
         Self {
             base_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -58,7 +58,7 @@ impl PathConfig {
     /// Resolve the input JSON path for a circuit.
     ///
     /// # Arguments
-    /// * `circuit` - Circuit name (e.g., "sha256rsa2048")
+    /// * `circuit` - Circuit name (e.g., "cert_chain_rs2048")
     ///
     /// # Returns
     /// Full path to the input JSON file.
@@ -76,7 +76,7 @@ impl PathConfig {
     /// Resolve the R1CS file path for a circuit.
     ///
     /// # Arguments
-    /// * `circuit` - Circuit name (e.g., "sha256rsa2048")
+    /// * `circuit` - Circuit name (e.g., "cert_chain_rs2048")
     ///
     /// # Returns
     /// Full path to the R1CS file.
@@ -94,6 +94,10 @@ impl PathConfig {
         }
     }
 
+    fn keys_subdir_file(&self, name: &str) -> PathBuf {
+        self.base_dir.join("keys").join(name)
+    }
+
     /// Resolve a key file path (proving/verifying keys).
     ///
     /// # Arguments
@@ -102,7 +106,7 @@ impl PathConfig {
     /// # Returns
     /// Full path to the key file.
     pub fn key_path(&self, name: &str) -> PathBuf {
-        self.base_dir.join("keys").join(name)
+        self.keys_subdir_file(name)
     }
 
     /// Resolve an artifact file path (proofs, witnesses, instances).
@@ -113,7 +117,7 @@ impl PathConfig {
     /// # Returns
     /// Full path to the artifact file.
     pub fn artifact_path(&self, name: &str) -> PathBuf {
-        self.base_dir.join("keys").join(name)
+        self.keys_subdir_file(name)
     }
 
     /// Resolve an absolute path, joining relative paths with base_dir.
@@ -129,23 +133,6 @@ impl PathConfig {
     }
 }
 
-// Key file name constants
-pub mod keys {
-    // RSA-2048 (default / HiPKI / card mode)
-    pub const RS256_PROVING_KEY: &str = "rs256_proving.key";
-    pub const RS256_VERIFYING_KEY: &str = "rs256_verifying.key";
-    pub const RS256_PROOF: &str = "rs256_proof.bin";
-    pub const RS256_WITNESS: &str = "rs256_witness.bin";
-    pub const RS256_INSTANCE: &str = "rs256_instance.bin";
-
-    // RSA-4096 (FIDO mode)
-    pub const RS256_4096_PROVING_KEY: &str = "rs256_4096_proving.key";
-    pub const RS256_4096_VERIFYING_KEY: &str = "rs256_4096_verifying.key";
-    pub const RS256_4096_PROOF: &str = "rs256_4096_proof.bin";
-    pub const RS256_4096_WITNESS: &str = "rs256_4096_witness.bin";
-    pub const RS256_4096_INSTANCE: &str = "rs256_4096_instance.bin";
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,16 +142,16 @@ mod tests {
         let config = PathConfig::mobile("/app/Documents");
 
         assert_eq!(
-            config.input_json("sha256rsa2048"),
-            PathBuf::from("/app/Documents/sha256rsa2048_input.json")
+            config.input_json("cert_chain_rs2048"),
+            PathBuf::from("/app/Documents/cert_chain_rs2048_input.json")
         );
         assert_eq!(
-            config.r1cs_path("sha256rsa2048"),
-            PathBuf::from("/app/Documents/sha256rsa2048.r1cs")
+            config.r1cs_path("cert_chain_rs2048"),
+            PathBuf::from("/app/Documents/cert_chain_rs2048.r1cs")
         );
         assert_eq!(
-            config.key_path("rs256_proving.key"),
-            PathBuf::from("/app/Documents/keys/rs256_proving.key")
+            config.key_path("cert_chain_rs2048_proving.key"),
+            PathBuf::from("/app/Documents/keys/cert_chain_rs2048_proving.key")
         );
     }
 
@@ -173,8 +160,8 @@ mod tests {
         let config = PathConfig::new("/project", false);
 
         assert_eq!(
-            config.input_json("sha256rsa2048"),
-            PathBuf::from("/project/../circom/inputs/sha256rsa2048/default.json")
+            config.input_json("cert_chain_rs2048"),
+            PathBuf::from("/project/../circom/inputs/cert_chain_rs2048/default.json")
         );
     }
 
