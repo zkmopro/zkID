@@ -274,11 +274,11 @@ jobs:
                   cargo run --release --features cert_chain_rs4096 -- cert-chain prove --cert-chain-4096 --input ../circom/inputs/cert_chain_rs4096/input.json
                   cargo run --release --features cert_chain_rs4096 -- cert-chain verify --cert-chain-4096
 
-            - name: Run e2e flow — device-sig (RS2048)
+            - name: Run e2e flow — device-sig (RS4096 chain)
               run: |
                   cd wallet-unit-poc/ecdsa-spartan2
-                  cargo run --release --features device_sig_rs2048 -- device-sig setup --input ../circom/inputs/device_sig_rs2048/input.json
-                  cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs2048/input.json
+                  cargo run --release --features device_sig_rs2048 -- device-sig setup --input ../circom/inputs/device_sig_rs4096chain/input.json
+                  cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs4096chain/input.json
                   cargo run --release --features device_sig_rs2048 -- device-sig verify
 
             - name: Link-verify (RS4096)
