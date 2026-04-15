@@ -50,3 +50,49 @@ fn fixture_signature_matches_default_tbs() {
          Regenerate with: cargo run --example generate_fixtures",
     );
 }
+
+#[test]
+fn fixture_rs4096_signature_matches_default_tbs() {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine as _;
+    use rsa::{
+        pkcs1v15::{Signature, VerifyingKey},
+        pkcs8::DecodePublicKey,
+        signature::Verifier,
+        RsaPublicKey,
+    };
+    use sha2::Sha256;
+    use x509_cert::{
+        der::{Decode, Encode},
+        Certificate,
+    };
+
+    let response_str = std::fs::read_to_string("tests/testdata/rs4096_response_sign.json")
+        .expect("rs4096_response_sign.json not found — run `cargo run --example generate_fixtures` first");
+    let response: serde_json::Value =
+        serde_json::from_str(&response_str).expect("invalid JSON in rs4096_response_sign.json");
+
+    let cert_b64 = response["result"]["cert"].as_str().expect("missing result.cert");
+    let sig_b64 = response["result"]["signed_response"].as_str().expect("missing result.signed_response");
+
+    let cert_der = B64.decode(cert_b64).expect("cert base64 decode failed");
+    let sig_bytes = B64.decode(sig_b64).expect("signature base64 decode failed");
+
+    let cert = Certificate::from_der(&cert_der).expect("cert DER parse failed");
+    let spki_der = cert
+        .tbs_certificate
+        .subject_public_key_info
+        .to_der()
+        .expect("SPKI encode failed");
+    let pub_key =
+        RsaPublicKey::from_public_key_der(&spki_der).expect("RSA pub key decode failed");
+
+    let verifying_key = VerifyingKey::<Sha256>::new(pub_key);
+    let signature =
+        Signature::try_from(sig_bytes.as_slice()).expect("signature format invalid");
+
+    verifying_key.verify(DEFAULT_TBS, &signature).expect(
+        "RS4096 fixture signature does not match SHA-256(DEFAULT_TBS). \
+         Regenerate with: cargo run --example generate_fixtures",
+    );
+}

@@ -1,8 +1,12 @@
 //! Deterministic synthetic test fixture generator.
 //!
 //! Overwrites `tests/testdata/response_sign_test.json` and
-//! `tests/testdata/pkcs11info_test.json` with byte-stable output derived from
-//! `SEED`. The user cert's signature covers `DEFAULT_TBS`, matching main.rs:139.
+//! `tests/testdata/pkcs11info_test.json` (RS2048 path) and writes
+//! `tests/testdata/rs4096_response_sign.json` and
+//! `tests/testdata/test_ca_rs4096.der` (RS4096 path).
+//!
+//! All output is byte-stable for a given seed. The user cert's signature
+//! covers `DEFAULT_TBS`, matching main.rs:139.
 //!
 //! Usage: `cargo run --example generate_fixtures`
 
@@ -27,15 +31,25 @@ use x509_cert::time::{Time, Validity};
 const DEFAULT_TBS: &[u8] = b"e775f2805fb993e05a208dbff15d1c1";
 
 // Change only to rotate synthetic keys.
-const SEED: [u8; 32] = [
+const SEED_RS2048: [u8; 32] = [
     0x7a, 0x6b, 0x49, 0x44, 0x5f, 0x74, 0x65, 0x73,
     0x74, 0x5f, 0x66, 0x69, 0x78, 0x74, 0x75, 0x72,
     0x65, 0x73, 0x5f, 0x73, 0x65, 0x65, 0x64, 0x5f,
     0x76, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
+const SEED_RS4096: [u8; 32] = [
+    0x7a, 0x6b, 0x49, 0x44, 0x5f, 0x74, 0x65, 0x73,
+    0x74, 0x5f, 0x66, 0x69, 0x78, 0x74, 0x75, 0x72,
+    0x65, 0x73, 0x5f, 0x73, 0x65, 0x65, 0x64, 0x5f,
+    0x76, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04,
+];
+
 const CA_SERIAL_HEX: &str = "26c76ee1317398df0a955d312f0645703a47418f";
 const USER_SERIAL_HEX: &str = "5e4fad0a7c6dd854be121e7a00733b212c1aed8a";
+
+const CA4096_SERIAL_HEX: &str = "3d8f12a04e7c6bb9c2d45810f3a72916b5e8340d";
+const USER4096_SERIAL_HEX: &str = "7a1bc23d4ef56789abcde01234567890fedcba98";
 
 // 2025-01-01 → 2034-12-30 (10 * 365 days, no leap adjustment — arbitrary window).
 const NOT_BEFORE_UNIX: u64 = 1_735_689_600;
@@ -43,41 +57,63 @@ const VALIDITY_SECONDS: u64 = 10 * 365 * 24 * 3600;
 
 const RESPONSE_SIGN_PATH: &str = "tests/testdata/response_sign_test.json";
 const PKCS11INFO_PATH: &str = "tests/testdata/pkcs11info_test.json";
+const RS4096_RESPONSE_SIGN_PATH: &str = "tests/testdata/rs4096_response_sign.json";
+const TEST_CA_RS4096_DER_PATH: &str = "tests/testdata/test_ca_rs4096.der";
 
 type BoxErr = Box<dyn std::error::Error>;
 
 fn main() -> Result<(), BoxErr> {
-    let ca_key = generate_rsa_key(0)?;
-    let user_key = generate_rsa_key(1)?;
+    // Phase A: RS2048 fixtures (unchanged byte output)
+    eprintln!("[1/2] generating RS2048 fixtures...");
+    let ca2048_key = generate_rsa_key(SEED_RS2048, 0, 2048)?;
+    let user2048_key = generate_rsa_key(SEED_RS2048, 1, 2048)?;
+    let ca2048_cert = generate_ca_cert(&ca2048_key, CA_SERIAL_HEX)?;
+    let user2048_cert = generate_user_cert(&user2048_key, &ca2048_key, &ca2048_cert, USER_SERIAL_HEX)?;
+    let sig2048 = sign_test_challenge(&user2048_key)?;
 
-    let ca_cert = generate_ca_cert(&ca_key)?;
-    let user_cert = generate_user_cert(&user_key, &ca_key, &ca_cert)?;
-    let signature = sign_test_challenge(&user_key)?;
+    let ca2048_der = ca2048_cert.to_der()?;
+    let user2048_der = user2048_cert.to_der()?;
 
-    let ca_der = ca_cert.to_der()?;
-    let user_der = user_cert.to_der()?;
-
-    // Stage to .tmp then rename so a partial failure can't desync the two files.
     let response_tmp = format!("{}.tmp", RESPONSE_SIGN_PATH);
     let pkcs11_tmp = format!("{}.tmp", PKCS11INFO_PATH);
+    write_response_sign(&response_tmp, &user2048_der, &sig2048)?;
+    write_pkcs11info(&pkcs11_tmp, &ca2048_der, &user2048_der)?;
 
-    write_response_sign(&response_tmp, &user_der, &signature)?;
-    write_pkcs11info(&pkcs11_tmp, &ca_der, &user_der)?;
+    // Phase B: RS4096 fixtures (slow — ~20s for 4096-bit keygen)
+    eprintln!("[2/2] generating RS4096 fixtures (this takes ~20s)...");
+    let ca4096_key = generate_rsa_key(SEED_RS4096, 0, 4096)?;
+    let user4096_key = generate_rsa_key(SEED_RS4096, 1, 2048)?; // user stays 2048
+    let ca4096_cert = generate_ca_cert(&ca4096_key, CA4096_SERIAL_HEX)?;
+    let user4096_cert = generate_user_cert(&user4096_key, &ca4096_key, &ca4096_cert, USER4096_SERIAL_HEX)?;
+    let sig4096 = sign_test_challenge(&user4096_key)?;
 
+    let ca4096_der = ca4096_cert.to_der()?;
+    let user4096_der = user4096_cert.to_der()?;
+
+    let rs4096_resp_tmp = format!("{}.tmp", RS4096_RESPONSE_SIGN_PATH);
+    let test_ca_tmp = format!("{}.tmp", TEST_CA_RS4096_DER_PATH);
+    write_rs4096_response_sign(&rs4096_resp_tmp, &user4096_der, &sig4096)?;
+    std::fs::write(&test_ca_tmp, &ca4096_der)?;
+
+    // Commit all four files atomically
     std::fs::rename(&response_tmp, RESPONSE_SIGN_PATH)?;
     std::fs::rename(&pkcs11_tmp, PKCS11INFO_PATH)?;
+    std::fs::rename(&rs4096_resp_tmp, RS4096_RESPONSE_SIGN_PATH)?;
+    std::fs::rename(&test_ca_tmp, TEST_CA_RS4096_DER_PATH)?;
 
-    println!("Fixtures written to tests/testdata/");
-    println!("  response_sign_test.json  — user cert + signature over DEFAULT_TBS");
-    println!("  pkcs11info_test.json     — CA cert + user cert");
+    eprintln!("fixtures written:");
+    eprintln!("  {RESPONSE_SIGN_PATH}");
+    eprintln!("  {PKCS11INFO_PATH}");
+    eprintln!("  {RS4096_RESPONSE_SIGN_PATH}");
+    eprintln!("  {TEST_CA_RS4096_DER_PATH}");
     Ok(())
 }
 
-fn generate_rsa_key(index: u8) -> Result<RsaPrivateKey, BoxErr> {
-    let mut seed = SEED;
-    seed[31] ^= index;
-    let mut rng = ChaCha20Rng::from_seed(seed);
-    Ok(RsaPrivateKey::new(&mut rng, 2048)?)
+fn generate_rsa_key(seed: [u8; 32], index: u8, bits: usize) -> Result<RsaPrivateKey, BoxErr> {
+    let mut s = seed;
+    s[31] ^= index;
+    let mut rng = ChaCha20Rng::from_seed(s);
+    Ok(RsaPrivateKey::new(&mut rng, bits)?)
 }
 
 fn fixed_validity() -> Result<Validity, BoxErr> {
@@ -90,8 +126,8 @@ fn fixed_validity() -> Result<Validity, BoxErr> {
     Ok(Validity { not_before, not_after })
 }
 
-fn generate_ca_cert(ca_key: &RsaPrivateKey) -> Result<x509_cert::Certificate, BoxErr> {
-    let serial = SerialNumber::new(&hex::decode(CA_SERIAL_HEX)?)?;
+fn generate_ca_cert(ca_key: &RsaPrivateKey, serial_hex: &str) -> Result<x509_cert::Certificate, BoxErr> {
+    let serial = SerialNumber::new(&hex::decode(serial_hex)?)?;
     let subject: Name =
         "C=TW,O=Test Government CA,OU=Test Certificate Authority".parse()?;
     let signer = SigningKey::<Sha256>::new(ca_key.clone());
@@ -113,8 +149,9 @@ fn generate_user_cert(
     user_key: &RsaPrivateKey,
     ca_key: &RsaPrivateKey,
     ca_cert: &x509_cert::Certificate,
+    serial_hex: &str,
 ) -> Result<x509_cert::Certificate, BoxErr> {
-    let serial = SerialNumber::new(&hex::decode(USER_SERIAL_HEX)?)?;
+    let serial = SerialNumber::new(&hex::decode(serial_hex)?)?;
     let subject: Name = "C=TW,CN=Test User,serialNumber=0000000000000000".parse()?;
     let issuer_name = ca_cert.tbs_certificate.subject.clone();
 
@@ -184,6 +221,21 @@ fn write_pkcs11info(path: &str, ca_der: &[u8], user_der: &[u8]) -> Result<(), Bo
                 ]
             }
         }]
+    });
+    std::fs::write(path, serde_json::to_string_pretty(&payload)?)?;
+    Ok(())
+}
+
+fn write_rs4096_response_sign(path: &str, user_der: &[u8], sig_bytes: &[u8]) -> Result<(), BoxErr> {
+    let payload = serde_json::json!({
+        "error_code": "000",
+        "error_message": "success",
+        "result": {
+            "hashed_id_num":   "0000000000000000000000000000000000000000000000000000000000000000",
+            "signed_response": B64.encode(sig_bytes),
+            "idp_checksum":    "00000000",
+            "cert":            B64.encode(user_der)
+        }
     });
     std::fs::write(path, serde_json::to_string_pretty(&payload)?)?;
     Ok(())
