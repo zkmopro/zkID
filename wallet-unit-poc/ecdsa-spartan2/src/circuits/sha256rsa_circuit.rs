@@ -62,13 +62,7 @@ pub trait RsaKeySize: Send + Sync + Clone + 'static {
     fn generate_witness_bytes(json: &str) -> Result<Vec<u8>, String>;
 }
 
-/// SHA256RSA Circuit for single-stage RSA signature verification and age proof.
-///
-/// This circuit combines:
-/// - RSA signature verification (sha256WithRSAEncryption)
-///
-/// Unlike the ES256 flow which requires Prepare + Show circuits,
-/// RS256 verification is done in a single circuit without device binding.
+/// Generic RSA-SHA256 circuit backed by Spartan2.
 ///
 /// The type parameter `T` selects the circuit variant at compile time.
 /// See `split_circuits` module for available marker types (e.g. `CertChainRsa2048`).

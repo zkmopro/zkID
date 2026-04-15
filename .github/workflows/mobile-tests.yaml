@@ -354,23 +354,3 @@ jobs:
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # TODO: re-enable after mobile crate refactor for split circuits
-    # build-ios:
-    #     needs: compile-circuits
-    #     runs-on: macos-latest
-    #     ...
-
-    # build-android:
-    #     needs: compile-circuits
-    #     runs-on: ubuntu-latest
-    #     ...
-
-    # build-ios-bindings:
-    #     needs: compile-circuits-macos
-    #     runs-on: macos-latest
-    #     ...
-
-    # build-android-bindings:
-    #     needs: compile-circuits
-    #     runs-on: ubuntu-latest
-    #     ...

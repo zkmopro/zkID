@@ -230,7 +230,6 @@ fn run_link_verify(command_args: &[String]) -> ! {
         || command_args.contains(&"-4".to_string());
     let path_config = PathConfig::development();
 
-    // Verify cert-chain proof and extract public values
     let (cc_proof_file, cc_vk_file) = if rs4096 {
         (CertChainRsa4096::PROOF, CertChainRsa4096::VERIFYING_KEY)
     } else {
@@ -242,7 +241,6 @@ fn run_link_verify(command_args: &[String]) -> ! {
         path_config.key_path(cc_vk_file),
     );
 
-    // Verify device-sig proof and extract public values
     info!("Verifying device-sig proof...");
     let ds_public_values = verify_circuit(
         path_config.artifact_path(DeviceSigRsa2048::PROOF),
@@ -296,7 +294,6 @@ fn main() {
         }
     };
 
-    // Dispatch based on top-level command
     let top_command = &command_args[0];
     match top_command.as_str() {
         "cert-chain" => execute_cert_chain(command.action, command.options),
