@@ -1,15 +1,10 @@
 //! Deterministic synthetic test fixture generator.
 //!
-//! Overwrites:
-//!   tests/testdata/response_sign_test.json
-//!   tests/testdata/pkcs11info_test.json
+//! Overwrites `tests/testdata/response_sign_test.json` and
+//! `tests/testdata/pkcs11info_test.json` with byte-stable output derived from
+//! `SEED`. The user cert's signature covers `DEFAULT_TBS`, matching main.rs:139.
 //!
-//! Both files are byte-for-byte reproducible given the same SEED.
-//! The signature in response_sign_test.json is a valid PKCS#1 v1.5
-//! SHA-256 signature over the DEFAULT_TBS challenge, matching main.rs:139.
-//!
-//! Usage:
-//!   cargo run --example generate_fixtures
+//! Usage: `cargo run --example generate_fixtures`
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
@@ -28,10 +23,10 @@ use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
 use x509_cert::time::{Time, Validity};
 
-// Canonical challenge value — mirrors main.rs:139. DO NOT change here.
+// Mirror of main.rs:139 — keep in sync.
 const DEFAULT_TBS: &[u8] = b"e775f2805fb993e05a208dbff15d1c1";
 
-// Determinism seed. Change only to rotate synthetic keys.
+// Change only to rotate synthetic keys.
 const SEED: [u8; 32] = [
     0x7a, 0x6b, 0x49, 0x44, 0x5f, 0x74, 0x65, 0x73,
     0x74, 0x5f, 0x66, 0x69, 0x78, 0x74, 0x75, 0x72,
@@ -39,14 +34,15 @@ const SEED: [u8; 32] = [
     0x76, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
-// Hex-encoded serials — kept stable to minimise git diff when keys rotate.
 const CA_SERIAL_HEX: &str = "26c76ee1317398df0a955d312f0645703a47418f";
 const USER_SERIAL_HEX: &str = "5e4fad0a7c6dd854be121e7a00733b212c1aed8a";
 
-// Fixed validity window so cert DER is byte-identical across regeneration days.
-// 2026-01-01T00:00:00Z → 2036-01-01T00:00:00Z (10 years)
+// 2025-01-01 → 2034-12-30 (10 * 365 days, no leap adjustment — arbitrary window).
 const NOT_BEFORE_UNIX: u64 = 1_735_689_600;
 const VALIDITY_SECONDS: u64 = 10 * 365 * 24 * 3600;
+
+const RESPONSE_SIGN_PATH: &str = "tests/testdata/response_sign_test.json";
+const PKCS11INFO_PATH: &str = "tests/testdata/pkcs11info_test.json";
 
 type BoxErr = Box<dyn std::error::Error>;
 
@@ -61,8 +57,15 @@ fn main() -> Result<(), BoxErr> {
     let ca_der = ca_cert.to_der()?;
     let user_der = user_cert.to_der()?;
 
-    write_response_sign(&user_der, &signature)?;
-    write_pkcs11info(&ca_der, &user_der)?;
+    // Stage to .tmp then rename so a partial failure can't desync the two files.
+    let response_tmp = format!("{}.tmp", RESPONSE_SIGN_PATH);
+    let pkcs11_tmp = format!("{}.tmp", PKCS11INFO_PATH);
+
+    write_response_sign(&response_tmp, &user_der, &signature)?;
+    write_pkcs11info(&pkcs11_tmp, &ca_der, &user_der)?;
+
+    std::fs::rename(&response_tmp, RESPONSE_SIGN_PATH)?;
+    std::fs::rename(&pkcs11_tmp, PKCS11INFO_PATH)?;
 
     println!("Fixtures written to tests/testdata/");
     println!("  response_sign_test.json  — user cert + signature over DEFAULT_TBS");
@@ -142,7 +145,7 @@ fn sign_test_challenge(user_key: &RsaPrivateKey) -> Result<Vec<u8>, BoxErr> {
     Ok(sig.to_vec())
 }
 
-fn write_response_sign(user_der: &[u8], sig_bytes: &[u8]) -> Result<(), BoxErr> {
+fn write_response_sign(path: &str, user_der: &[u8], sig_bytes: &[u8]) -> Result<(), BoxErr> {
     let payload = serde_json::json!({
         "cardSN":     "TEST000000000000",
         "certb64":    B64.encode(user_der),
@@ -152,14 +155,11 @@ fn write_response_sign(user_der: &[u8], sig_bytes: &[u8]) -> Result<(), BoxErr> 
         "signature":  B64.encode(sig_bytes),
         "version":    "0.0.0"
     });
-    std::fs::write(
-        "tests/testdata/response_sign_test.json",
-        serde_json::to_string_pretty(&payload)?,
-    )?;
+    std::fs::write(path, serde_json::to_string_pretty(&payload)?)?;
     Ok(())
 }
 
-fn write_pkcs11info(ca_der: &[u8], user_der: &[u8]) -> Result<(), BoxErr> {
+fn write_pkcs11info(path: &str, ca_der: &[u8], user_der: &[u8]) -> Result<(), BoxErr> {
     let payload = serde_json::json!({
         "func":       "pkcs11info",
         "last_error": 0,
@@ -185,9 +185,6 @@ fn write_pkcs11info(ca_der: &[u8], user_der: &[u8]) -> Result<(), BoxErr> {
             }
         }]
     });
-    std::fs::write(
-        "tests/testdata/pkcs11info_test.json",
-        serde_json::to_string_pretty(&payload)?,
-    )?;
+    std::fs::write(path, serde_json::to_string_pretty(&payload)?)?;
     Ok(())
 }
