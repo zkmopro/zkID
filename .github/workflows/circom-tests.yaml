@@ -1,0 +1,175 @@
+# Compiles all Circom circuits (Linux) and runs the mocha witness test suite.
+# Also smoke-compiles a subset on macOS to catch platform-specific issues.
+# Triggers on changes to circom source or this workflow file.
+name: circom-tests
+
+on:
+    push:
+        branches:
+            - main
+        paths:
+            - "wallet-unit-poc/circom/**"
+            - ".github/workflows/circom-tests.yaml"
+    pull_request:
+        paths:
+            - "wallet-unit-poc/circom/**"
+            - ".github/workflows/circom-tests.yaml"
+    workflow_dispatch:
+
+jobs:
+    compile-circuits:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install system dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install --yes \
+                    build-essential \
+                    libgmp-dev \
+                    libsodium-dev \
+                    nasm \
+                    nlohmann-json3-dev
+
+            - name: Download Circom Binary v2.2.3
+              run: |
+                  wget -qO /home/runner/work/circom https://github.com/iden3/circom/releases/download/v2.2.3/circom-linux-amd64
+                  chmod +x /home/runner/work/circom
+                  sudo mv /home/runner/work/circom /bin/circom
+
+            - name: Print Circom version
+              run: circom --version
+
+            - name: Install JS dependencies
+              run: cd wallet-unit-poc/circom && yarn
+
+            - name: Compile all circuits
+              run: cd wallet-unit-poc/circom && yarn compile:all
+
+            - name: Upload circuit C++ artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: circuit-cpp
+                  path: |
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs2048.cpp
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs2048.dat
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs4096.cpp
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs4096.dat
+                      wallet-unit-poc/circom/build/cpp/device_sig_rs2048.cpp
+                      wallet-unit-poc/circom/build/cpp/device_sig_rs2048.dat
+                  retention-days: 1
+
+            - name: Upload cert_chain_rs2048 R1CS artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: circuit-r1cs-cert-chain-rs2048
+                  path: wallet-unit-poc/circom/build/cert_chain_rs2048/cert_chain_rs2048_js/cert_chain_rs2048.r1cs
+                  retention-days: 1
+
+            - name: Upload cert_chain_rs4096 R1CS artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: circuit-r1cs-cert-chain-rs4096
+                  path: wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/cert_chain_rs4096.r1cs
+                  retention-days: 1
+
+            - name: Upload device_sig_rs2048 R1CS artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: circuit-r1cs-device-sig-rs2048
+                  path: wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.r1cs
+                  retention-days: 1
+
+    circuit-tests:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install system dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install --yes \
+                    build-essential \
+                    libgmp-dev \
+                    libsodium-dev \
+                    nasm \
+                    nlohmann-json3-dev
+
+            - name: Download Circom Binary v2.2.3
+              run: |
+                  wget -qO /home/runner/work/circom https://github.com/iden3/circom/releases/download/v2.2.3/circom-linux-amd64
+                  chmod +x /home/runner/work/circom
+                  sudo mv /home/runner/work/circom /bin/circom
+
+            - name: Install JS dependencies
+              run: cd wallet-unit-poc/circom && yarn
+
+            - name: Run circuit tests
+              run: cd wallet-unit-poc/circom && yarn test
+
+    compile-circuits-macos:
+        runs-on: macos-latest
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install system dependencies
+              run: |
+                  brew install nasm
+
+            - name: Download Circom Binary v2.2.3
+              run: |
+                  sudo wget -O ~/.cargo/bin/circom https://github.com/iden3/circom/releases/download/v2.2.3/circom-macos-amd64
+                  sudo chmod +x ~/.cargo/bin/circom
+
+            - name: Print Circom version
+              run: circom --version
+
+            - name: Install JS dependencies
+              run: cd wallet-unit-poc/circom && yarn
+
+            - name: Compile cert_chain_rs4096 circuit
+              run: cd wallet-unit-poc/circom && yarn compile:cert_chain_rs4096
+
+            - name: Compile device_sig_rs2048 circuit
+              run: cd wallet-unit-poc/circom && yarn compile:device_sig_rs2048
+
+            - name: Upload circuit C++ artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: circuit-cpp-macos
+                  path: |
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs4096.cpp
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs4096.dat
+                      wallet-unit-poc/circom/build/cpp/device_sig_rs2048.cpp
+                      wallet-unit-poc/circom/build/cpp/device_sig_rs2048.dat
+                  retention-days: 1
+
+            - name: Upload cert_chain_rs4096 R1CS artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: circuit-r1cs-cert-chain-rs4096-macos
+                  path: wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/cert_chain_rs4096.r1cs
+                  retention-days: 1
+
+            - name: Upload device_sig_rs2048 R1CS artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: circuit-r1cs-device-sig-rs2048-macos
+                  path: wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.r1cs
+                  retention-days: 1
