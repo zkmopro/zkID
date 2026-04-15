@@ -87,3 +87,29 @@ RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 benchmark --
 ```sh
 cargo test --release
 ```
+
+## Regenerating test fixtures
+
+The bundled synthetic fixtures in `tests/testdata/` are generated deterministically
+from a fixed seed. Regenerate them whenever the synthetic RSA key material rotates,
+or after a fresh clone if you want to confirm fixture integrity:
+
+```sh
+cargo run --example generate_fixtures
+```
+
+This overwrites `tests/testdata/response_sign_test.json` and
+`tests/testdata/pkcs11info_test.json`. The generator:
+- Creates a 2048-bit RSA CA key and user key from a fixed ChaCha20 seed
+- Issues a self-signed CA certificate and a CA-signed user certificate
+- Signs `b"e775f2805fb993e05a208dbff15d1c1"` (the default TBS challenge) with
+  the user key using PKCS#1 v1.5 / SHA-256
+
+Private keys are **not** persisted — they are re-derived from the seed on each run.
+Never replace the synthetic fixtures with real card material.
+
+Run the consistency test to verify fixtures are aligned with the TBS constant:
+
+```sh
+cargo test --release fixture_consistency
+```
