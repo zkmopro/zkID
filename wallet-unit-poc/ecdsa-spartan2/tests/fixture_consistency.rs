@@ -95,3 +95,63 @@ fn fixture_rs4096_signature_matches_default_tbs() {
          Regenerate with: cargo run --example generate_fixtures",
     );
 }
+
+#[test]
+fn fixture_device_sig_input_is_valid_json() {
+    let input_str = std::fs::read_to_string("../circom/inputs/device_sig_rs2048/input.json")
+        .expect("device_sig_rs2048/input.json not found");
+    let input: serde_json::Value =
+        serde_json::from_str(&input_str).expect("invalid JSON in device_sig input");
+
+    for key in [
+        "tbs",
+        "tbs_length",
+        "user_pk_limbs",
+        "user_rsa_signature",
+        "pk_blind",
+    ] {
+        assert!(
+            input.get(key).is_some(),
+            "device_sig input missing key: {key}"
+        );
+    }
+
+    assert_eq!(
+        input["tbs"].as_array().unwrap().len(),
+        1536,
+        "tbs array must have maxMessageLength=1536 elements"
+    );
+    assert_eq!(
+        input["user_pk_limbs"].as_array().unwrap().len(),
+        17,
+        "user_pk_limbs must have k=17 limbs for RSA-2048"
+    );
+    assert_eq!(
+        input["user_rsa_signature"].as_array().unwrap().len(),
+        17,
+        "user_rsa_signature must have k=17 limbs for RSA-2048"
+    );
+}
+
+#[test]
+fn fixture_pk_blind_matches_across_inputs() {
+    let cc_str = std::fs::read_to_string("../circom/inputs/cert_chain_rs2048/input.json")
+        .expect("cert_chain_rs2048/input.json not found");
+    let ds_str = std::fs::read_to_string("../circom/inputs/device_sig_rs2048/input.json")
+        .expect("device_sig_rs2048/input.json not found");
+
+    let cc: serde_json::Value = serde_json::from_str(&cc_str).unwrap();
+    let ds: serde_json::Value = serde_json::from_str(&ds_str).unwrap();
+
+    let cc_blind = cc["pk_blind"]
+        .as_str()
+        .expect("cert_chain pk_blind not a string");
+    let ds_blind = ds["pk_blind"]
+        .as_str()
+        .expect("device_sig pk_blind not a string");
+
+    assert_eq!(
+        cc_blind, ds_blind,
+        "pk_blind must match between cert_chain_rs2048 and device_sig_rs2048 fixtures"
+    );
+}
