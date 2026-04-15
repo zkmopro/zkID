@@ -40,6 +40,11 @@ const-oid = { version = "0.9", features = ["db"] }
 hex = "0.4.3"
 ureq = { version = "2", features = ["json"] }
 
+[dev-dependencies]
+x509-cert = { version = "0.2", features = ["builder"] }
+rand_chacha = "0.3"
+rsa = { version = "0.9", features = ["sha2"] }
+
 [build-dependencies]
 witnesscalc-adapter = { git = "https://github.com/zkmopro/witnesscalc_adapter.git", branch = "secq256r1-support" }
 chkstk_stub = { version = "0.1.0" }
