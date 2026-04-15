@@ -34,9 +34,10 @@
 
 use ecdsa_spartan2::{
     generate_split_inputs, load_proof, prove_circuit, prove_circuit_with_pk, run_circuit,
-    save_keys, setup_circuit_keys, setup_circuit_keys_no_save, verify_circuit,
-    verify_circuit_with_loaded_data, CertChainCircuit, CertChainRs4096Circuit, CertChainRsa2048,
-    CertChainRsa4096, DeviceSigRsa2048, PathConfig, RsaKeySize, Sha256RsaCircuit,
+    save_keys, serial_bytes_to_hex_trimmed, setup_circuit_keys, setup_circuit_keys_no_save,
+    verify_circuit, verify_circuit_with_loaded_data, CertChainCircuit, CertChainRs4096Circuit,
+    CertChainRsa2048, CertChainRsa4096, DeviceSigRsa2048, PathConfig, RsaKeySize,
+    Sha256RsaCircuit,
 };
 use std::{
     env::args,
@@ -50,20 +51,6 @@ use tracing_subscriber::EnvFilter;
 
 fn get_file_size(path: &Path) -> u64 {
     fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-}
-
-/// DER INTEGER serial bytes → hex with leading zero bytes stripped.
-fn serial_hex_trimmed(serial_bytes: &[u8]) -> String {
-    let trimmed: Vec<u8> = serial_bytes
-        .iter()
-        .skip_while(|&&b| b == 0)
-        .copied()
-        .collect();
-    hex::encode(if trimmed.is_empty() {
-        serial_bytes
-    } else {
-        &trimmed
-    })
 }
 
 /// Format bytes into human-readable size string
@@ -147,7 +134,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             serde_json::from_str(&response_str).expect("Failed to parse RS4096 response");
         let user_cert = CertChainRs4096Circuit::generate_user_cert_from_certb64(&response.result.cert)
             .expect("Failed to parse user cert");
-        let serial_hex = serial_hex_trimmed(
+        let serial_hex = serial_bytes_to_hex_trimmed(
             user_cert.tbs_certificate.serial_number.as_bytes(),
         );
         (
@@ -170,7 +157,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             serde_json::from_str(&response_str).expect("Failed to parse sign response");
         let user_cert = CertChainCircuit::generate_user_cert_from_certb64(&response.certb64)
             .expect("Failed to parse user cert");
-        let serial_hex = serial_hex_trimmed(
+        let serial_hex = serial_bytes_to_hex_trimmed(
             user_cert.tbs_certificate.serial_number.as_bytes(),
         );
         (

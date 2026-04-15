@@ -164,7 +164,8 @@ pub(crate) fn smt_fields_from_option(
     }
 }
 
-fn serial_bytes_to_hex_trimmed(serial_bytes: &[u8]) -> String {
+/// DER INTEGER serial bytes to hex with leading zero bytes stripped.
+pub fn serial_bytes_to_hex_trimmed(serial_bytes: &[u8]) -> String {
     let trimmed: Vec<u8> = serial_bytes
         .iter()
         .skip_while(|&&b| b == 0)

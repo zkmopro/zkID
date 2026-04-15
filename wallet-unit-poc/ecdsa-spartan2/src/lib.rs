@@ -19,7 +19,7 @@ pub mod setup;
 pub mod smt_client;
 pub mod utils;
 
-pub use circuits::sha256rsa_circuit::{RsaKeySize, Sha256RsaCircuit};
+pub use circuits::sha256rsa_circuit::{serial_bytes_to_hex_trimmed, RsaKeySize, Sha256RsaCircuit};
 pub use circuits::split_circuits::{
     generate_split_inputs, CertChainCircuit, CertChainRs4096Circuit, CertChainRsa2048,
     CertChainRsa4096, DeviceSigCircuit, DeviceSigRsa2048,
