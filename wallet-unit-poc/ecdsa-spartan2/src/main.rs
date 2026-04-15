@@ -92,7 +92,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     let mut smt_server: Option<String> = None;
     let mut issuer = "g2".to_string();
     let mut cert_chain_output = "../circom/inputs/cert_chain_rs2048/input.json".to_string();
-    let mut device_sig_output = "../circom/inputs/device_sig_rs2048/input.json".to_string();
+    let device_sig_output = "../circom/inputs/device_sig_rs2048/input.json".to_string();
 
     let mut i = 1;
     while i < command_args.len() {
@@ -100,8 +100,6 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             "--cert-chain-4096" | "-4" => {
                 rs4096 = true;
                 cert_chain_output = "../circom/inputs/cert_chain_rs4096/input.json".to_string();
-                device_sig_output =
-                    "../circom/inputs/device_sig_rs4096chain/input.json".to_string();
                 issuer = "g3".to_string();
             }
             "--smt-server" => {
