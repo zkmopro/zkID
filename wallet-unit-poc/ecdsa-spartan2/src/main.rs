@@ -136,7 +136,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
 
     let (k_issuer, k_user) = if rs4096 { (34, 17) } else { (17, 17) };
 
-    let default_tbs = b"e775f2805fb993e05a208dbff15d1c1";
+    let default_tbs = ecdsa_spartan2::DEFAULT_TBS;
     let (user_cert, user_sig_b64, issuer_cert, serial_hex) = if rs4096 {
         let response_path = Path::new("tests/testdata/rs4096_response_sign.json");
         let issuer_cert = CertChainRs4096Circuit::fetch_cert_from_file("tests/testdata/test_ca_rs4096.der")
@@ -191,7 +191,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         &user_cert,
         &issuer_cert,
         &user_sig_b64,
-        default_tbs.as_slice(),
+        default_tbs,
         &serial_hex,
         smt_inputs.as_ref(),
         k_issuer,

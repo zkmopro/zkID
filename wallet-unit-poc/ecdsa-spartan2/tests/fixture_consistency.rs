@@ -1,8 +1,7 @@
 //! Asserts the bundled fixture's signature is a valid PKCS#1 v1.5 signature
-//! over `SHA-256(DEFAULT_TBS)`. Fails if the fixture and `main.rs:139` drift.
+//! over `SHA-256(DEFAULT_TBS)`.
 
-// Mirror of main.rs:139 — keep in sync.
-const DEFAULT_TBS: &[u8] = b"e775f2805fb993e05a208dbff15d1c1";
+use ecdsa_spartan2::DEFAULT_TBS;
 
 #[test]
 fn fixture_signature_matches_default_tbs() {

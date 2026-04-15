@@ -8,6 +8,9 @@ use spartan2::{provider::T256HyraxEngine, traits::Engine};
 pub type E = T256HyraxEngine;
 pub type Scalar = <E as Engine>::Scalar;
 
+/// Default TBS challenge used by test fixtures and CLI defaults.
+pub const DEFAULT_TBS: &[u8] = b"e775f2805fb993e05a208dbff15d1c1";
+
 pub mod circuits;
 pub mod hipki_client;
 pub mod paths;

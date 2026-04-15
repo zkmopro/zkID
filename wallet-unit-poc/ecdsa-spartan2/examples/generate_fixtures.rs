@@ -27,8 +27,7 @@ use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
 use x509_cert::time::{Time, Validity};
 
-// Mirror of main.rs:139 — keep in sync.
-const DEFAULT_TBS: &[u8] = b"e775f2805fb993e05a208dbff15d1c1";
+use ecdsa_spartan2::DEFAULT_TBS;
 
 // Change only to rotate synthetic keys.
 const SEED_RS2048: [u8; 32] = [
