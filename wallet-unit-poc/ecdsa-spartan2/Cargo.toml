@@ -13,8 +13,9 @@ path = "src/main.rs"
 
 [features]
 default = []
-sha256rsa2048 = []
-sha256rsa4096 = []
+cert_chain_rs2048 = []
+cert_chain_rs4096 = []
+device_sig_rs2048 = []
 
 [dependencies]
 spartan2 = { git = "https://github.com/therealyingtong/Spartan2.git", branch = "zk", default-features = false }
@@ -38,6 +39,11 @@ der = { version = "0.7", features = ["derive"] }
 const-oid = { version = "0.9", features = ["db"] }
 hex = "0.4.3"
 ureq = { version = "2", features = ["json"] }
+
+[dev-dependencies]
+x509-cert = { version = "0.2", features = ["builder"] }
+rand_chacha = "0.3"
+rsa = { version = "0.9", features = ["sha2"] }
 
 [build-dependencies]
 witnesscalc-adapter = { git = "https://github.com/zkmopro/witnesscalc_adapter.git", branch = "secq256r1-support" }

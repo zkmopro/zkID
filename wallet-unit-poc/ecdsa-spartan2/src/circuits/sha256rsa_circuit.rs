@@ -37,11 +37,6 @@ use x509_cert::{
     Certificate,
 };
 
-#[cfg(feature = "sha256rsa2048")]
-witnesscalc_adapter::witness!(sha256rsa2048);
-#[cfg(feature = "sha256rsa4096")]
-witnesscalc_adapter::witness!(sha256rsa4096);
-
 // ── RSA key-size marker trait ─────────────────────────────────────────────────
 
 /// Marker trait that carries all compile-time constants and the witness-generation
@@ -67,65 +62,10 @@ pub trait RsaKeySize: Send + Sync + Clone + 'static {
     fn generate_witness_bytes(json: &str) -> Result<Vec<u8>, String>;
 }
 
-/// Marker type for RSA-2048 circuits (`k = 17` limbs of 121 bits).
-#[derive(Debug, Clone, Copy)]
-pub struct Rsa2048;
-
-/// Marker type for RSA-4096 circuits (`k = 34` limbs of 121 bits).
-#[derive(Debug, Clone, Copy)]
-pub struct Rsa4096;
-
-#[allow(unused_variables)]
-impl RsaKeySize for Rsa2048 {
-    const RSA_K: usize = 17;
-    const CIRCUIT_NAME: &'static str = "sha256rsa2048";
-    /// 17 (rsaModulus limbs) + 1 (smtRoot) + 1 (serialNumber) + 1 (subjectDNHash) + 1 (TBS)
-    const NUM_PUBLIC: usize = 21;
-    const PROVING_KEY: &'static str = "rs256_proving.key";
-    const VERIFYING_KEY: &'static str = "rs256_verifying.key";
-    const PROOF: &'static str = "rs256_proof.bin";
-    const WITNESS: &'static str = "rs256_witness.bin";
-    const INSTANCE: &'static str = "rs256_instance.bin";
-
-    fn generate_witness_bytes(json: &str) -> Result<Vec<u8>, String> {
-        #[cfg(feature = "sha256rsa2048")]
-        return sha256rsa2048_witness(json).map_err(|e| e.to_string());
-        #[cfg(not(feature = "sha256rsa2048"))]
-        Err("Feature `sha256rsa2048` is not enabled".to_string())
-    }
-}
-
-#[allow(unused_variables)]
-impl RsaKeySize for Rsa4096 {
-    const RSA_K: usize = 34;
-    const CIRCUIT_NAME: &'static str = "sha256rsa4096";
-    /// 34 (rsaModulus limbs) + 1 (smtRoot) + 1 (serialNumber) + 1 (subjectDNHash) + 1 (TBS)
-    const NUM_PUBLIC: usize = 38;
-    const PROVING_KEY: &'static str = "rs256_4096_proving.key";
-    const VERIFYING_KEY: &'static str = "rs256_4096_verifying.key";
-    const PROOF: &'static str = "rs256_4096_proof.bin";
-    const WITNESS: &'static str = "rs256_4096_witness.bin";
-    const INSTANCE: &'static str = "rs256_4096_instance.bin";
-
-    fn generate_witness_bytes(json: &str) -> Result<Vec<u8>, String> {
-        #[cfg(feature = "sha256rsa4096")]
-        return sha256rsa4096_witness(json).map_err(|e| e.to_string());
-        #[cfg(not(feature = "sha256rsa4096"))]
-        Err("Feature `sha256rsa4096` is not enabled".to_string())
-    }
-}
-
-/// SHA256RSA2048/SHA256RSA4096 Circuit for single-stage RSA signature verification and age proof.
+/// Generic RSA-SHA256 circuit backed by Spartan2.
 ///
-/// This circuit combines:
-/// - RSA signature verification (sha256WithRSAEncryption)
-///
-/// Unlike the ES256 flow which requires Prepare + Show circuits,
-/// RS256 verification is done in a single circuit without device binding.
-///
-/// The type parameter `T` selects the RSA key size at compile time:
-/// - `Sha256RsaCircuit<Rsa2048>` — RSA-2048, 17 limbs, `sha256rsa2048` circuit
-/// - `Sha256RsaCircuit<Rsa4096>` — RSA-4096, 34 limbs, `sha256rsa4096` circuit
+/// The type parameter `T` selects the circuit variant at compile time.
+/// See `split_circuits` module for available marker types (e.g. `CertChainRsa2048`).
 #[derive(Clone)]
 pub struct Sha256RsaCircuit<T: RsaKeySize> {
     /// Path configuration for resolving file paths
@@ -164,16 +104,16 @@ pub struct CardSignResponse {
     _version: String,
 }
 
-/// Response from FIDO `/sign` API.
+/// Response from RS4096 sign API (4096-bit issuer CA path).
 #[derive(Deserialize)]
-pub struct FidoSignResponse {
+pub struct Rs4096SignResponse {
     pub error_code: String,
     pub error_message: String,
-    pub result: FidoSignResult,
+    pub result: Rs4096SignResult,
 }
 
 #[derive(Deserialize)]
-pub struct FidoSignResult {
+pub struct Rs4096SignResult {
     pub hashed_id_num: String,
     pub signed_response: String,
     pub idp_checksum: String,
@@ -181,22 +121,85 @@ pub struct FidoSignResult {
 }
 
 /// Intermediate result from per-certificate RSA input generation.
-struct RsaCircuitInput {
-    message: Vec<String>,
-    message_length: usize,
-    rsa_modulus: Vec<String>,
-    rsa_signature: Vec<String>,
+pub(crate) struct RsaCircuitInput {
+    pub(crate) message: Vec<String>,
+    pub(crate) message_length: usize,
+    pub(crate) rsa_modulus: Vec<String>,
+    pub(crate) rsa_signature: Vec<String>,
+}
+
+/// SMT JSON fields: either cloned from a fetched proof or deterministic defaults.
+pub(crate) fn smt_fields_from_option(
+    smt_inputs: Option<&crate::smt_client::SmtCircuitInputs>,
+    serial_decimal: String,
+    sibling_depth: usize,
+) -> (
+    String,
+    String,
+    Vec<String>,
+    String,
+    String,
+    String,
+) {
+    match smt_inputs {
+        Some(smt) => (
+            smt.smt_root.clone(),
+            smt.serial_number.clone(),
+            smt.smt_siblings.clone(),
+            smt.smt_old_key.clone(),
+            smt.smt_old_value.clone(),
+            smt.smt_is_old0.clone(),
+        ),
+        None => {
+            let zeros = vec!["0".to_string(); sibling_depth];
+            (
+                "0".to_string(),
+                serial_decimal,
+                zeros,
+                "0".to_string(),
+                "0".to_string(),
+                "1".to_string(),
+            )
+        }
+    }
+}
+
+/// DER INTEGER serial bytes to hex with leading zero bytes stripped.
+pub fn serial_bytes_to_hex_trimmed(serial_bytes: &[u8]) -> String {
+    let trimmed: Vec<u8> = serial_bytes
+        .iter()
+        .skip_while(|&&b| b == 0)
+        .copied()
+        .collect();
+    hex::encode(if trimmed.is_empty() {
+        serial_bytes
+    } else {
+        &trimmed
+    })
+}
+
+/// Zero-pad `bytes` to `length` elements as `u64` wire values (Circom input style).
+pub(crate) fn zero_pad_to_u64(bytes: &[u8], length: usize) -> Vec<u64> {
+    assert!(
+        bytes.len() <= length,
+        "byte length {} exceeds maximum {}",
+        bytes.len(),
+        length
+    );
+    let mut v: Vec<u64> = bytes.iter().map(|&b| b as u64).collect();
+    v.resize(length, 0);
+    v
 }
 
 /// DER byte offsets for in-circuit modulus extraction.
 
 #[derive(Debug)]
-struct CertOffsets {
-    modulus_offset: usize,       // first real modulus byte (after sign byte)
-    modulus_tag_offset: usize,   // where 0x02 INTEGER tag is
-    subject_dn_offset: usize,    // where subject DN starts
-    subject_dn_length: usize,    // length of subject DN
-    serial_number_offset: usize, // where serial number starts
+pub(crate) struct CertOffsets {
+    pub(crate) modulus_offset: usize,       // first real modulus byte (after sign byte)
+    pub(crate) modulus_tag_offset: usize,   // where 0x02 INTEGER tag is
+    pub(crate) subject_dn_offset: usize,    // where subject DN starts
+    pub(crate) subject_dn_length: usize,    // length of subject DN
+    pub(crate) serial_number_offset: usize, // where serial number starts
 }
 // === HiPKI /pkcs11info?withcert=true response structs ===
 
@@ -375,18 +378,8 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         output_path: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let subject_cn = Self::get_attr(&user_cert.tbs_certificate.subject, COMMON_NAME);
-        // Strip leading 0x00 padding bytes from DER INTEGER encoding
-        let serial_bytes = user_cert.tbs_certificate.serial_number.as_bytes();
-        let trimmed: Vec<u8> = serial_bytes
-            .iter()
-            .skip_while(|&&b| b == 0)
-            .copied()
-            .collect();
-        let serial_hex = hex::encode(if trimmed.is_empty() {
-            serial_bytes
-        } else {
-            &trimmed
-        });
+        let serial_hex =
+            serial_bytes_to_hex_trimmed(user_cert.tbs_certificate.serial_number.as_bytes());
         info!(subject = %subject_cn, serial = %serial_hex, "Parsed user certificate");
 
         Self::verify_issuer_signature(issuer_cert, &user_cert)?;
@@ -455,7 +448,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         )
     }
 
-    pub fn generate_input_from_fido_file(
+    pub fn generate_input_from_rs4096_file(
         response_path: &Path,
         tbs: &[u8],
         issuer_cert: &Certificate,
@@ -464,7 +457,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         output_path: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let response_string = std::fs::read_to_string(response_path)?;
-        let response: FidoSignResponse = serde_json::from_str(&response_string)?;
+        let response: Rs4096SignResponse = serde_json::from_str(&response_string)?;
         let user_cert = Self::generate_user_cert_from_certb64(&response.result.cert)?;
 
         Self::generate_input(
@@ -482,7 +475,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
 
     /// Generate RSA circuit input for a single certificate.
     /// Extracts the modulus from the cert and chunks both modulus and signature.
-    fn generate_rsa_circuit_input(
+    pub(crate) fn generate_rsa_circuit_input(
         cert: &Certificate,
         signature_b64: &str,
         original_data: &[u8],
@@ -526,18 +519,6 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         const MAX_MESSAGE_LENGTH: usize = 1536;
         const MAX_SUBJECT_DN_LENGTH: usize = 128;
 
-        let zero_pad = |bytes: &[u8], length: usize| -> Vec<u64> {
-            assert!(
-                bytes.len() <= length,
-                "Certificate too large: {} > {}",
-                bytes.len(),
-                length
-            );
-            let mut v: Vec<u64> = bytes.iter().map(|&b| b as u64).collect();
-            v.resize(length, 0);
-            v
-        };
-
         let user_input = Self::generate_rsa_circuit_input(user_cert, user_signature_b64, user_tbs)?;
         let issuer_input =
             Self::generate_rsa_circuit_input(issuer_cert, issuer_signature_b64, issuer_tbs)?;
@@ -551,29 +532,9 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
             .map(|n| n.to_string())
             .unwrap_or_else(|| "0".to_string());
 
-        // SMT fields: use provided values or zero defaults
+        const SMT_SIBLING_DEPTH: usize = 128;
         let (smt_root, smt_serial, smt_siblings, smt_old_key, smt_old_value, smt_is_old0) =
-            match smt_inputs {
-                Some(smt) => (
-                    smt.smt_root.clone(),
-                    smt.serial_number.clone(),
-                    smt.smt_siblings.clone(),
-                    smt.smt_old_key.clone(),
-                    smt.smt_old_value.clone(),
-                    smt.smt_is_old0.clone(),
-                ),
-                None => {
-                    let zeros = vec!["0".to_string(); 128];
-                    (
-                        "0".to_string(),
-                        serial_decimal,
-                        zeros,
-                        "0".to_string(),
-                        "0".to_string(),
-                        "1".to_string(),
-                    )
-                }
-            };
+            smt_fields_from_option(smt_inputs, serial_decimal, SMT_SIBLING_DEPTH);
 
         Ok(serde_json::json!({
             "tbs": user_input.message,
@@ -581,11 +542,11 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
             "issuer_tbs": issuer_input.message,
             "issuer_tbs_length": issuer_input.message_length,
             "actual_issuer_tbs_length": issuer_tbs.len(),
-            "user_cert_zero_padded": zero_pad(&user_cert_der, MAX_MESSAGE_LENGTH),
+            "user_cert_zero_padded": zero_pad_to_u64(&user_cert_der, MAX_MESSAGE_LENGTH),
             "actual_user_cert_length": user_cert_der.len(),
             "user_modulus_offset": user_offsets.modulus_offset,
             "user_modulus_tag_offset": user_offsets.modulus_tag_offset,
-            "subject_dn": zero_pad(&user_subject_der, MAX_SUBJECT_DN_LENGTH),
+            "subject_dn": zero_pad_to_u64(&user_subject_der, MAX_SUBJECT_DN_LENGTH),
             "subject_dn_offset": user_offsets.subject_dn_offset,
             "subject_dn_length": user_offsets.subject_dn_length,
             "serial_number_offset": user_offsets.serial_number_offset,
@@ -604,7 +565,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
     // === DER parsing helpers ===
 
     /// Find the RSA modulus and subject DN byte offsets in a DER-encoded certificate.
-    fn parse_cert_offsets(der: &[u8]) -> Result<CertOffsets, Box<dyn std::error::Error>> {
+    pub(crate) fn parse_cert_offsets(der: &[u8]) -> Result<CertOffsets, Box<dyn std::error::Error>> {
         let (modulus_offset, modulus_tag_offset) = Self::find_modulus_offset(der)?;
 
         if der[modulus_tag_offset] != 0x02 {
@@ -764,7 +725,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
 
     // === Utility functions ===
 
-    fn bigint_to_chunks(n: &BigUint, count: usize, chunk_bits: usize) -> Vec<String> {
+    pub(crate) fn bigint_to_chunks(n: &BigUint, count: usize, chunk_bits: usize) -> Vec<String> {
         let mask = (BigUint::from(1u64) << chunk_bits) - BigUint::from(1u64);
         let mut chunks = Vec::new();
         let mut val = n.clone();
@@ -776,7 +737,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         chunks
     }
 
-    fn sha256_pad(msg: &[u8], max_len: usize) -> Vec<u8> {
+    pub(crate) fn sha256_pad(msg: &[u8], max_len: usize) -> Vec<u8> {
         let bit_len = (msg.len() as u64) * 8;
         let mut padded = msg.to_vec();
         padded.push(0x80);
@@ -788,7 +749,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         padded
     }
 
-    fn sha256_padded_length(original_len: usize) -> usize {
+    pub(crate) fn sha256_padded_length(original_len: usize) -> usize {
         let mut len = original_len + 1;
         while len % 64 != 56 {
             len += 1;
@@ -867,12 +828,6 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
     }
 }
 
-/// Convenience alias: RSA-2048 circuit for the default (non-FIDO) flow.
-pub type Rs256Circuit = Sha256RsaCircuit<Rsa2048>;
-
-/// Convenience alias: RSA-4096 circuit for the FIDO flow.
-pub type Rs256FidoCircuit = Sha256RsaCircuit<Rsa4096>;
-
 impl<T: RsaKeySize> SpartanCircuit<E> for Sha256RsaCircuit<T> {
     fn synthesize<CS: ConstraintSystem<Scalar>>(
         &self,
@@ -940,6 +895,7 @@ impl<T: RsaKeySize> SpartanCircuit<E> for Sha256RsaCircuit<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::split_circuits::CertChainRsa2048;
 
     // Sanitized test fixtures — synthetic CA + user cert with no personal data
     const SIGN_RESPONSE: &str = include_str!("../../tests/testdata/response_sign_test.json");
@@ -955,14 +911,14 @@ mod tests {
 
     fn load_issuer_cert() -> Certificate {
         let pkcs11: Pkcs11InfoResponse = serde_json::from_str(PKCS11_RESPONSE).unwrap();
-        Rs256Circuit::extract_issuer_cert(&pkcs11).unwrap()
+        Sha256RsaCircuit::<CertChainRsa2048>::extract_issuer_cert(&pkcs11).unwrap()
     }
 
     #[test]
     fn test_extract_issuer_cert() {
         let pkcs11: Pkcs11InfoResponse = serde_json::from_str(PKCS11_RESPONSE).unwrap();
-        let cert = Rs256Circuit::extract_issuer_cert(&pkcs11).unwrap();
-        let ou = Rs256Circuit::get_attr(&cert.tbs_certificate.subject, ORGANIZATIONAL_UNIT_NAME);
+        let cert = Sha256RsaCircuit::<CertChainRsa2048>::extract_issuer_cert(&pkcs11).unwrap();
+        let ou = Sha256RsaCircuit::<CertChainRsa2048>::get_attr(&cert.tbs_certificate.subject, ORGANIZATIONAL_UNIT_NAME);
         assert!(!ou.is_empty(), "Issuer cert should have an OU");
     }
 
@@ -970,7 +926,7 @@ mod tests {
     fn test_verify_issuer_signature() {
         let user_cert = load_user_cert();
         let issuer_cert = load_issuer_cert();
-        Rs256Circuit::verify_issuer_signature(&issuer_cert, &user_cert)
+        Sha256RsaCircuit::<CertChainRsa2048>::verify_issuer_signature(&issuer_cert, &user_cert)
             .expect("Issuer should have signed the user cert");
     }
 
@@ -978,7 +934,7 @@ mod tests {
     fn test_parse_cert_offsets() {
         let user_cert = load_user_cert();
         let der = user_cert.to_der().unwrap();
-        let offsets = Rs256Circuit::parse_cert_offsets(&der).unwrap();
+        let offsets = Sha256RsaCircuit::<CertChainRsa2048>::parse_cert_offsets(&der).unwrap();
 
         assert_eq!(der[offsets.modulus_tag_offset], 0x02);
         assert!(offsets.modulus_offset > offsets.modulus_tag_offset);
@@ -998,7 +954,7 @@ mod tests {
     #[test]
     fn test_rsa_circuit_input_dimensions() {
         let user_cert = load_user_cert();
-        let input = Rs256Circuit::generate_rsa_circuit_input(
+        let input = Sha256RsaCircuit::<CertChainRsa2048>::generate_rsa_circuit_input(
             &user_cert, "AAAA", // dummy base64 signature
             b"test",
         )
@@ -1022,7 +978,7 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode(user_cert.signature.raw_bytes());
         let serial_hex = hex::encode(user_cert.tbs_certificate.serial_number.as_bytes());
 
-        let input = Rs256Circuit::generate_circuit_input(
+        let input = Sha256RsaCircuit::<CertChainRsa2048>::generate_circuit_input(
             &user_cert,
             &issuer_cert,
             &response.signature,

@@ -8,12 +8,14 @@ on:
             - "wallet-unit-poc/mobile/**"
             - "wallet-unit-poc/ecdsa-spartan2/**"
             - "wallet-unit-poc/circom/circuits/**"
+            - "wallet-unit-poc/circom/tests/**"
             - ".github/workflows/mobile-tests.yaml"
     pull_request:
         paths:
             - "wallet-unit-poc/mobile/**"
             - "wallet-unit-poc/ecdsa-spartan2/**"
             - "wallet-unit-poc/circom/circuits/**"
+            - "wallet-unit-poc/circom/tests/**"
             - ".github/workflows/mobile-tests.yaml"
     workflow_dispatch:
 
@@ -50,36 +52,74 @@ jobs:
             - name: Install JS dependencies
               run: cd wallet-unit-poc/circom && yarn
 
-            - name: Compile sha256rsa2048 circuit
-              run: cd wallet-unit-poc/circom && yarn compile:sha256rsa2048
-
-            - name: Compile sha256rsa4096 circuit
-              run: cd wallet-unit-poc/circom && yarn compile:sha256rsa4096
+            - name: Compile all circuits
+              run: cd wallet-unit-poc/circom && yarn compile:all
 
             - name: Upload circuit C++ artifacts
               uses: actions/upload-artifact@v4
               with:
                   name: circuit-cpp
                   path: |
-                      wallet-unit-poc/circom/build/cpp/sha256rsa2048.cpp
-                      wallet-unit-poc/circom/build/cpp/sha256rsa2048.dat
-                      wallet-unit-poc/circom/build/cpp/sha256rsa4096.cpp
-                      wallet-unit-poc/circom/build/cpp/sha256rsa4096.dat
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs2048.cpp
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs2048.dat
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs4096.cpp
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs4096.dat
+                      wallet-unit-poc/circom/build/cpp/device_sig_rs2048.cpp
+                      wallet-unit-poc/circom/build/cpp/device_sig_rs2048.dat
                   retention-days: 1
 
-            - name: Upload sha256rsa2048 R1CS artifact
+            - name: Upload cert_chain_rs2048 R1CS artifact
               uses: actions/upload-artifact@v4
               with:
-                  name: circuit-r1cs-sha256rsa2048
-                  path: wallet-unit-poc/circom/build/sha256rsa2048/sha256rsa2048_js/sha256rsa2048.r1cs
+                  name: circuit-r1cs-cert-chain-rs2048
+                  path: wallet-unit-poc/circom/build/cert_chain_rs2048/cert_chain_rs2048_js/cert_chain_rs2048.r1cs
                   retention-days: 1
 
-            - name: Upload sha256rsa4096 R1CS artifact
+            - name: Upload cert_chain_rs4096 R1CS artifact
               uses: actions/upload-artifact@v4
               with:
-                  name: circuit-r1cs-sha256rsa4096
-                  path: wallet-unit-poc/circom/build/sha256rsa4096/sha256rsa4096_js/sha256rsa4096.r1cs
+                  name: circuit-r1cs-cert-chain-rs4096
+                  path: wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/cert_chain_rs4096.r1cs
                   retention-days: 1
+
+            - name: Upload device_sig_rs2048 R1CS artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: circuit-r1cs-device-sig-rs2048
+                  path: wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.r1cs
+                  retention-days: 1
+
+    circuit-tests:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install system dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install --yes \
+                    build-essential \
+                    libgmp-dev \
+                    libsodium-dev \
+                    nasm \
+                    nlohmann-json3-dev
+
+            - name: Download Circom Binary v2.2.3
+              run: |
+                  wget -qO /home/runner/work/circom https://github.com/iden3/circom/releases/download/v2.2.3/circom-linux-amd64
+                  chmod +x /home/runner/work/circom
+                  sudo mv /home/runner/work/circom /bin/circom
+
+            - name: Install JS dependencies
+              run: cd wallet-unit-poc/circom && yarn
+
+            - name: Run circuit tests
+              run: cd wallet-unit-poc/circom && yarn test
 
     compile-circuits-macos:
         runs-on: macos-latest
@@ -106,23 +146,35 @@ jobs:
             - name: Install JS dependencies
               run: cd wallet-unit-poc/circom && yarn
 
-            - name: Compile sha256rsa4096 circuit
-              run: cd wallet-unit-poc/circom && yarn compile:sha256rsa4096
+            - name: Compile cert_chain_rs4096 circuit
+              run: cd wallet-unit-poc/circom && yarn compile:cert_chain_rs4096
+
+            - name: Compile device_sig_rs2048 circuit
+              run: cd wallet-unit-poc/circom && yarn compile:device_sig_rs2048
 
             - name: Upload circuit C++ artifacts
               uses: actions/upload-artifact@v4
               with:
                   name: circuit-cpp-macos
                   path: |
-                      wallet-unit-poc/circom/build/cpp/sha256rsa4096.cpp
-                      wallet-unit-poc/circom/build/cpp/sha256rsa4096.dat
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs4096.cpp
+                      wallet-unit-poc/circom/build/cpp/cert_chain_rs4096.dat
+                      wallet-unit-poc/circom/build/cpp/device_sig_rs2048.cpp
+                      wallet-unit-poc/circom/build/cpp/device_sig_rs2048.dat
                   retention-days: 1
 
-            - name: Upload sha256rsa4096 R1CS artifact
+            - name: Upload cert_chain_rs4096 R1CS artifact
               uses: actions/upload-artifact@v4
               with:
-                  name: circuit-r1cs-sha256rsa4096-macos
-                  path: wallet-unit-poc/circom/build/sha256rsa4096/sha256rsa4096_js/sha256rsa4096.r1cs
+                  name: circuit-r1cs-cert-chain-rs4096-macos
+                  path: wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/cert_chain_rs4096.r1cs
+                  retention-days: 1
+
+            - name: Upload device_sig_rs2048 R1CS artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: circuit-r1cs-device-sig-rs2048-macos
+                  path: wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.r1cs
                   retention-days: 1
 
     rust-tests:
@@ -141,17 +193,23 @@ jobs:
                   name: circuit-cpp
                   path: wallet-unit-poc/circom/build/cpp/
 
-            - name: Download sha256rsa2048 R1CS artifact
+            - name: Download cert_chain_rs2048 R1CS artifact
               uses: actions/download-artifact@v4
               with:
-                  name: circuit-r1cs-sha256rsa2048
-                  path: wallet-unit-poc/circom/build/sha256rsa2048/sha256rsa2048_js/
+                  name: circuit-r1cs-cert-chain-rs2048
+                  path: wallet-unit-poc/circom/build/cert_chain_rs2048/cert_chain_rs2048_js/
 
-            - name: Download sha256rsa4096 R1CS artifact
+            - name: Download cert_chain_rs4096 R1CS artifact
               uses: actions/download-artifact@v4
               with:
-                  name: circuit-r1cs-sha256rsa4096
-                  path: wallet-unit-poc/circom/build/sha256rsa4096/sha256rsa4096_js/
+                  name: circuit-r1cs-cert-chain-rs4096
+                  path: wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/
+
+            - name: Download device_sig_rs2048 R1CS artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: circuit-r1cs-device-sig-rs2048
+                  path: wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/
 
             - name: Install system dependencies
               run: |
@@ -176,19 +234,59 @@ jobs:
                   restore-keys: |
                       rust-tests-cargo-
 
-            - name: Run e2e flow (sha256rsa2048)
-              run: |
-                  cd wallet-unit-poc/ecdsa-spartan2
-                  cargo run --release --features sha256rsa2048 -- rs256 setup --input ../circom/inputs/sha256rsa2048/input.json
-                  cargo run --release --features sha256rsa2048 -- rs256 prove --input ../circom/inputs/sha256rsa2048/input.json
-                  cargo run --release --features sha256rsa2048 -- rs256 verify
+            # === cert-chain RSA-2048 issuer + device-sig RSA-2048 user ===
 
-            - name: Run e2e flow (sha256rsa4096)
+            - name: Generate split inputs (RS2048)
               run: |
                   cd wallet-unit-poc/ecdsa-spartan2
-                  cargo run --release --features sha256rsa4096 -- rs256 setup --fido --input ../circom/inputs/sha256rsa4096/input.json
-                  cargo run --release --features sha256rsa4096 -- rs256 prove --fido --input ../circom/inputs/sha256rsa4096/input.json
-                  cargo run --release --features sha256rsa4096 -- rs256 verify --fido
+                  RUST_LOG=info cargo run --release -- generate-split-input
+
+            - name: Run e2e flow — cert-chain (RS2048)
+              run: |
+                  cd wallet-unit-poc/ecdsa-spartan2
+                  cargo run --release --features cert_chain_rs2048 -- cert-chain setup --input ../circom/inputs/cert_chain_rs2048/input.json
+                  cargo run --release --features cert_chain_rs2048 -- cert-chain prove --input ../circom/inputs/cert_chain_rs2048/input.json
+                  cargo run --release --features cert_chain_rs2048 -- cert-chain verify
+
+            - name: Run e2e flow — device-sig (RS2048)
+              run: |
+                  cd wallet-unit-poc/ecdsa-spartan2
+                  cargo run --release --features device_sig_rs2048 -- device-sig setup --input ../circom/inputs/device_sig_rs2048/input.json
+                  cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs2048/input.json
+                  cargo run --release --features device_sig_rs2048 -- device-sig verify
+
+            - name: Link-verify (RS2048)
+              run: |
+                  cd wallet-unit-poc/ecdsa-spartan2
+                  RUST_LOG=info cargo run --release -- link-verify
+
+            # === cert-chain 4096-bit issuer + device-sig 2048-bit user ===
+
+            - name: Generate split inputs (RS4096)
+              run: |
+                  cd wallet-unit-poc/ecdsa-spartan2
+                  RUST_LOG=info cargo run --release -- generate-split-input --cert-chain-4096
+
+            - name: Run e2e flow — cert-chain (RS4096)
+              run: |
+                  cd wallet-unit-poc/ecdsa-spartan2
+                  cargo run --release --features cert_chain_rs4096 -- cert-chain setup --cert-chain-4096 --input ../circom/inputs/cert_chain_rs4096/input.json
+                  cargo run --release --features cert_chain_rs4096 -- cert-chain prove --cert-chain-4096 --input ../circom/inputs/cert_chain_rs4096/input.json
+                  cargo run --release --features cert_chain_rs4096 -- cert-chain verify --cert-chain-4096
+
+            - name: Run e2e flow — device-sig (RS4096 chain)
+              run: |
+                  cd wallet-unit-poc/ecdsa-spartan2
+                  cargo run --release --features device_sig_rs2048 -- device-sig setup --input ../circom/inputs/device_sig_rs4096chain/input.json
+                  cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs4096chain/input.json
+                  cargo run --release --features device_sig_rs2048 -- device-sig verify
+
+            - name: Link-verify (RS4096)
+              run: |
+                  cd wallet-unit-poc/ecdsa-spartan2
+                  RUST_LOG=info cargo run --release -- link-verify --cert-chain-4096
+
+            # === Unit tests ===
 
             - name: Run ecdsa-spartan2 unit tests
               run: |
@@ -200,35 +298,34 @@ jobs:
                   cd wallet-unit-poc/mobile
                   cargo test --release --no-default-features --lib
 
-            - name: Create ZIP of sha256rsa2048 proving key
+            # === Release artifacts ===
+
+            - name: Create ZIP of cert_chain_rs2048 keys
               run: |
                   cd wallet-unit-poc/ecdsa-spartan2/keys
-                  zip rs256_proving.key.zip rs256_proving.key
+                  zip cert_chain_rs2048_proving.key.zip cert_chain_rs2048_proving.key
+                  zip cert_chain_rs2048_verifying.key.zip cert_chain_rs2048_verifying.key
 
-            - name: Create ZIP of sha256rsa2048 verifying key
+            - name: Create ZIP of cert_chain_rs4096 keys
               run: |
                   cd wallet-unit-poc/ecdsa-spartan2/keys
-                  zip rs256_verifying.key.zip rs256_verifying.key
+                  zip cert_chain_rs4096_proving.key.zip cert_chain_rs4096_proving.key
+                  zip cert_chain_rs4096_verifying.key.zip cert_chain_rs4096_verifying.key
 
-            - name: Create ZIP of sha256rsa4096 proving key
+            - name: Create ZIP of device_sig_rs2048 keys
               run: |
                   cd wallet-unit-poc/ecdsa-spartan2/keys
-                  zip rs256_4096_proving.key.zip rs256_4096_proving.key
+                  zip device_sig_rs2048_proving.key.zip device_sig_rs2048_proving.key
+                  zip device_sig_rs2048_verifying.key.zip device_sig_rs2048_verifying.key
 
-            - name: Create ZIP of sha256rsa4096 verifying key
+            - name: Create ZIP of R1CS artifacts
               run: |
-                  cd wallet-unit-poc/ecdsa-spartan2/keys
-                  zip rs256_4096_verifying.key.zip rs256_4096_verifying.key
-
-            - name: Create ZIP of sha256rsa2048 R1CS artifact
-              run: |
-                  cd wallet-unit-poc/circom/build/sha256rsa2048/sha256rsa2048_js
-                  zip -r sha256rsa2048.r1cs.zip sha256rsa2048.r1cs
-
-            - name: Create ZIP of sha256rsa4096 R1CS artifact
-              run: |
-                  cd wallet-unit-poc/circom/build/sha256rsa4096/sha256rsa4096_js
-                  zip -r sha256rsa4096.r1cs.zip sha256rsa4096.r1cs
+                  cd wallet-unit-poc/circom/build/cert_chain_rs2048/cert_chain_rs2048_js
+                  zip -r cert_chain_rs2048.r1cs.zip cert_chain_rs2048.r1cs
+                  cd ../../cert_chain_rs4096/cert_chain_rs4096_js
+                  zip -r cert_chain_rs4096.r1cs.zip cert_chain_rs4096.r1cs
+                  cd ../../device_sig_rs2048/device_sig_rs2048_js
+                  zip -r device_sig_rs2048.r1cs.zip device_sig_rs2048.r1cs
 
             - name: Upload key ZIPs to GitHub Release
               if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -236,257 +333,24 @@ jobs:
               with:
                   tag_name: latest
                   files: |
-                      wallet-unit-poc/ecdsa-spartan2/keys/rs256_proving.key.zip
-                      wallet-unit-poc/ecdsa-spartan2/keys/rs256_verifying.key.zip
-                      wallet-unit-poc/ecdsa-spartan2/keys/rs256_4096_proving.key.zip
-                      wallet-unit-poc/ecdsa-spartan2/keys/rs256_4096_verifying.key.zip
+                      wallet-unit-poc/ecdsa-spartan2/keys/cert_chain_rs2048_proving.key.zip
+                      wallet-unit-poc/ecdsa-spartan2/keys/cert_chain_rs2048_verifying.key.zip
+                      wallet-unit-poc/ecdsa-spartan2/keys/cert_chain_rs4096_proving.key.zip
+                      wallet-unit-poc/ecdsa-spartan2/keys/cert_chain_rs4096_verifying.key.zip
+                      wallet-unit-poc/ecdsa-spartan2/keys/device_sig_rs2048_proving.key.zip
+                      wallet-unit-poc/ecdsa-spartan2/keys/device_sig_rs2048_verifying.key.zip
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-            - name: Upload sha256rsa2048 R1CS to GitHub Release
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-              uses: softprops/action-gh-release@v2
-              with:
-                  tag_name: latest
-                  files: wallet-unit-poc/circom/build/sha256rsa2048/sha256rsa2048_js/sha256rsa2048.r1cs.zip
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-            - name: Upload sha256rsa4096 R1CS to GitHub Release
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-              uses: softprops/action-gh-release@v2
-              with:
-                  tag_name: latest
-                  files: wallet-unit-poc/circom/build/sha256rsa4096/sha256rsa4096_js/sha256rsa4096.r1cs.zip
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    build-ios:
-        needs: compile-circuits
-        runs-on: macos-latest
-        steps:
-            - uses: actions/checkout@v5
-
-            - name: Download circuit artifacts
-              uses: actions/download-artifact@v4
-              with:
-                  name: circuit-cpp
-                  path: wallet-unit-poc/circom/build/cpp/
-
-            - name: Verify circuit artifacts
-              run: ls -la wallet-unit-poc/circom/build/cpp/
-
-            - name: Set up Flutter
-              uses: subosito/flutter-action@v2
-              with:
-                  channel: stable
-
-            - name: Set up Rust
-              uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: aarch64-apple-ios-sim
-
-            - name: Cache Cargo registry and git
-              uses: actions/cache@v4
-              with:
-                  path: |
-                      ~/.cargo/registry
-                      ~/.cargo/git
-                  key: ios-cargo-${{ hashFiles('wallet-unit-poc/mobile/**/Cargo.lock', 'wallet-unit-poc/mobile/**/Cargo.toml', 'wallet-unit-poc/ecdsa-spartan2/Cargo.lock') }}
-                  restore-keys: |
-                      ios-cargo-
-
-            - name: Cache GMP prebuild
-              uses: actions/cache@v4
-              with:
-                  path: wallet-unit-poc/mobile/.build-cache/
-                  key: ios-gmp-${{ hashFiles('wallet-unit-poc/mobile/scripts/prebuild-ios-gmp.sh') }}
-                  restore-keys: |
-                      ios-gmp-
-
-            - name: Cache CocoaPods
-              uses: actions/cache@v4
-              with:
-                  path: wallet-unit-poc/mobile/flutter/ios/Pods
-                  key: ios-pods-${{ hashFiles('wallet-unit-poc/mobile/flutter/ios/Podfile.lock') }}
-                  restore-keys: |
-                      ios-pods-
-
-            - name: Flutter pub get
-              run: cd wallet-unit-poc/mobile/flutter && flutter pub get
-
-            - name: Build iOS (simulator)
-              run: cd wallet-unit-poc/mobile/flutter && flutter build ios --simulator --no-codesign
-
-    build-android:
-        needs: compile-circuits
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v5
-
-            - name: Download circuit artifacts
-              uses: actions/download-artifact@v4
-              with:
-                  name: circuit-cpp
-                  path: wallet-unit-poc/circom/build/cpp/
-
-            - name: Verify circuit artifacts
-              run: ls -la wallet-unit-poc/circom/build/cpp/
-
-            - name: Install system dependencies
-              run: |
-                  sudo apt-get update
-                  sudo apt-get install --yes \
-                    build-essential \
-                    libgmp-dev \
-                    libsodium-dev \
-                    nasm \
-                    nlohmann-json3-dev
-
-            - name: Set up Java 17
-              uses: actions/setup-java@v4
-              with:
-                  distribution: temurin
-                  java-version: "17"
-
-            - name: Set up Android NDK r26d
-              uses: nttld/setup-ndk@v1
-              with:
-                  ndk-version: r26d
-                  link-to-sdk: true
-
-            - name: Set up Flutter
-              uses: subosito/flutter-action@v2
-              with:
-                  channel: stable
-
-            - name: Set up Rust
-              uses: dtolnay/rust-toolchain@stable
-              with:
-                  targets: aarch64-linux-android,x86_64-linux-android,armv7-linux-androideabi
-
-            - name: Cache Cargo registry and git
-              uses: actions/cache@v4
-              with:
-                  path: |
-                      ~/.cargo/registry
-                      ~/.cargo/git
-                  key: android-cargo-${{ hashFiles('wallet-unit-poc/mobile/**/Cargo.lock', 'wallet-unit-poc/mobile/**/Cargo.toml', 'wallet-unit-poc/ecdsa-spartan2/Cargo.lock') }}
-                  restore-keys: |
-                      android-cargo-
-
-            - name: Cache Gradle
-              uses: actions/cache@v4
-              with:
-                  path: |
-                      ~/.gradle/caches
-                      ~/.gradle/wrapper
-                  key: android-gradle-${{ hashFiles('wallet-unit-poc/mobile/flutter/android/**/*.gradle*', 'wallet-unit-poc/mobile/flutter/android/gradle/wrapper/gradle-wrapper.properties') }}
-                  restore-keys: |
-                      android-gradle-
-
-            - name: Flutter pub get
-              run: cd wallet-unit-poc/mobile/flutter && flutter pub get
-
-            - name: Build Android APK (debug)
-              run: cd wallet-unit-poc/mobile/flutter && flutter build apk --debug
-
-    build-ios-bindings:
-        needs: compile-circuits-macos
-        runs-on: macos-latest
-
-        permissions:
-            contents: write
-
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v5
-
-            - name: Download circuit artifacts
-              uses: actions/download-artifact@v4
-              with:
-                  name: circuit-cpp-macos
-                  path: wallet-unit-poc/circom/build/cpp/
-
-            - name: Verify circuit artifacts
-              run: ls -la wallet-unit-poc/circom/build/cpp/
-
-            - name: Install system dependencies
-              run: |
-                  brew install nasm
-
-            - name: Build iOS bindings
-              run: |
-                  cd wallet-unit-poc/mobile
-                  IOS_ARCHS=aarch64-apple-ios,aarch64-apple-ios-sim CONFIGURATION=release cargo run --bin ios
-
-            - name: Create ZIP of xcframework
-              run: |
-                  cd wallet-unit-poc/mobile/MoproiOSBindings
-                  zip -r MoproBindings.xcframework.zip MoproBindings.xcframework
-
-            - name: Upload release xcframework to GitHub Release
+            - name: Upload R1CS ZIPs to GitHub Release
               if: github.event_name == 'push' && github.ref == 'refs/heads/main'
               uses: softprops/action-gh-release@v2
               with:
                   tag_name: latest
                   files: |
-                      wallet-unit-poc/mobile/MoproiOSBindings/MoproBindings.xcframework.zip
+                      wallet-unit-poc/circom/build/cert_chain_rs2048/cert_chain_rs2048_js/cert_chain_rs2048.r1cs.zip
+                      wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/cert_chain_rs4096.r1cs.zip
+                      wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.r1cs.zip
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-            - name: Upload release swift to GitHub Release
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-              uses: softprops/action-gh-release@v2
-              with:
-                  tag_name: latest
-                  files: |
-                      wallet-unit-poc/mobile/MoproiOSBindings/mopro.swift
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    build-android-bindings:
-        needs: compile-circuits
-        runs-on: ubuntu-latest
-
-        permissions:
-            contents: write
-
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v5
-
-            - name: Download circuit artifacts
-              uses: actions/download-artifact@v4
-              with:
-                  name: circuit-cpp
-                  path: wallet-unit-poc/circom/build/cpp/
-
-            - name: Verify circuit artifacts
-              run: ls -la wallet-unit-poc/circom/build/cpp/
-
-            - name: Install Linux dependencies
-              uses: awalsh128/cache-apt-pkgs-action@v1
-              with:
-                  packages: curl xz-utils build-essential cmake m4 nasm libstdc++6 protobuf-compiler
-                  version: 1.0
-
-            - name: Build Android bindings
-              run: |
-                  cd wallet-unit-poc/mobile
-                  ANDROID_ARCHS=aarch64-linux-android CONFIGURATION=release cargo run --bin android -vvv
-
-            - name: Create ZIP of xcframework
-              run: |
-                  cd wallet-unit-poc/mobile
-                  zip -r MoproAndroidBindings.zip MoproAndroidBindings
-
-            - name: Upload release assets to GitHub Release
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-              uses: softprops/action-gh-release@v2
-              with:
-                  tag_name: latest
-                  files: |
-                      wallet-unit-poc/mobile/MoproAndroidBindings.zip
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

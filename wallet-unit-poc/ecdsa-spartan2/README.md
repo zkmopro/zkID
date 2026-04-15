@@ -17,7 +17,7 @@ Two RSA key-size variants are supported, selected at build time via Cargo featur
 | Feature flag      | Key size | CA         | Mode          |
 |-------------------|----------|------------|---------------|
 | `sha256rsa2048`   | RSA-2048 | MOICA-G2   | Default/HiPKI |
-| `sha256rsa4096`   | RSA-4096 | MOICA-G3   | FIDO          |
+| `sha256rsa4096`   | RSA-4096 | 4096-bit CA | cert-chain-4096 |
 
 ### 1. Generate circuit input
 
@@ -35,11 +35,11 @@ RUST_LOG=info cargo run --release --features sha256rsa2048 -- rs256 generate-inp
   --tbs 123456 --pin <YOUR_PIN> --smt-server http://localhost:3000
 ```
 
-#### RSA-4096 (MOICA-G3, FIDO)
+#### RSA-4096 (cert-chain-4096)
 
 ```sh
-# Default mode — uses bundled FIDO test fixtures (no card reader needed)
-RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 generate-input --fido
+# Default mode — uses bundled synthetic test fixtures (no card reader needed)
+RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 generate-input --cert-chain-4096
 ```
 
 In live mode, the CLI:
@@ -64,12 +64,12 @@ RUST_LOG=info cargo run --release --features sha256rsa2048 -- rs256 prove --inpu
 RUST_LOG=info cargo run --release --features sha256rsa2048 -- rs256 verify
 ```
 
-#### RSA-4096 (FIDO)
+#### RSA-4096 (cert-chain-4096)
 
 ```sh
-RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 setup --fido --input ../circom/inputs/sha256rsa4096/input.json
-RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 prove --fido --input ../circom/inputs/sha256rsa4096/input.json
-RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 verify --fido
+RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 setup --cert-chain-4096 --input ../circom/inputs/sha256rsa4096/input.json
+RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 prove --cert-chain-4096 --input ../circom/inputs/sha256rsa4096/input.json
+RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 verify --cert-chain-4096
 ```
 
 ### 3. Benchmark
@@ -78,12 +78,44 @@ RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 verify --fid
 # RSA-2048
 RUST_LOG=info cargo run --release --features sha256rsa2048 -- rs256 benchmark --input ../circom/inputs/sha256rsa2048/input.json
 
-# RSA-4096 (FIDO)
-RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 benchmark --fido --input ../circom/inputs/sha256rsa4096/input.json
+# RSA-4096 (cert-chain-4096)
+RUST_LOG=info cargo run --release --features sha256rsa4096 -- rs256 benchmark --cert-chain-4096 --input ../circom/inputs/sha256rsa4096/input.json
 ```
 
 ## Tests
 
 ```sh
 cargo test --release
+```
+
+## Regenerating test fixtures
+
+The bundled synthetic fixtures in `tests/testdata/` are generated deterministically
+from a fixed seed. Regenerate them whenever the synthetic RSA key material rotates,
+or after a fresh clone if you want to confirm fixture integrity:
+
+```sh
+cargo run --example generate_fixtures
+```
+
+This produces four files (two for RS2048, two for RS4096):
+- `tests/testdata/response_sign_test.json` — RS2048 user cert + signature
+- `tests/testdata/pkcs11info_test.json` — RS2048 CA + user cert
+- `tests/testdata/rs4096_response_sign.json` — RS4096 user cert + signature
+- `tests/testdata/test_ca_rs4096.der` — RS4096 synthetic CA (raw DER)
+
+The generator:
+- Creates RSA CA and user keys from fixed ChaCha20 seeds (RS2048 + RS4096)
+- Issues self-signed CA certificates and CA-signed user certificates
+- Signs `b"e775f2805fb993e05a208dbff15d1c1"` (the default TBS challenge) with
+  each user key using PKCS#1 v1.5 / SHA-256
+- RS4096 keygen takes ~20s (4096-bit CA key)
+
+Private keys are **not** persisted — they are re-derived from the seed on each run.
+Never replace the synthetic fixtures with real card material.
+
+Run the consistency test to verify fixtures are aligned with the TBS constant:
+
+```sh
+cargo test --release fixture_consistency
 ```
