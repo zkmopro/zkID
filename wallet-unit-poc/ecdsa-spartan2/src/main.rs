@@ -17,13 +17,13 @@
 //!
 //! # Setup / Prove / Verify  (cert-chain, RSA-2048)
 //!
-//!   cargo run --release --features cert_chain_rs2048 -- cert-chain setup --input ../circom/inputs/cert_chain_rs2048/input.json
+//!   cargo run --release --features cert_chain_rs2048 -- cert-chain setup
 //!   cargo run --release --features cert_chain_rs2048 -- cert-chain prove --input ../circom/inputs/cert_chain_rs2048/input.json
 //!   cargo run --release --features cert_chain_rs2048 -- cert-chain verify
 //!
 //! # Setup / Prove / Verify  (device-sig)
 //!
-//!   cargo run --release --features device_sig_rs2048 -- device-sig setup --input ../circom/inputs/device_sig_rs2048/input.json
+//!   cargo run --release --features device_sig_rs2048 -- device-sig setup
 //!   cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs2048/input.json
 //!   cargo run --release --features device_sig_rs2048 -- device-sig verify
 //!
@@ -349,8 +349,8 @@ fn execute_rs256_for<T: RsaKeySize>(action: CircuitAction, options: CommandOptio
 
     match action {
         CircuitAction::Setup => {
-            info!(input = ?options.input, circuit = T::CIRCUIT_NAME, "Setting up Spartan-2 keys");
-            let circuit = Sha256RsaCircuit::<T>::new(path_config.clone(), options.input);
+            info!(circuit = T::CIRCUIT_NAME, "Setting up Spartan-2 keys");
+            let circuit = Sha256RsaCircuit::<T>::new(path_config.clone(), None);
             setup_circuit_keys(
                 circuit,
                 path_config.key_path(T::PROVING_KEY),
@@ -587,10 +587,10 @@ Options:
 Examples:
   cargo run --release -- generate-split-input
   cargo run --release -- generate-split-input --fido
-  cargo run --release --features cert_chain_rs2048 -- cert-chain setup --input ../circom/inputs/cert_chain_rs2048/input.json
+  cargo run --release --features cert_chain_rs2048 -- cert-chain setup
   cargo run --release --features cert_chain_rs2048 -- cert-chain prove --input ../circom/inputs/cert_chain_rs2048/input.json
   cargo run --release --features cert_chain_rs2048 -- cert-chain verify
-  cargo run --release --features device_sig_rs2048 -- device-sig setup --input ../circom/inputs/device_sig_rs2048/input.json
+  cargo run --release --features device_sig_rs2048 -- device-sig setup
   cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs2048/input.json
   cargo run --release --features device_sig_rs2048 -- device-sig verify
   cargo run --release -- link-verify
