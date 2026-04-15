@@ -234,7 +234,7 @@ jobs:
                   restore-keys: |
                       rust-tests-cargo-
 
-            # === Non-FIDO e2e (RS2048) ===
+            # === RS2048 e2e ===
 
             - name: Generate split inputs (RS2048)
               run: |
@@ -260,31 +260,31 @@ jobs:
                   cd wallet-unit-poc/ecdsa-spartan2
                   RUST_LOG=info cargo run --release -- link-verify
 
-            # === FIDO e2e (CertChain RS4096 + DeviceSig RS2048) ===
+            # === RS4096 e2e (cert-chain 4096-bit issuer + device-sig 2048-bit user) ===
 
-            - name: Generate split inputs (FIDO)
+            - name: Generate split inputs (RS4096)
               run: |
                   cd wallet-unit-poc/ecdsa-spartan2
-                  RUST_LOG=info cargo run --release -- generate-split-input --fido
+                  RUST_LOG=info cargo run --release -- generate-split-input --cert-chain-4096
 
-            - name: Run e2e flow — cert-chain (RS4096/FIDO)
+            - name: Run e2e flow — cert-chain (RS4096)
               run: |
                   cd wallet-unit-poc/ecdsa-spartan2
-                  cargo run --release --features cert_chain_rs4096 -- cert-chain setup --fido --input ../circom/inputs/cert_chain_rs4096/input.json
-                  cargo run --release --features cert_chain_rs4096 -- cert-chain prove --fido --input ../circom/inputs/cert_chain_rs4096/input.json
-                  cargo run --release --features cert_chain_rs4096 -- cert-chain verify --fido
+                  cargo run --release --features cert_chain_rs4096 -- cert-chain setup --cert-chain-4096 --input ../circom/inputs/cert_chain_rs4096/input.json
+                  cargo run --release --features cert_chain_rs4096 -- cert-chain prove --cert-chain-4096 --input ../circom/inputs/cert_chain_rs4096/input.json
+                  cargo run --release --features cert_chain_rs4096 -- cert-chain verify --cert-chain-4096
 
-            - name: Run e2e flow — device-sig (RS2048, FIDO inputs)
+            - name: Run e2e flow — device-sig (RS2048, RS4096 inputs)
               run: |
                   cd wallet-unit-poc/ecdsa-spartan2
                   cargo run --release --features device_sig_rs2048 -- device-sig setup --input ../circom/inputs/device_sig_rs2048/input.json
                   cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs2048/input.json
                   cargo run --release --features device_sig_rs2048 -- device-sig verify
 
-            - name: Link-verify (FIDO)
+            - name: Link-verify (RS4096)
               run: |
                   cd wallet-unit-poc/ecdsa-spartan2
-                  RUST_LOG=info cargo run --release -- link-verify --fido
+                  RUST_LOG=info cargo run --release -- link-verify --cert-chain-4096
 
             # === Unit tests ===
 
