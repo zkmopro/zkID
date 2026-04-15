@@ -110,16 +110,16 @@ pub struct CardSignResponse {
     _version: String,
 }
 
-/// Response from FIDO `/sign` API.
+/// Response from RS4096 sign API (4096-bit issuer CA path).
 #[derive(Deserialize)]
-pub struct FidoSignResponse {
+pub struct Rs4096SignResponse {
     pub error_code: String,
     pub error_message: String,
-    pub result: FidoSignResult,
+    pub result: Rs4096SignResult,
 }
 
 #[derive(Deserialize)]
-pub struct FidoSignResult {
+pub struct Rs4096SignResult {
     pub hashed_id_num: String,
     pub signed_response: String,
     pub idp_checksum: String,
@@ -453,7 +453,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         )
     }
 
-    pub fn generate_input_from_fido_file(
+    pub fn generate_input_from_rs4096_file(
         response_path: &Path,
         tbs: &[u8],
         issuer_cert: &Certificate,
@@ -462,7 +462,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         output_path: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let response_string = std::fs::read_to_string(response_path)?;
-        let response: FidoSignResponse = serde_json::from_str(&response_string)?;
+        let response: Rs4096SignResponse = serde_json::from_str(&response_string)?;
         let user_cert = Self::generate_user_cert_from_certb64(&response.result.cert)?;
 
         Self::generate_input(

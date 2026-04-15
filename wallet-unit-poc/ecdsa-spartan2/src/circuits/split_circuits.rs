@@ -19,7 +19,7 @@ witnesscalc_adapter::witness!(device_sig_rs2048);
 #[derive(Debug, Clone, Copy)]
 pub struct CertChainRsa2048;
 
-/// Marker for CertChainRSA256 with RSA-4096 issuer + RSA-2048 user (MOICA-G3).
+/// Marker for CertChainRSA256 with RSA-4096 issuer + RSA-2048 user.
 #[derive(Debug, Clone, Copy)]
 pub struct CertChainRsa4096;
 
@@ -100,8 +100,8 @@ impl RsaKeySize for DeviceSigRsa2048 {
 
 /// Cert-chain proof (Circuit A) for MOICA-G2 (RSA-2048 issuer + 2048 user).
 pub type CertChainCircuit = Sha256RsaCircuit<CertChainRsa2048>;
-/// Cert-chain proof (Circuit A) for MOICA-G3 (RSA-4096 issuer + 2048 user).
-pub type CertChainFidoCircuit = Sha256RsaCircuit<CertChainRsa4096>;
+/// Cert-chain proof (Circuit A) for RSA-4096 issuer + 2048-bit user.
+pub type CertChainRs4096Circuit = Sha256RsaCircuit<CertChainRsa4096>;
 /// Device-signature proof (Circuit B) — always RSA-2048 (user keys).
 pub type DeviceSigCircuit = Sha256RsaCircuit<DeviceSigRsa2048>;
 

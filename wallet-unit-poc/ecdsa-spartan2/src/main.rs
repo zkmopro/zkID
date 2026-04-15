@@ -7,13 +7,13 @@
 //!   | Command       | Feature flag        | Key size | CA             |
 //!   |---------------|---------------------|----------|----------------|
 //!   | cert-chain    | `cert_chain_rs2048` | RSA-2048 | MOICA-G2       |
-//!   | cert-chain -f | `cert_chain_rs4096` | RSA-4096 | MOICA-G3       |
+//!   | cert-chain -4 | `cert_chain_rs4096` | RSA-4096 | 4096-bit CA    |
 //!   | device-sig    | `device_sig_rs2048` | RSA-2048 | (user key)     |
 //!
 //! # Generate split circuit inputs
 //!
 //!   cargo run --release -- generate-split-input
-//!   cargo run --release -- generate-split-input --fido
+//!   cargo run --release -- generate-split-input --cert-chain-4096
 //!
 //! # Setup / Prove / Verify  (cert-chain, RSA-2048)
 //!
@@ -30,12 +30,12 @@
 //! # Link-verify  (check pk_commit equality across proofs)
 //!
 //!   cargo run --release -- link-verify
-//!   cargo run --release -- link-verify --fido
+//!   cargo run --release -- link-verify --cert-chain-4096
 
 use ecdsa_spartan2::{
     generate_split_inputs, load_proof, prove_circuit, prove_circuit_with_pk, run_circuit,
     save_keys, setup_circuit_keys, setup_circuit_keys_no_save, verify_circuit,
-    verify_circuit_with_loaded_data, CertChainCircuit, CertChainFidoCircuit, CertChainRsa2048,
+    verify_circuit_with_loaded_data, CertChainCircuit, CertChainRs4096Circuit, CertChainRsa2048,
     CertChainRsa4096, DeviceSigRsa2048, PathConfig, RsaKeySize, Sha256RsaCircuit,
 };
 use std::{
@@ -89,8 +89,8 @@ enum CircuitAction {
 #[derive(Debug, Default, Clone)]
 struct CommandOptions {
     input: Option<PathBuf>,
-    /// Use RSA-4096 (FIDO/MOICA-G3) circuit instead of RSA-2048.
-    fido: bool,
+    /// Use RSA-4096 (4096-bit issuer CA) circuit instead of RSA-2048.
+    rs4096: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -101,17 +101,17 @@ struct ParsedCommand {
 
 /// `generate-split-input` CLI: fixture load → optional SMT fetch → write two JSON files.
 fn run_generate_split_input(command_args: &[String]) -> ! {
-    let mut fido = false;
+    let mut rs4096 = false;
     let mut smt_server: Option<String> = None;
     let mut issuer = "g2".to_string();
     let mut cert_chain_output = "../circom/inputs/cert_chain_rs2048/input.json".to_string();
     let device_sig_output = "../circom/inputs/device_sig_rs2048/input.json".to_string();
 
-    let mut i = 2;
+    let mut i = 1;
     while i < command_args.len() {
         match command_args[i].as_str() {
-            "--fido" => {
-                fido = true;
+            "--cert-chain-4096" | "-4" => {
+                rs4096 = true;
                 cert_chain_output = "../circom/inputs/cert_chain_rs4096/input.json".to_string();
                 issuer = "g3".to_string();
             }
@@ -134,18 +134,18 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         i += 1;
     }
 
-    let (k_issuer, k_user) = if fido { (34, 17) } else { (17, 17) };
+    let (k_issuer, k_user) = if rs4096 { (34, 17) } else { (17, 17) };
 
     let default_tbs = b"e775f2805fb993e05a208dbff15d1c1";
-    let (user_cert, user_sig_b64, issuer_cert, serial_hex) = if fido {
-        let response_path = Path::new("tests/testdata/fido_response_sign.json");
-        let issuer_cert = CertChainFidoCircuit::fetch_cert_from_file("tests/testdata/MOICA-G3.cer")
-            .expect("Failed to load MOICA-G3 cert");
+    let (user_cert, user_sig_b64, issuer_cert, serial_hex) = if rs4096 {
+        let response_path = Path::new("tests/testdata/rs4096_response_sign.json");
+        let issuer_cert = CertChainRs4096Circuit::fetch_cert_from_file("tests/testdata/test_ca_rs4096.der")
+            .expect("Failed to load RS4096 test CA cert");
         let response_str =
-            fs::read_to_string(response_path).expect("Failed to read FIDO sign response");
-        let response: ecdsa_spartan2::circuits::sha256rsa_circuit::FidoSignResponse =
-            serde_json::from_str(&response_str).expect("Failed to parse FIDO response");
-        let user_cert = CertChainFidoCircuit::generate_user_cert_from_certb64(&response.result.cert)
+            fs::read_to_string(response_path).expect("Failed to read RS4096 sign response");
+        let response: ecdsa_spartan2::circuits::sha256rsa_circuit::Rs4096SignResponse =
+            serde_json::from_str(&response_str).expect("Failed to parse RS4096 response");
+        let user_cert = CertChainRs4096Circuit::generate_user_cert_from_certb64(&response.result.cert)
             .expect("Failed to parse user cert");
         let serial_hex = serial_hex_trimmed(
             user_cert.tbs_certificate.serial_number.as_bytes(),
@@ -226,11 +226,12 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
 /// The verifier checks `pk_commit_A == pk_commit_B` to bind the two proofs
 /// and prevent proof-mixing attacks.
 fn run_link_verify(command_args: &[String]) -> ! {
-    let fido = command_args.contains(&"--fido".to_string());
+    let rs4096 = command_args.contains(&"--cert-chain-4096".to_string())
+        || command_args.contains(&"-4".to_string());
     let path_config = PathConfig::development();
 
     // Verify cert-chain proof and extract public values
-    let (cc_proof_file, cc_vk_file) = if fido {
+    let (cc_proof_file, cc_vk_file) = if rs4096 {
         (CertChainRsa4096::PROOF, CertChainRsa4096::VERIFYING_KEY)
     } else {
         (CertChainRsa2048::PROOF, CertChainRsa2048::VERIFYING_KEY)
@@ -308,12 +309,12 @@ fn main() {
     }
 }
 
-/// Execute cert-chain (Circuit A) commands — dispatch by `--fido` flag.
+/// Execute cert-chain (Circuit A) commands — dispatch by `--cert-chain-4096` flag.
 fn execute_cert_chain(action: CircuitAction, options: CommandOptions) {
-    if options.fido {
+    if options.rs4096 {
         if !cfg!(feature = "cert_chain_rs4096") {
             eprintln!(
-                "Error: --fido requires the `cert_chain_rs4096` feature. \
+                "Error: --cert-chain-4096 requires the `cert_chain_rs4096` feature. \
                  Rebuild with --features cert_chain_rs4096"
             );
             process::exit(1);
@@ -548,8 +549,8 @@ fn parse_options(args: &[String]) -> Result<CommandOptions, String> {
                 return Err("Missing value for --input".into());
             }
             options.input = Some(PathBuf::from(value));
-        } else if arg == "--fido" || arg == "-f" {
-            options.fido = true;
+        } else if arg == "--cert-chain-4096" || arg == "-4" {
+            options.rs4096 = true;
         } else if arg == "--help" || arg == "-h" {
             print_usage();
             process::exit(0);
@@ -582,11 +583,11 @@ Actions:
 
 Options:
   --input, -i <path>   Override the circuit input JSON
-  --fido, -f           Use RSA-4096 cert-chain circuit (FIDO / MOICA-G3)
+  --cert-chain-4096, -4  Use RSA-4096 cert-chain circuit (4096-bit issuer CA)
 
 Examples:
   cargo run --release -- generate-split-input
-  cargo run --release -- generate-split-input --fido
+  cargo run --release -- generate-split-input --cert-chain-4096
   cargo run --release --features cert_chain_rs2048 -- cert-chain setup
   cargo run --release --features cert_chain_rs2048 -- cert-chain prove --input ../circom/inputs/cert_chain_rs2048/input.json
   cargo run --release --features cert_chain_rs2048 -- cert-chain verify
@@ -594,6 +595,6 @@ Examples:
   cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs2048/input.json
   cargo run --release --features device_sig_rs2048 -- device-sig verify
   cargo run --release -- link-verify
-  cargo run --release -- link-verify --fido"
+  cargo run --release -- link-verify --cert-chain-4096"
     );
 }

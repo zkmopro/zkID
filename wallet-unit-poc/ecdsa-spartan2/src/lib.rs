@@ -19,7 +19,7 @@ pub mod utils;
 // Re-export commonly used types and functions
 pub use circuits::sha256rsa_circuit::{RsaKeySize, Sha256RsaCircuit};
 pub use circuits::split_circuits::{
-    generate_split_inputs, CertChainCircuit, CertChainFidoCircuit, CertChainRsa2048,
+    generate_split_inputs, CertChainCircuit, CertChainRs4096Circuit, CertChainRsa2048,
     CertChainRsa4096, DeviceSigCircuit, DeviceSigRsa2048,
 };
 pub use paths::PathConfig;
