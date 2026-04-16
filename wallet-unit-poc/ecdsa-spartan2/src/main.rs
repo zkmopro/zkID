@@ -247,7 +247,14 @@ fn run_link_verify(command_args: &[String]) -> ! {
     let pk_commit_a = &cc_public_values[1];
     let pk_commit_b = &ds_public_values[0];
 
-    if pk_commit_a == pk_commit_b {
+    use ff::PrimeField;
+    use subtle::ConstantTimeEq;
+    let commits_match: bool = pk_commit_a
+        .to_repr()
+        .as_ref()
+        .ct_eq(pk_commit_b.to_repr().as_ref())
+        .into();
+    if commits_match {
         info!(
             pk_commit = ?pk_commit_a,
             "Link verification PASSED: pk_commit_A == pk_commit_B"

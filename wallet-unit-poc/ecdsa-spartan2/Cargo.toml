@@ -39,6 +39,7 @@ der = { version = "0.7", features = ["derive"] }
 const-oid = { version = "0.9", features = ["db"] }
 hex = "0.4.3"
 ureq = { version = "2", features = ["json"] }
+subtle = "2"
 anyhow = "1"
 
 [dev-dependencies]
@@ -52,3 +53,6 @@ chkstk_stub = { version = "0.1.0" }
 
 [profile.release]
 debug = true
+opt-level = 3
+lto = "thin"
+codegen-units = 1

@@ -1,6 +1,6 @@
 use std::{
     fs::{create_dir_all, File},
-    io::{BufReader, Cursor, Write},
+    io::{BufReader, BufWriter, Cursor},
     path::Path,
     time::Instant,
 };
@@ -34,15 +34,10 @@ pub fn save_keys(
     ensure_parent_dir(pk_path)?;
     ensure_parent_dir(vk_path)?;
 
-    let pk_bytes = bincode::serialize(pk)?;
-    let mut pk_file = File::create(pk_path)?;
-    pk_file.write_all(&pk_bytes)?;
-
+    bincode::serialize_into(BufWriter::new(File::create(pk_path)?), pk)?;
     info!("Saved ZK-Spartan proving key to: {}", pk_path.display());
 
-    let vk_bytes = bincode::serialize(vk)?;
-    let mut vk_file = File::create(vk_path)?;
-    vk_file.write_all(&vk_bytes)?;
+    bincode::serialize_into(BufWriter::new(File::create(vk_path)?), vk)?;
     info!("Saved ZK-Spartan verifying key to: {}", vk_path.display());
 
     Ok(())
@@ -106,9 +101,7 @@ pub fn save_shared_blinds<E: Engine>(
     let shared_blinds_path = shared_blinds_path.as_ref();
     ensure_parent_dir(shared_blinds_path)?;
 
-    let shared_blinds_bytes = bincode::serialize(shared_blinds)?;
-    let mut shared_blinds_file = File::create(shared_blinds_path)?;
-    shared_blinds_file.write_all(&shared_blinds_bytes)?;
+    bincode::serialize_into(BufWriter::new(File::create(shared_blinds_path)?), shared_blinds)?;
     info!(
         "Saved ZK-Spartan shared_blinds to: {}",
         shared_blinds_path.display()
@@ -124,9 +117,7 @@ pub fn save_proof(
     let proof_path = proof_path.as_ref();
     ensure_parent_dir(proof_path)?;
 
-    let proof_bytes = bincode::serialize(proof)?;
-    let mut proof_file = File::create(proof_path)?;
-    proof_file.write_all(&proof_bytes)?;
+    bincode::serialize_into(BufWriter::new(File::create(proof_path)?), proof)?;
     info!("Saved ZK-Spartan proof to: {}", proof_path.display());
 
     Ok(())
@@ -139,9 +130,7 @@ pub fn save_instance(
     let instance_path = instance_path.as_ref();
     ensure_parent_dir(instance_path)?;
 
-    let instance_bytes = bincode::serialize(instance)?;
-    let mut instance_file = File::create(instance_path)?;
-    instance_file.write_all(&instance_bytes)?;
+    bincode::serialize_into(BufWriter::new(File::create(instance_path)?), instance)?;
     info!("Saved ZK-Spartan instance to: {}", instance_path.display());
 
     Ok(())
@@ -154,9 +143,7 @@ pub fn save_witness(
     let witness_path = witness_path.as_ref();
     ensure_parent_dir(witness_path)?;
 
-    let witness_bytes = bincode::serialize(witness)?;
-    let mut witness_file = File::create(witness_path)?;
-    witness_file.write_all(&witness_bytes)?;
+    bincode::serialize_into(BufWriter::new(File::create(witness_path)?), witness)?;
     info!("Saved ZK-Spartan witness to: {}", witness_path.display());
 
     Ok(())
