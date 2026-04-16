@@ -20,7 +20,7 @@ anyhow = "1.0.99"
 ecdsa-spartan2 = { path = "../ecdsa-spartan2", features = ["sha256rsa4096"] } # mobile only supports 4096-bit RSA
 
 # SPARTAN2_DEPENDENCIES
-spartan2 = { git = "https://github.com/therealyingtong/Spartan2.git", branch = "zk", default-features = false }
+spartan2 = { git = "https://github.com/0xVikasRushi/Spartan2.git", branch = "openac-sdk", default-features = false }
 bellpepper-core = "0.4.0"
 bellpepper = "0.4.0"
 ff = { version = "0.13.0", features = ["derive"] }
@@ -53,7 +53,7 @@ tempfile = "3.8"
 mopro-ffi = { version = "0.3.5", features = ["uniffi-tests"] }
 
 [build-dependencies]
-spartan2 = { git = "https://github.com/therealyingtong/Spartan2.git", branch = "zk", default-features = false }
+spartan2 = { git = "https://github.com/0xVikasRushi/Spartan2.git", branch = "openac-sdk", default-features = false }
 
 [profile.release]
 opt-level = 3       # Optimize for performance
