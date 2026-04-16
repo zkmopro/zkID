@@ -97,8 +97,7 @@ use sha2::{Digest, Sha256};
 use x509_cert::Certificate;
 
 const RSA_N: usize = 121;
-pub const MAX_CERT_CHAIN_RS2048_LENGTH: usize = 1024;
-pub const MAX_CERT_CHAIN_RS4096_LENGTH: usize = 1280;
+pub const MAX_CERT_CHAIN_LENGTH: usize = 1536;
 const MAX_MESSAGE_LENGTH: usize = 1536;
 const MAX_SUBJECT_DN_LENGTH: usize = 128;
 const SMT_DEPTH: usize = 128;

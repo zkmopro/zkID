@@ -23,7 +23,7 @@ include "components/pk_commit.circom";
 ///         byte-for-byte. The verifier checks pk_commit_A == pk_commit_B to
 ///         prevent proof-mixing (legit cert + illegit device sig).
 ///
-/// @param maxMessageLength    Max TBS / cert byte length (1024 for rs2048, 1280 for rs4096)
+/// @param maxMessageLength    Max TBS / cert byte length (1536 for both rs2048 and rs4096)
 /// @param n                   RSA limb bits (e.g. 121) — shared across roles
 /// @param k_issuer            Issuer RSA limb count (17 for G2, 34 for G3)
 /// @param modulusBitsIssuer   Issuer RSA key bits (2048 for G2, 4096 for G3)

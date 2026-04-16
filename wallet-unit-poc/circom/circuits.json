@@ -2,13 +2,13 @@
   "cert_chain_rs2048": {
     "file": "cert_chain",
     "template": "CertChainRSA256",
-    "params": [1024, 121, 17, 2048, 17, 2048, 128, 128, 20],
+    "params": [1536, 121, 17, 2048, 17, 2048, 128, 128, 20],
     "pubs": ["issuer_rsa_modulus", "smtRoot", "serialNumber"]
   },
   "cert_chain_rs4096": {
     "file": "cert_chain",
     "template": "CertChainRSA256",
-    "params": [1280, 121, 34, 4096, 17, 2048, 128, 128, 20],
+    "params": [1536, 121, 34, 4096, 17, 2048, 128, 128, 20],
     "pubs": ["issuer_rsa_modulus", "smtRoot", "serialNumber"]
   },
   "device_sig_rs2048": {

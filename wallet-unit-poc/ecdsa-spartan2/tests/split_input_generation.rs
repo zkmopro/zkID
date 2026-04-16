@@ -6,7 +6,7 @@ use ecdsa_spartan2::{
     generate_split_inputs,
     circuits::types::{CardSignResponse, Pkcs11InfoResponse},
     CertChainCircuit, CertChainRs4096Circuit, DEFAULT_TBS,
-    MAX_CERT_CHAIN_RS2048_LENGTH, MAX_CERT_CHAIN_RS4096_LENGTH,
+    MAX_CERT_CHAIN_LENGTH,
 };
 
 fn load_rs2048_fixtures() -> (x509_cert::Certificate, String, x509_cert::Certificate, String) {
@@ -62,7 +62,7 @@ fn split_inputs_have_expected_structure() {
         None,
         17,
         17,
-        MAX_CERT_CHAIN_RS2048_LENGTH,
+        MAX_CERT_CHAIN_LENGTH,
     )
     .expect("generate_split_inputs failed");
 
@@ -106,13 +106,13 @@ fn split_inputs_have_expected_structure() {
     // Array dimensions
     assert_eq!(
         cert_chain["user_cert_zero_padded"].as_array().unwrap().len(),
-        1024,
+        1536,
         "user_cert_zero_padded length"
     );
     assert_eq!(
         cert_chain["issuer_tbs"].as_array().unwrap().len(),
-        1024,
-        "issuer_tbs length (MAX_CERT_CHAIN_RS2048_LENGTH)"
+        1536,
+        "issuer_tbs length (MAX_CERT_CHAIN_LENGTH)"
     );
     assert_eq!(
         cert_chain["issuer_rsa_modulus"].as_array().unwrap().len(),
@@ -154,7 +154,7 @@ fn split_inputs_share_pk_blind() {
         None,
         17,
         17,
-        MAX_CERT_CHAIN_RS2048_LENGTH,
+        MAX_CERT_CHAIN_LENGTH,
     )
     .expect("generate_split_inputs failed");
 
@@ -179,7 +179,7 @@ fn split_inputs_rs4096_have_expected_structure() {
         None,
         34,
         17,
-        MAX_CERT_CHAIN_RS4096_LENGTH,
+        MAX_CERT_CHAIN_LENGTH,
     )
     .expect("generate_split_inputs failed for RS4096");
 
@@ -220,16 +220,16 @@ fn split_inputs_rs4096_have_expected_structure() {
         );
     }
 
-    // Array dimensions — 4096 params: cert padding=1280, k_issuer=34, k_user=17
+    // Array dimensions — 4096 params: cert padding=1536, k_issuer=34, k_user=17
     assert_eq!(
         cert_chain["user_cert_zero_padded"].as_array().unwrap().len(),
-        1280,
-        "user_cert_zero_padded length (MAX_CERT_CHAIN_RS4096_LENGTH)"
+        1536,
+        "user_cert_zero_padded length (MAX_CERT_CHAIN_LENGTH)"
     );
     assert_eq!(
         cert_chain["issuer_tbs"].as_array().unwrap().len(),
-        1280,
-        "issuer_tbs length (MAX_CERT_CHAIN_RS4096_LENGTH)"
+        1536,
+        "issuer_tbs length (MAX_CERT_CHAIN_LENGTH)"
     );
     assert_eq!(
         cert_chain["issuer_rsa_modulus"].as_array().unwrap().len(),
@@ -276,7 +276,7 @@ fn split_inputs_rs4096_share_pk_blind() {
         None,
         34,
         17,
-        MAX_CERT_CHAIN_RS4096_LENGTH,
+        MAX_CERT_CHAIN_LENGTH,
     )
     .expect("generate_split_inputs failed for RS4096");
 

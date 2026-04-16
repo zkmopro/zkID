@@ -36,7 +36,7 @@ describe("CertChainRSA256 (rs2048)", function () {
     circuit = await circomkit.WitnessTester("cert_chain_rs2048", {
       file: "cert_chain",
       template: "CertChainRSA256",
-      params: [1024, 121, 17, 2048, 17, 2048, 128, 128, 20],
+      params: [1536, 121, 17, 2048, 17, 2048, 128, 128, 20],
     });
   });
 

@@ -37,7 +37,7 @@ use ecdsa_spartan2::{
     save_keys, serial_bytes_to_hex_trimmed, setup_circuit_keys, setup_circuit_keys_no_save,
     verify_circuit, verify_circuit_with_loaded_data, CertChainCircuit, CertChainRs4096Circuit,
     CertChainRsa2048, CertChainRsa4096, DeviceSigRsa2048, PathConfig, RsaKeySize,
-    Sha256RsaCircuit, MAX_CERT_CHAIN_RS2048_LENGTH, MAX_CERT_CHAIN_RS4096_LENGTH,
+    Sha256RsaCircuit, MAX_CERT_CHAIN_LENGTH,
 };
 use std::{
     env::args,
@@ -128,11 +128,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     }
 
     let (k_issuer, k_user) = if rs4096 { (34, 17) } else { (17, 17) };
-    let max_cert_length = if rs4096 {
-        MAX_CERT_CHAIN_RS4096_LENGTH
-    } else {
-        MAX_CERT_CHAIN_RS2048_LENGTH
-    };
+    let max_cert_length = MAX_CERT_CHAIN_LENGTH;
 
     let (user_cert, user_sig_b64, issuer_cert, serial_hex, tbs_bytes) = if let Some(ref pin) = pin {
         info!(server = %challenge_server, "Fetching TBS challenge from verifier");
