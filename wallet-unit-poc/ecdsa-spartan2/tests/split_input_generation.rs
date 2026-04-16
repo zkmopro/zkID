@@ -5,7 +5,8 @@
 use ecdsa_spartan2::{
     generate_split_inputs,
     circuits::types::{CardSignResponse, Pkcs11InfoResponse},
-    CertChainCircuit, DEFAULT_TBS, MAX_CERT_CHAIN_RS2048_LENGTH,
+    CertChainCircuit, CertChainRs4096Circuit, DEFAULT_TBS,
+    MAX_CERT_CHAIN_RS2048_LENGTH, MAX_CERT_CHAIN_RS4096_LENGTH,
 };
 
 fn load_rs2048_fixtures() -> (x509_cert::Certificate, String, x509_cert::Certificate, String) {
@@ -28,6 +29,24 @@ fn load_rs2048_fixtures() -> (x509_cert::Certificate, String, x509_cert::Certifi
     let serial_hex = hex::encode(serial_bytes);
 
     (user_cert, response.signature, issuer_cert, serial_hex)
+}
+
+fn load_rs4096_fixtures() -> (x509_cert::Certificate, String, x509_cert::Certificate, String) {
+    let issuer_cert = CertChainRs4096Circuit::fetch_cert_from_file("tests/testdata/test_ca_rs4096.der")
+        .expect("test_ca_rs4096.der not found — run `cargo run --example generate_fixtures`");
+
+    let response_str = std::fs::read_to_string("tests/testdata/rs4096_response_sign.json")
+        .expect("rs4096_response_sign.json not found — run `cargo run --example generate_fixtures`");
+    let response: ecdsa_spartan2::circuits::types::Rs4096SignResponse =
+        serde_json::from_str(&response_str).expect("invalid JSON in rs4096_response_sign.json");
+
+    let user_cert = CertChainRs4096Circuit::generate_user_cert_from_certb64(&response.result.cert)
+        .expect("failed to parse RS4096 user cert");
+
+    let serial_bytes = user_cert.tbs_certificate.serial_number.as_bytes();
+    let serial_hex = hex::encode(serial_bytes);
+
+    (user_cert, response.result.signed_response, issuer_cert, serial_hex)
 }
 
 #[test]
@@ -144,5 +163,127 @@ fn split_inputs_share_pk_blind() {
     assert_eq!(
         cc_blind, ds_blind,
         "pk_blind must be identical across cert-chain and device-sig outputs"
+    );
+}
+
+#[test]
+fn split_inputs_rs4096_have_expected_structure() {
+    let (user_cert, user_sig_b64, issuer_cert, serial_hex) = load_rs4096_fixtures();
+
+    let (cert_chain, device_sig) = generate_split_inputs(
+        &user_cert,
+        &issuer_cert,
+        &user_sig_b64,
+        DEFAULT_TBS,
+        &serial_hex,
+        None,
+        34,
+        17,
+        MAX_CERT_CHAIN_RS4096_LENGTH,
+    )
+    .expect("generate_split_inputs failed for RS4096");
+
+    // cert_chain JSON must have all expected keys
+    for key in [
+        "user_cert_zero_padded",
+        "actual_user_cert_length",
+        "user_modulus_offset",
+        "user_modulus_tag_offset",
+        "subject_dn",
+        "subject_dn_offset",
+        "subject_dn_length",
+        "serial_number_offset",
+        "issuer_tbs",
+        "issuer_tbs_length",
+        "actual_issuer_tbs_length",
+        "issuer_rsa_modulus",
+        "issuer_rsa_signature",
+        "smtRoot",
+        "serialNumber",
+        "smtSiblings",
+        "smtOldKey",
+        "smtOldValue",
+        "smtIsOld0",
+        "pk_blind",
+    ] {
+        assert!(
+            cert_chain.get(key).is_some(),
+            "cert_chain (RS4096) missing key: {key}"
+        );
+    }
+
+    // device_sig JSON must have all expected keys
+    for key in ["tbs", "tbs_length", "user_pk_limbs", "user_rsa_signature", "pk_blind"] {
+        assert!(
+            device_sig.get(key).is_some(),
+            "device_sig (RS4096) missing key: {key}"
+        );
+    }
+
+    // Array dimensions — 4096 params: cert padding=1280, k_issuer=34, k_user=17
+    assert_eq!(
+        cert_chain["user_cert_zero_padded"].as_array().unwrap().len(),
+        1280,
+        "user_cert_zero_padded length (MAX_CERT_CHAIN_RS4096_LENGTH)"
+    );
+    assert_eq!(
+        cert_chain["issuer_tbs"].as_array().unwrap().len(),
+        1280,
+        "issuer_tbs length (MAX_CERT_CHAIN_RS4096_LENGTH)"
+    );
+    assert_eq!(
+        cert_chain["issuer_rsa_modulus"].as_array().unwrap().len(),
+        34,
+        "issuer_rsa_modulus length (k_issuer=34)"
+    );
+    assert_eq!(
+        cert_chain["issuer_rsa_signature"].as_array().unwrap().len(),
+        34,
+        "issuer_rsa_signature length (k_issuer=34)"
+    );
+    assert_eq!(
+        cert_chain["smtSiblings"].as_array().unwrap().len(),
+        128,
+        "smtSiblings length (smtDepth=128)"
+    );
+    assert_eq!(
+        device_sig["tbs"].as_array().unwrap().len(),
+        1536,
+        "tbs length (maxMessageLength=1536)"
+    );
+    assert_eq!(
+        device_sig["user_pk_limbs"].as_array().unwrap().len(),
+        17,
+        "user_pk_limbs length (k_user=17, always RSA-2048)"
+    );
+    assert_eq!(
+        device_sig["user_rsa_signature"].as_array().unwrap().len(),
+        17,
+        "user_rsa_signature length (k_user=17)"
+    );
+}
+
+#[test]
+fn split_inputs_rs4096_share_pk_blind() {
+    let (user_cert, user_sig_b64, issuer_cert, serial_hex) = load_rs4096_fixtures();
+
+    let (cert_chain, device_sig) = generate_split_inputs(
+        &user_cert,
+        &issuer_cert,
+        &user_sig_b64,
+        DEFAULT_TBS,
+        &serial_hex,
+        None,
+        34,
+        17,
+        MAX_CERT_CHAIN_RS4096_LENGTH,
+    )
+    .expect("generate_split_inputs failed for RS4096");
+
+    let cc_blind = cert_chain["pk_blind"].as_str().expect("cert_chain pk_blind not a string");
+    let ds_blind = device_sig["pk_blind"].as_str().expect("device_sig pk_blind not a string");
+    assert_eq!(
+        cc_blind, ds_blind,
+        "pk_blind must be identical across cert-chain and device-sig outputs (RS4096)"
     );
 }

@@ -135,12 +135,6 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     };
 
     let (user_cert, user_sig_b64, issuer_cert, serial_hex, tbs_bytes) = if let Some(ref pin) = pin {
-        if rs4096 {
-            eprintln!("Error: live mode with --cert-chain-4096 is not yet supported.");
-            eprintln!("Live mode currently works with RSA-2048 (MOICA-G2) only.");
-            process::exit(1);
-        }
-
         info!(server = %challenge_server, "Fetching TBS challenge from verifier");
         let challenge_resp = ecdsa_spartan2::challenge_client::create_challenge(&challenge_server)
             .unwrap_or_else(|e| {
@@ -664,6 +658,7 @@ Examples:
 
 Live mode examples:
   cargo run --release -- generate-split-input --pin 830929
+  cargo run --release -- generate-split-input --cert-chain-4096 --pin 830929
   cargo run --release -- generate-split-input --pin 830929 --smt-server http://localhost:3000
   cargo run --release -- generate-split-input --pin 830929 --challenge-server http://localhost:8080"
     );
