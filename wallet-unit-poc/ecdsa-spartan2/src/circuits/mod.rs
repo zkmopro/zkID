@@ -1,7 +1,6 @@
 pub mod cert;
 pub mod circuit;
 pub mod encoding;
-pub mod sha256rsa_circuit;
 pub mod split_circuits;
 pub mod types;
 

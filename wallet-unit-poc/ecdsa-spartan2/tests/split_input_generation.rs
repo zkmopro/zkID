@@ -4,7 +4,7 @@
 
 use ecdsa_spartan2::{
     generate_split_inputs,
-    circuits::sha256rsa_circuit::{CardSignResponse, Pkcs11InfoResponse},
+    circuits::types::{CardSignResponse, Pkcs11InfoResponse},
     CertChainCircuit, DEFAULT_TBS, MAX_CERT_CHAIN_RS2048_LENGTH,
 };
 

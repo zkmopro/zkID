@@ -194,7 +194,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             .expect("Failed to load RS4096 test CA cert");
         let response_str =
             fs::read_to_string(response_path).expect("Failed to read RS4096 sign response");
-        let response: ecdsa_spartan2::circuits::sha256rsa_circuit::Rs4096SignResponse =
+        let response: ecdsa_spartan2::circuits::types::Rs4096SignResponse =
             serde_json::from_str(&response_str).expect("Failed to parse RS4096 response");
         let user_cert = CertChainRs4096Circuit::generate_user_cert_from_certb64(&response.result.cert)
             .expect("Failed to parse user cert");
@@ -212,13 +212,13 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         let response_path = Path::new("tests/testdata/response_sign_test.json");
         let pkcs11_path = Path::new("tests/testdata/pkcs11info_test.json");
         let pkcs11_str = fs::read_to_string(pkcs11_path).expect("Failed to read pkcs11 response");
-        let pkcs11: ecdsa_spartan2::circuits::sha256rsa_circuit::Pkcs11InfoResponse =
+        let pkcs11: ecdsa_spartan2::circuits::types::Pkcs11InfoResponse =
             serde_json::from_str(&pkcs11_str).expect("Failed to parse pkcs11 response");
         let issuer_cert =
             CertChainCircuit::extract_issuer_cert(&pkcs11).expect("Failed to extract issuer cert");
         let response_str =
             fs::read_to_string(response_path).expect("Failed to read sign response");
-        let response: ecdsa_spartan2::circuits::sha256rsa_circuit::CardSignResponse =
+        let response: ecdsa_spartan2::circuits::types::CardSignResponse =
             serde_json::from_str(&response_str).expect("Failed to parse sign response");
         let user_cert = CertChainCircuit::generate_user_cert_from_certb64(&response.certb64)
             .expect("Failed to parse user cert");

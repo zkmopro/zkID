@@ -3,7 +3,7 @@
 //! Calls the local HiPKI server to fetch certificate chains and sign data
 //! using the Taiwan Citizen Digital Certificate (自然人憑證).
 
-use crate::circuits::sha256rsa_circuit::{CardSignResponse, Pkcs11InfoResponse};
+use crate::circuits::types::{CardSignResponse, Pkcs11InfoResponse};
 use std::error::Error;
 
 const DEFAULT_SERVER_URL: &str = "http://localhost:61161";
