@@ -29,7 +29,7 @@ use std::{
     fs::File,
     io::Read,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, OnceLock},
     time::Instant,
 };
 use tracing::info;
@@ -73,8 +73,7 @@ pub struct Sha256RsaCircuit<T: RsaKeySize> {
     path_config: PathConfig,
     /// Optional override for input JSON path
     input_path: Option<PathBuf>,
-    /// Cached witness shared via Arc to avoid cloning ~50-100 MB per access
-    cached_witness: Arc<Mutex<Option<Arc<Vec<Scalar>>>>>,
+    cached_witness: Arc<OnceLock<Vec<Scalar>>>,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -246,7 +245,7 @@ impl<T: RsaKeySize> Default for Sha256RsaCircuit<T> {
         Self {
             path_config: PathConfig::default(),
             input_path: None,
-            cached_witness: Arc::new(Mutex::new(None)),
+            cached_witness: Arc::new(OnceLock::new()),
             _marker: std::marker::PhantomData,
         }
     }
@@ -258,7 +257,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         Self {
             path_config,
             input_path,
-            cached_witness: Arc::new(Mutex::new(None)),
+            cached_witness: Arc::new(OnceLock::new()),
             _marker: std::marker::PhantomData,
         }
     }
@@ -269,7 +268,7 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
         Self {
             path_config: PathConfig::development(),
             input_path: path.into(),
-            cached_witness: Arc::new(Mutex::new(None)),
+            cached_witness: Arc::new(OnceLock::new()),
             _marker: std::marker::PhantomData,
         }
     }
@@ -829,17 +828,12 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
     }
 
     /// Get cached witness or generate and cache it.
-    /// Returns Arc to avoid cloning the full Vec<Scalar> on each access.
-    fn get_or_generate_witness(&self) -> Result<Arc<Vec<Scalar>>, SynthesisError> {
-        let mut cache = self.cached_witness.lock().unwrap();
-
-        if let Some(ref witness) = *cache {
-            return Ok(Arc::clone(witness));
+    fn get_or_generate_witness(&self) -> Result<&Vec<Scalar>, SynthesisError> {
+        if let Some(w) = self.cached_witness.get() {
+            return Ok(w);
         }
-
-        let witness = Arc::new(self.generate_witness()?);
-        *cache = Some(Arc::clone(&witness));
-        Ok(witness)
+        let witness = self.generate_witness()?;
+        Ok(self.cached_witness.get_or_init(|| witness))
     }
 
     /// Pre-generate and cache the witness.
