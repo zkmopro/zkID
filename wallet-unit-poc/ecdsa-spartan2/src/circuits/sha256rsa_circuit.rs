@@ -858,26 +858,39 @@ impl<T: RsaKeySize> SpartanCircuit<E> for Sha256RsaCircuit<T> {
         _: &[AllocatedNum<Scalar>],
         _: Option<&[Scalar]>,
     ) -> Result<(), SynthesisError> {
-        let r1cs_path = self.r1cs_path();
-
-        // Detect if we're in setup phase (ShapeCS) or prove phase (SatisfyingAssignment)
-        // During setup, we only need constraint structure instead of actual witness values
         let cs_type = type_name::<CS>();
         let is_setup_phase = cs_type.contains("ShapeCS");
 
         if is_setup_phase {
+            let r1cs_path = self.r1cs_path();
             let r1cs = load_r1cs_mmap(&r1cs_path)
                 .expect("failed to load r1cs");
             synthesize(cs, r1cs, None)?;
             return Ok(());
         }
 
-        // Generate witness for prove phase
+        // During prove, cs is SatisfyingAssignment whose enforce() is a no-op
+        // (see Spartan2 src/bellpepper/solver.rs:70-78)
+        // Allocate wires directly from the pre-computed witness instead.
         let witness = self.get_or_generate_witness()?;
+        let num_inputs = T::NUM_PUBLIC + 1; // +1 for the constant-1 wire at index 0
+        let num_aux = witness.len().saturating_sub(num_inputs);
 
-        let r1cs = load_r1cs_mmap(&r1cs_path)
-            .expect("failed to load r1cs");
-        synthesize(cs, r1cs, Some(witness))?;
+        debug_assert!(
+            witness.len() >= num_inputs,
+            "witness too short: len={} but NUM_PUBLIC={} requires num_inputs={}",
+            witness.len(),
+            T::NUM_PUBLIC,
+            num_inputs,
+        );
+
+        // Index 0 is the implicit constant-1 wire, so start at 1
+        for i in 1..num_inputs {
+            cs.alloc_input(|| format!("public_{i}"), || Ok(witness[i]))?;
+        }
+        for i in 0..num_aux {
+            cs.alloc(|| format!("aux_{i}"), || Ok(witness[i + num_inputs]))?;
+        }
         Ok(())
     }
 
