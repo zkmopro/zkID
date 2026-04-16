@@ -54,6 +54,3 @@ chkstk_stub = { version = "0.1.0" }
 
 [profile.release]
 debug = true
-opt-level = 3
-lto = "thin"
-codegen-units = 1
