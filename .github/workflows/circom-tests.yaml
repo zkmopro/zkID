@@ -118,6 +118,9 @@ jobs:
             - name: Run circuit tests
               run: cd wallet-unit-poc/circom && yarn test
 
+            - name: Run constraint-count regression guard
+              run: cd wallet-unit-poc/circom && yarn test:constraints
+
     compile-circuits-macos:
         runs-on: macos-latest
         steps:
