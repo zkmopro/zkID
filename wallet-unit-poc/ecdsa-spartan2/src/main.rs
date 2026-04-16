@@ -44,8 +44,8 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process,
-    time::Instant,
 };
+use web_time::Instant;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 

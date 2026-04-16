@@ -30,8 +30,8 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
-    time::Instant,
 };
+use web_time::Instant;
 use tracing::info;
 use x509_cert::{
     der::{Length, Reader, SliceReader, Tag, TagNumber},

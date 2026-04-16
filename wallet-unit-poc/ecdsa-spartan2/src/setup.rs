@@ -2,8 +2,8 @@ use std::{
     fs::{create_dir_all, File},
     io::{BufReader, BufWriter, Cursor},
     path::Path,
-    time::Instant,
 };
+use web_time::Instant;
 
 use spartan2::{
     r1cs::{R1CSWitness, SplitR1CSInstance},

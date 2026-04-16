@@ -1,4 +1,5 @@
-use std::{path::Path, time::Instant};
+use std::path::Path;
+use web_time::Instant;
 
 use crate::{
     setup::{
