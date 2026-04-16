@@ -1,7 +1,6 @@
-# Compiles all Circom circuits (Linux via reusable workflow) and runs the mocha
-# witness test suite. Also smoke-compiles a subset on macOS to catch
-# platform-specific issues.
-# Triggers on changes to circom source or workflow files.
+# Runs the mocha witness test suite (Linux) and smoke-compiles a subset on
+# macOS to catch platform-specific issues.
+# Triggers on changes to circom source or this workflow file.
 name: circom-tests
 
 on:
@@ -11,23 +10,16 @@ on:
         paths:
             - "wallet-unit-poc/circom/**"
             - ".github/workflows/circom-tests.yaml"
-            - ".github/workflows/compile-circuits.yaml"
     pull_request:
         paths:
             - "wallet-unit-poc/circom/**"
             - ".github/workflows/circom-tests.yaml"
-            - ".github/workflows/compile-circuits.yaml"
     workflow_dispatch:
 
 env:
     CIRCOM_VERSION: v2.2.3
 
 jobs:
-    compile-circuits:
-        uses: ./.github/workflows/compile-circuits.yaml
-        with:
-            circom-version: v2.2.3
-
     circuit-tests:
         runs-on: ubuntu-latest
         steps:
