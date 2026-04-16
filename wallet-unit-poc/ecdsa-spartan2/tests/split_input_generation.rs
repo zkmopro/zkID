@@ -86,7 +86,7 @@ fn split_inputs_have_expected_structure() {
     // Array dimensions
     assert_eq!(
         cert_chain["user_cert_zero_padded"].as_array().unwrap().len(),
-        1536,
+        1024,
         "user_cert_zero_padded length"
     );
     assert_eq!(

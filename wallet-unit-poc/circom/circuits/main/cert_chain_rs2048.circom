@@ -3,4 +3,4 @@ pragma circom 2.2.3;
 
 include "../cert_chain.circom";
 
-component main {public[issuer_rsa_modulus, smtRoot, serialNumber]} = CertChainRSA256(1536, 121, 17, 2048, 17, 2048, 128, 128, 20);
+component main {public[issuer_rsa_modulus, smtRoot, serialNumber]} = CertChainRSA256(1024, 121, 17, 2048, 17, 2048, 128, 128, 20);

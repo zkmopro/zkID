@@ -73,8 +73,7 @@ impl RsaKeySize for CertChainRsa4096 {
 pub struct DeviceSigRsa2048;
 
 /// Packed-tbs output field count: `ceil(1536 / 31) = 50`.
-/// (`maxMessageLength` is 1536 in both cert_chain and device_sig during Phase 2;
-/// Phase 3 will tighten device_sig's maxTbsLen to ~256, reducing this.)
+/// device_sig maxMessageLength stays at 1536; cert_chain is 1024 (Phase 3.1).
 const PACKED_TBS_FIELDS: usize = (1536 + 30) / 31;
 
 #[allow(unused_variables)]
@@ -113,7 +112,8 @@ use sha2::{Digest, Sha256};
 use x509_cert::Certificate;
 
 const RSA_N: usize = 121;
-const MAX_MESSAGE_LENGTH: usize = 1536;
+const MAX_CERT_CHAIN_LENGTH: usize = 1024;
+const MAX_MESSAGE_LENGTH: usize = 1536; // device-sig tbs stays at 1536
 const MAX_SUBJECT_DN_LENGTH: usize = 128;
 const SMT_DEPTH: usize = 128;
 
@@ -176,7 +176,7 @@ pub fn generate_split_inputs(
         .collect();
     let tbs_padded_len = S::sha256_padded_length(tbs.len());
     let issuer_tbs_padded: Vec<String> =
-        S::sha256_pad(&user_cert_tbs_der, MAX_MESSAGE_LENGTH)
+        S::sha256_pad(&user_cert_tbs_der, MAX_CERT_CHAIN_LENGTH)
             .iter()
             .map(|b| b.to_string())
             .collect();
@@ -198,7 +198,7 @@ pub fn generate_split_inputs(
         smt_fields_from_option(smt_inputs, serial_decimal, SMT_DEPTH);
 
     let cert_chain_json = serde_json::json!({
-        "user_cert_zero_padded": zero_pad_to_u64(&user_cert_der, MAX_MESSAGE_LENGTH),
+        "user_cert_zero_padded": zero_pad_to_u64(&user_cert_der, MAX_CERT_CHAIN_LENGTH),
         "actual_user_cert_length": user_cert_der.len(),
         "user_modulus_offset": user_offsets.modulus_offset,
         "user_modulus_tag_offset": user_offsets.modulus_tag_offset,
