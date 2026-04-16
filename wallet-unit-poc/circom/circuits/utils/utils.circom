@@ -29,16 +29,13 @@ template VerifyTBSinCert(MAX_CERT_LEN, MAX_TBS_LEN) {
     }
 }
 
-/// Uses zk-email's SelectSubArray (log-depth butterfly shift) instead of
-/// O(MAX_SUBJECT_LEN * MAX_CERT_LEN) IsEqual scan.
+/// Extracts cert[subject_dn_offset .. +length] and asserts it equals subject_dn.
 template VerifySubjectDN(MAX_CERT_LEN, MAX_SUBJECT_LEN) {
     signal input cert[MAX_CERT_LEN];
     signal input subject_dn[MAX_SUBJECT_LEN];
     signal input subject_dn_offset;
     signal input length;
 
-    // SelectSubArray: O(log₂(MAX_CERT_LEN) * MAX_CERT_LEN) constraints.
-    // out[i] = cert[subject_dn_offset + i] for i < length, 0 for i >= length.
     component extracted = SelectSubArray(MAX_CERT_LEN, MAX_SUBJECT_LEN);
     extracted.in <== cert;
     extracted.startIndex <== subject_dn_offset;
@@ -49,8 +46,8 @@ template VerifySubjectDN(MAX_CERT_LEN, MAX_SUBJECT_LEN) {
     }
 }
 
-/// Uses ItemAtIndex for tag/length extraction and SelectSubArray for serial
-/// byte extraction — replaces three O(MAX_CERT_LEN) scans with log-depth shifts.
+/// Validates ASN.1 INTEGER tag+length, extracts serial bytes, and reconstructs
+/// a big-endian integer to assert it equals `target`.
 template VerifySerialNumber(MAX_CERT_LEN, MAX_SERIAL_LEN) {
     signal input cert[MAX_CERT_LEN];
     signal input offset;
@@ -96,7 +93,6 @@ template VerifySerialNumber(MAX_CERT_LEN, MAX_SERIAL_LEN) {
 
     // -----------------------------------------------------------------------
     // Step 2: Reconstruct big-endian integer using actual_len-relative powers
-    //         O(MAX_SERIAL_LEN²) — small at 20²=400
     // -----------------------------------------------------------------------
 
     var pow256[MAX_SERIAL_LEN + 1];
