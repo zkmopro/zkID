@@ -53,7 +53,6 @@ fn get_file_size(path: &Path) -> u64 {
     fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
-/// Format bytes into human-readable size string
 fn format_size(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{} B", bytes)
@@ -86,11 +85,23 @@ struct ParsedCommand {
     options: CommandOptions,
 }
 
-/// `generate-split-input` CLI: fixture load → optional SMT fetch → write two JSON files.
+/// Require the next positional value for a flag, or exit with an error.
+fn require_arg(args: &[String], index: &mut usize, flag: &str) -> String {
+    *index += 1;
+    args.get(*index).cloned().unwrap_or_else(|| {
+        eprintln!("Missing value for {}", flag);
+        process::exit(1);
+    })
+}
+
+/// `generate-split-input` CLI: fixture load -> optional SMT fetch -> write two JSON files.
 fn run_generate_split_input(command_args: &[String]) -> ! {
     let mut rs4096 = false;
     let mut smt_server: Option<String> = None;
     let mut issuer = "g2".to_string();
+    let mut pin: Option<String> = None;
+    let mut hipki_server = ecdsa_spartan2::hipki_client::default_server_url().to_string();
+    let mut challenge_server = ecdsa_spartan2::challenge_client::default_server_url().to_string();
     let mut cert_chain_output = "../circom/inputs/cert_chain_rs2048/input.json".to_string();
     let mut device_sig_output = "../circom/inputs/device_sig_rs2048/input.json".to_string();
 
@@ -104,19 +115,12 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
                     "../circom/inputs/device_sig_rs4096chain/input.json".to_string();
                 issuer = "g3".to_string();
             }
-            "--smt-server" => {
-                i += 1;
-                smt_server = Some(command_args.get(i).cloned().unwrap_or_else(|| {
-                    eprintln!("Missing value for --smt-server");
-                    process::exit(1);
-                }));
-            }
-            "--issuer" => {
-                i += 1;
-                issuer = command_args.get(i).cloned().unwrap_or_else(|| {
-                    eprintln!("Missing value for --issuer");
-                    process::exit(1);
-                });
+            "--smt-server" => smt_server = Some(require_arg(command_args, &mut i, "--smt-server")),
+            "--issuer" => issuer = require_arg(command_args, &mut i, "--issuer"),
+            "--pin" => pin = Some(require_arg(command_args, &mut i, "--pin")),
+            "--hipki-server" => hipki_server = require_arg(command_args, &mut i, "--hipki-server"),
+            "--challenge-server" => {
+                challenge_server = require_arg(command_args, &mut i, "--challenge-server")
             }
             _ => {}
         }
@@ -130,8 +134,61 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         MAX_CERT_CHAIN_RS2048_LENGTH
     };
 
-    let default_tbs = ecdsa_spartan2::DEFAULT_TBS;
-    let (user_cert, user_sig_b64, issuer_cert, serial_hex) = if rs4096 {
+    let (user_cert, user_sig_b64, issuer_cert, serial_hex, tbs_bytes) = if let Some(ref pin) = pin {
+        if rs4096 {
+            eprintln!("Error: live mode with --cert-chain-4096 is not yet supported.");
+            eprintln!("Live mode currently works with RSA-2048 (MOICA-G2) only.");
+            process::exit(1);
+        }
+
+        info!(server = %challenge_server, "Fetching TBS challenge from verifier");
+        let challenge_resp = ecdsa_spartan2::challenge_client::create_challenge(&challenge_server)
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to fetch challenge from {}: {}", challenge_server, e);
+                process::exit(1);
+            });
+        info!(
+            challenge_id = %challenge_resp.challenge_id,
+            expires_at = %challenge_resp.expires_at,
+            "Challenge received"
+        );
+        let tbs_hex = challenge_resp.challenge_bytes;
+
+        info!(server = %hipki_server, "Fetching certificate chain from HiPKI");
+        let pkcs11info = ecdsa_spartan2::hipki_client::fetch_pkcs11info(&hipki_server)
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to fetch pkcs11info from {}: {}", hipki_server, e);
+                process::exit(1);
+            });
+        let issuer_cert = CertChainCircuit::extract_issuer_cert(&pkcs11info)
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to extract issuer cert: {}", e);
+                process::exit(1);
+            });
+
+        info!(tbs = %tbs_hex, "Signing TBS via HiPKI card");
+        let sign_response = ecdsa_spartan2::hipki_client::sign_tbs(&hipki_server, &tbs_hex, pin)
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to sign via HiPKI: {}", e);
+                process::exit(1);
+            });
+        let user_cert = CertChainCircuit::generate_user_cert_from_certb64(&sign_response.certb64)
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to parse user cert from card response: {}", e);
+                process::exit(1);
+            });
+        let serial_hex = serial_bytes_to_hex_trimmed(
+            user_cert.tbs_certificate.serial_number.as_bytes(),
+        );
+
+        info!(
+            challenge_id = %challenge_resp.challenge_id,
+            serial = %serial_hex,
+            "Live input ready — save challenge_id for /verify"
+        );
+
+        (user_cert, sign_response.signature, issuer_cert, serial_hex, tbs_hex.into_bytes())
+    } else if rs4096 {
         let response_path = Path::new("tests/testdata/rs4096_response_sign.json");
         let issuer_cert = CertChainRs4096Circuit::fetch_cert_from_file("tests/testdata/test_ca_rs4096.der")
             .expect("Failed to load RS4096 test CA cert");
@@ -149,6 +206,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             response.result.signed_response,
             issuer_cert,
             serial_hex,
+            ecdsa_spartan2::DEFAULT_TBS.to_vec(),
         )
     } else {
         let response_path = Path::new("tests/testdata/response_sign_test.json");
@@ -172,6 +230,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             response.signature,
             issuer_cert,
             serial_hex,
+            ecdsa_spartan2::DEFAULT_TBS.to_vec(),
         )
     };
 
@@ -185,7 +244,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         &user_cert,
         &issuer_cert,
         &user_sig_b64,
-        default_tbs,
+        &tbs_bytes,
         &serial_hex,
         smt_inputs.as_ref(),
         k_issuer,
@@ -584,6 +643,13 @@ Options:
   --input, -i <path>   Override the circuit input JSON
   --cert-chain-4096, -4  Use RSA-4096 cert-chain circuit (4096-bit issuer CA)
 
+Live mode options (for generate-split-input):
+  --pin <pin>                Card PIN (6-8 digits) — triggers live mode
+  --hipki-server <url>       HiPKI server URL (default: http://localhost:61161)
+  --challenge-server <url>   Challenge server URL (default: http://localhost:8080)
+  --smt-server <url>         SMT server URL for revocation proof (optional)
+  --issuer <id>              Issuer identifier (default: g2, or g3 with -4)
+
 Examples:
   cargo run --release -- generate-split-input
   cargo run --release -- generate-split-input --cert-chain-4096
@@ -594,6 +660,11 @@ Examples:
   cargo run --release --features device_sig_rs2048 -- device-sig prove --input ../circom/inputs/device_sig_rs2048/input.json
   cargo run --release --features device_sig_rs2048 -- device-sig verify
   cargo run --release -- link-verify
-  cargo run --release -- link-verify --cert-chain-4096"
+  cargo run --release -- link-verify --cert-chain-4096
+
+Live mode examples:
+  cargo run --release -- generate-split-input --pin 830929
+  cargo run --release -- generate-split-input --pin 830929 --smt-server http://localhost:3000
+  cargo run --release -- generate-split-input --pin 830929 --challenge-server http://localhost:8080"
     );
 }
