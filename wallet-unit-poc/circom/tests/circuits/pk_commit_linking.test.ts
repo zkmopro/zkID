@@ -30,7 +30,7 @@ describe("pk_commit linking (CertChain <-> DeviceSig)", function () {
     certChainCircuit = await circomkit.WitnessTester("cert_chain_rs2048", {
       file: "cert_chain",
       template: "CertChainRSA256",
-      params: [1024, 121, 17, 2048, 17, 2048, 128, 128, 20],
+      params: [1536, 121, 17, 2048, 17, 2048, 128, 128, 20],
     });
     deviceSigCircuit = await circomkit.WitnessTester("device_sig_rs2048", {
       file: "device_sig",
