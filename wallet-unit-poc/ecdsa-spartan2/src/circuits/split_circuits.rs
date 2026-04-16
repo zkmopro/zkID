@@ -1,12 +1,10 @@
-//! Split circuit marker types for Phase 2 cert-chain + device-sig architecture.
+//! Split circuit marker types (Phase 2 cert-chain + device-sig).
 //!
-//! These implement [`RsaKeySize`] so they plug into the existing
-//! [`Sha256RsaCircuit<T>`] generic and its SpartanCircuit impl — no new
-//! circuit struct needed.
+//! Each marker implements [`RsaKeySize`] and plugs into [`Sha256RsaCircuit<T>`].
 
-use super::sha256rsa_circuit::{
-    RsaKeySize, Sha256RsaCircuit, smt_fields_from_option, zero_pad_to_u64,
-};
+use super::cert::parse_cert_offsets;
+use super::circuit::{RsaKeySize, Sha256RsaCircuit};
+use super::encoding::{bigint_to_chunks, sha256_pad, sha256_padded_length, smt_fields_from_option, zero_pad_to_u64};
 
 #[cfg(feature = "cert_chain_rs2048")]
 witnesscalc_adapter::witness!(cert_chain_rs2048);
@@ -15,21 +13,18 @@ witnesscalc_adapter::witness!(cert_chain_rs4096);
 #[cfg(feature = "device_sig_rs2048")]
 witnesscalc_adapter::witness!(device_sig_rs2048);
 
-/// Marker for CertChainRSA256 with RSA-2048 issuer + RSA-2048 user (MOICA-G2).
+/// RSA-2048 issuer + RSA-2048 user (MOICA-G2).
 #[derive(Debug, Clone, Copy)]
 pub struct CertChainRsa2048;
 
-/// Marker for CertChainRSA256 with RSA-4096 issuer + RSA-2048 user.
+/// RSA-4096 issuer + RSA-2048 user.
 #[derive(Debug, Clone, Copy)]
 pub struct CertChainRsa4096;
 
 #[allow(unused_variables)]
 impl RsaKeySize for CertChainRsa2048 {
-    /// k_issuer = 17 limbs (RSA-2048). User key is also 2048-bit.
     const RSA_K: usize = 17;
     const CIRCUIT_NAME: &'static str = "cert_chain_rs2048";
-    /// Public signals: issuer_rsa_modulus[17] + smtRoot + serialNumber
-    ///                 + subject_dn_hash(output) + pk_commit(output)
     const NUM_PUBLIC: usize = 21;
     const PROVING_KEY: &'static str = "cert_chain_rs2048_proving.key";
     const VERIFYING_KEY: &'static str = "cert_chain_rs2048_verifying.key";
@@ -47,12 +42,8 @@ impl RsaKeySize for CertChainRsa2048 {
 
 #[allow(unused_variables)]
 impl RsaKeySize for CertChainRsa4096 {
-    /// k_issuer = 34 limbs (RSA-4096 issuer key). User key is still 2048-bit,
-    /// but the public input `issuer_rsa_modulus` is 34 limbs.
     const RSA_K: usize = 34;
     const CIRCUIT_NAME: &'static str = "cert_chain_rs4096";
-    /// Public signals: issuer_rsa_modulus[34] + smtRoot + serialNumber
-    ///                 + subject_dn_hash(output) + pk_commit(output)
     const NUM_PUBLIC: usize = 38;
     const PROVING_KEY: &'static str = "cert_chain_rs4096_proving.key";
     const VERIFYING_KEY: &'static str = "cert_chain_rs4096_verifying.key";
@@ -68,20 +59,17 @@ impl RsaKeySize for CertChainRsa4096 {
     }
 }
 
-/// Marker for DeviceSigRSA256 — always RSA-2048 (user keys are always 2048-bit).
+/// Device signature -- always RSA-2048 (user keys).
 #[derive(Debug, Clone, Copy)]
 pub struct DeviceSigRsa2048;
 
-/// Packed-tbs output field count: `ceil(1536 / 31) = 50`.
-/// device_sig maxMessageLength stays at 1536; cert_chain is 1024 (Phase 3.1).
+/// ceil(MAX_MESSAGE_LENGTH / 31) -- packed-tbs output field count.
 const PACKED_TBS_FIELDS: usize = (1536 + 30) / 31;
 
 #[allow(unused_variables)]
 impl RsaKeySize for DeviceSigRsa2048 {
-    /// User key is always RSA-2048: k = 17 limbs.
     const RSA_K: usize = 17;
     const CIRCUIT_NAME: &'static str = "device_sig_rs2048";
-    /// Public signals: pk_commit(output) + packed_tbs[50](output)
     const NUM_PUBLIC: usize = 1 + PACKED_TBS_FIELDS;
     const PROVING_KEY: &'static str = "device_sig_rs2048_proving.key";
     const VERIFYING_KEY: &'static str = "device_sig_rs2048_verifying.key";
@@ -97,11 +85,8 @@ impl RsaKeySize for DeviceSigRsa2048 {
     }
 }
 
-/// Cert-chain proof (Circuit A) for MOICA-G2 (RSA-2048 issuer + 2048 user).
 pub type CertChainCircuit = Sha256RsaCircuit<CertChainRsa2048>;
-/// Cert-chain proof (Circuit A) for RSA-4096 issuer + 2048-bit user.
 pub type CertChainRs4096Circuit = Sha256RsaCircuit<CertChainRsa4096>;
-/// Device-signature proof (Circuit B) — always RSA-2048 (user keys).
 pub type DeviceSigCircuit = Sha256RsaCircuit<DeviceSigRsa2048>;
 
 use base64::Engine as _;
@@ -114,21 +99,14 @@ use x509_cert::Certificate;
 const RSA_N: usize = 121;
 pub const MAX_CERT_CHAIN_RS2048_LENGTH: usize = 1024;
 pub const MAX_CERT_CHAIN_RS4096_LENGTH: usize = 1280;
-const MAX_MESSAGE_LENGTH: usize = 1536; // device-sig tbs stays at 1536
+const MAX_MESSAGE_LENGTH: usize = 1536;
 const MAX_SUBJECT_DN_LENGTH: usize = 128;
 const SMT_DEPTH: usize = 128;
 
-/// Generate split circuit input JSONs for CertChain (Circuit A) + DeviceSig
-/// (Circuit B).
+/// Build CertChain (Circuit A) + DeviceSig (Circuit B) input JSON values.
 ///
-/// Accepts already-parsed cert data (from HiPKI client or test fixtures) and
-/// produces two JSON values. The caller writes them to the appropriate paths.
-///
-/// `pk_blind` is derived deterministically as:
-///   `SHA-256(user_pk_bytes ‖ tbs ‖ "zkID/pk-commit/v1")` (decimal string)
-///
-/// Using `tbs` as the session-specific component ensures per-session freshness
-/// without requiring a separate session_id parameter.
+/// `pk_blind` = `SHA-256(user_pk_bytes || tbs || "zkID/pk-commit/v1")` -- using
+/// `tbs` as the session-specific component provides per-session freshness.
 pub fn generate_split_inputs(
     user_cert: &Certificate,
     issuer_cert: &Certificate,
@@ -140,11 +118,9 @@ pub fn generate_split_inputs(
     k_user: usize,
     max_cert_length: usize,
 ) -> Result<(serde_json::Value, serde_json::Value), Box<dyn std::error::Error>> {
-    type S = Sha256RsaCircuit<CertChainRsa2048>;
-
     let user_cert_der = user_cert.to_der()?;
     let user_cert_tbs_der = user_cert.tbs_certificate.to_der()?;
-    let user_offsets = S::parse_cert_offsets(&user_cert_der)?;
+    let user_offsets = parse_cert_offsets(&user_cert_der)?;
     let user_subject_der = user_cert.tbs_certificate.subject.to_der()?;
 
     let user_spki_der = user_cert
@@ -153,7 +129,7 @@ pub fn generate_split_inputs(
         .to_der()?;
     let user_rsa_pub = RsaPublicKey::from_public_key_der(&user_spki_der)?;
     let user_modulus = BigUint::from_bytes_be(&user_rsa_pub.n().to_bytes_be());
-    let user_pk_limbs = S::bigint_to_chunks(&user_modulus, k_user, RSA_N);
+    let user_pk_limbs = bigint_to_chunks(&user_modulus, k_user, RSA_N);
 
     let issuer_spki_der = issuer_cert
         .tbs_certificate
@@ -161,28 +137,28 @@ pub fn generate_split_inputs(
         .to_der()?;
     let issuer_rsa_pub = RsaPublicKey::from_public_key_der(&issuer_spki_der)?;
     let issuer_modulus = BigUint::from_bytes_be(&issuer_rsa_pub.n().to_bytes_be());
-    let issuer_rsa_modulus = S::bigint_to_chunks(&issuer_modulus, k_issuer, RSA_N);
+    let issuer_rsa_modulus = bigint_to_chunks(&issuer_modulus, k_issuer, RSA_N);
 
     let issuer_sig_bytes = user_cert.signature.raw_bytes();
     let issuer_sig_biguint = BigUint::from_bytes_be(issuer_sig_bytes);
-    let issuer_rsa_signature = S::bigint_to_chunks(&issuer_sig_biguint, k_issuer, RSA_N);
+    let issuer_rsa_signature = bigint_to_chunks(&issuer_sig_biguint, k_issuer, RSA_N);
 
     let user_sig_bytes =
         base64::engine::general_purpose::STANDARD.decode(user_signature_b64)?;
     let user_sig_biguint = BigUint::from_bytes_be(&user_sig_bytes);
-    let user_rsa_signature = S::bigint_to_chunks(&user_sig_biguint, k_user, RSA_N);
+    let user_rsa_signature = bigint_to_chunks(&user_sig_biguint, k_user, RSA_N);
 
-    let tbs_padded: Vec<String> = S::sha256_pad(tbs, MAX_MESSAGE_LENGTH)
+    let tbs_padded: Vec<String> = sha256_pad(tbs, MAX_MESSAGE_LENGTH)
         .iter()
         .map(|b| b.to_string())
         .collect();
-    let tbs_padded_len = S::sha256_padded_length(tbs.len());
+    let tbs_padded_len = sha256_padded_length(tbs.len());
     let issuer_tbs_padded: Vec<String> =
-        S::sha256_pad(&user_cert_tbs_der, max_cert_length)
+        sha256_pad(&user_cert_tbs_der, max_cert_length)
             .iter()
             .map(|b| b.to_string())
             .collect();
-    let issuer_tbs_padded_len = S::sha256_padded_length(user_cert_tbs_der.len());
+    let issuer_tbs_padded_len = sha256_padded_length(user_cert_tbs_der.len());
 
     let user_pk_bytes = user_rsa_pub.n().to_bytes_be();
     let mut hasher = Sha256::new();
@@ -219,7 +195,7 @@ pub fn generate_split_inputs(
         "smtOldKey": smt_old_key,
         "smtOldValue": smt_old_value,
         "smtIsOld0": smt_is_old0,
-        "pk_blind": pk_blind.clone(),
+        "pk_blind": &pk_blind,
     });
 
     let device_sig_json = serde_json::json!({
