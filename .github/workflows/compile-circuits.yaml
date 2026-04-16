@@ -1,5 +1,3 @@
-# Reusable workflow: compiles all Circom circuits on macOS and uploads
-# C++, R1CS, and WASM artifacts for downstream jobs.
 name: compile-circuits
 
 on:
@@ -55,25 +53,14 @@ jobs:
                       wallet-unit-poc/circom/build/cpp/device_sig_rs2048.dat
                   retention-days: 3
 
-            - name: Upload cert_chain_rs2048 R1CS artifact
+            - name: Upload R1CS artifacts
               uses: actions/upload-artifact@v4
               with:
-                  name: circuit-r1cs-cert-chain-rs2048
-                  path: wallet-unit-poc/circom/build/cert_chain_rs2048/cert_chain_rs2048_js/cert_chain_rs2048.r1cs
-                  retention-days: 3
-
-            - name: Upload cert_chain_rs4096 R1CS artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  name: circuit-r1cs-cert-chain-rs4096
-                  path: wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/cert_chain_rs4096.r1cs
-                  retention-days: 3
-
-            - name: Upload device_sig_rs2048 R1CS artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  name: circuit-r1cs-device-sig-rs2048
-                  path: wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.r1cs
+                  name: circuit-r1cs
+                  path: |
+                      wallet-unit-poc/circom/build/cert_chain_rs2048/cert_chain_rs2048_js/cert_chain_rs2048.r1cs
+                      wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/cert_chain_rs4096.r1cs
+                      wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.r1cs
                   retention-days: 3
 
             - name: Upload circuit WASM artifacts
