@@ -37,7 +37,7 @@ use ecdsa_spartan2::{
     save_keys, serial_bytes_to_hex_trimmed, setup_circuit_keys, setup_circuit_keys_no_save,
     verify_circuit, verify_circuit_with_loaded_data, CertChainCircuit, CertChainRs4096Circuit,
     CertChainRsa2048, CertChainRsa4096, DeviceSigRsa2048, PathConfig, RsaKeySize,
-    Sha256RsaCircuit,
+    Sha256RsaCircuit, MAX_CERT_CHAIN_RS2048_LENGTH, MAX_CERT_CHAIN_RS4096_LENGTH,
 };
 use std::{
     env::args,
@@ -124,6 +124,11 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     }
 
     let (k_issuer, k_user) = if rs4096 { (34, 17) } else { (17, 17) };
+    let max_cert_length = if rs4096 {
+        MAX_CERT_CHAIN_RS4096_LENGTH
+    } else {
+        MAX_CERT_CHAIN_RS2048_LENGTH
+    };
 
     let default_tbs = ecdsa_spartan2::DEFAULT_TBS;
     let (user_cert, user_sig_b64, issuer_cert, serial_hex) = if rs4096 {
@@ -185,6 +190,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         smt_inputs.as_ref(),
         k_issuer,
         k_user,
+        max_cert_length,
     )
     .unwrap_or_else(|e| {
         eprintln!("Error generating split inputs: {}", e);

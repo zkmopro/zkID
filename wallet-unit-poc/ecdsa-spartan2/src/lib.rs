@@ -23,7 +23,8 @@ pub mod utils;
 pub use circuits::sha256rsa_circuit::{serial_bytes_to_hex_trimmed, RsaKeySize, Sha256RsaCircuit};
 pub use circuits::split_circuits::{
     generate_split_inputs, CertChainCircuit, CertChainRs4096Circuit, CertChainRsa2048,
-    CertChainRsa4096, DeviceSigCircuit, DeviceSigRsa2048,
+    CertChainRsa4096, DeviceSigCircuit, DeviceSigRsa2048, MAX_CERT_CHAIN_RS2048_LENGTH,
+    MAX_CERT_CHAIN_RS4096_LENGTH,
 };
 pub use paths::PathConfig;
 pub use prover::{
