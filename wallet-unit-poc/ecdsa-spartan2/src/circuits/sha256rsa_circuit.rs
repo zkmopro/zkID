@@ -73,8 +73,8 @@ pub struct Sha256RsaCircuit<T: RsaKeySize> {
     path_config: PathConfig,
     /// Optional override for input JSON path
     input_path: Option<PathBuf>,
-    /// Cached witness for reuse across synthesize and public_values calls
-    cached_witness: Arc<Mutex<Option<Vec<Scalar>>>>,
+    /// Cached witness shared via Arc to avoid cloning ~50-100 MB per access
+    cached_witness: Arc<Mutex<Option<Arc<Vec<Scalar>>>>>,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -829,15 +829,16 @@ impl<T: RsaKeySize> Sha256RsaCircuit<T> {
     }
 
     /// Get cached witness or generate and cache it.
-    fn get_or_generate_witness(&self) -> Result<Vec<Scalar>, SynthesisError> {
+    /// Returns Arc to avoid cloning the full Vec<Scalar> on each access.
+    fn get_or_generate_witness(&self) -> Result<Arc<Vec<Scalar>>, SynthesisError> {
         let mut cache = self.cached_witness.lock().unwrap();
 
         if let Some(ref witness) = *cache {
-            return Ok(witness.clone());
+            return Ok(Arc::clone(witness));
         }
 
-        let witness = self.generate_witness()?;
-        *cache = Some(witness.clone());
+        let witness = Arc::new(self.generate_witness()?);
+        *cache = Some(Arc::clone(&witness));
         Ok(witness)
     }
 
