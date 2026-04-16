@@ -1,4 +1,4 @@
-# Reusable workflow: compiles all Circom circuits on Ubuntu and uploads
+# Reusable workflow: compiles all Circom circuits on macOS and uploads
 # C++, R1CS, and WASM artifacts for downstream jobs.
 name: compile-circuits
 
@@ -13,7 +13,7 @@ on:
 
 jobs:
     compile-circuits:
-        runs-on: ubuntu-latest
+        runs-on: macos-latest
         steps:
             - uses: actions/checkout@v5
 
@@ -25,22 +25,13 @@ jobs:
                   cache-dependency-path: wallet-unit-poc/circom/yarn.lock
 
             - name: Install system dependencies
-              run: |
-                  set -euo pipefail
-                  sudo apt-get update
-                  sudo apt-get install --yes \
-                    build-essential \
-                    libgmp-dev \
-                    libsodium-dev \
-                    nasm \
-                    nlohmann-json3-dev
+              run: brew install nasm
 
             - name: Download Circom Binary ${{ inputs.circom-version }}
               run: |
                   set -euo pipefail
-                  wget -qO /home/runner/work/circom https://github.com/iden3/circom/releases/download/${{ inputs.circom-version }}/circom-linux-amd64
-                  chmod +x /home/runner/work/circom
-                  sudo mv /home/runner/work/circom /bin/circom
+                  sudo wget -O ~/.cargo/bin/circom https://github.com/iden3/circom/releases/download/${{ inputs.circom-version }}/circom-macos-amd64
+                  sudo chmod +x ~/.cargo/bin/circom
 
             - name: Print Circom version
               run: circom --version
