@@ -1,5 +1,7 @@
 # Rust build artifacts
 /target/
+wallet-unit-poc/spartan2-wasm/target/
+wallet-unit-poc/spartan2-wasm/pkg/
 
 # IDE files
 .vscode/
