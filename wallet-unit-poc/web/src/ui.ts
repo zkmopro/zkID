@@ -27,7 +27,7 @@ export interface StepState {
 
 export type StepAtom = WritableAtom<StepState>;
 
-const STEP_ORDER: Step[] = [
+export const STEP_ORDER: Step[] = [
   "preflight",
   "challenge",
   "download",
