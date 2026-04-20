@@ -6,10 +6,7 @@
 // the user has installed a CORS-enabled LocalSignServer. Over HTTPS the
 // browser's mixed-content rules apply — see README.
 
-import { stripTrailingSlash } from "./url-utils";
-
-const HIPKI_BASE =
-  import.meta.env.VITE_HIPKI_BASE_URL ?? "http://localhost:61161";
+import { popupPkcs11Info, popupSign } from "./hipki-popup";
 
 export interface Pkcs11CertEntry {
   certb64: string;
@@ -52,40 +49,25 @@ export interface SignTbsParams {
   tbs: string;
   /** 6-8 digit card PIN. Caller is responsible for lifetime + redaction. */
   pin: string;
-  baseUrl?: string;
 }
 
 /** Full cert-chain lookup. Used once per proving run; the polling detector
  *  uses `probePkcs11Info` (no `withcert=true`) which is cheap enough to hit
- *  on an interval. */
-export async function fetchPkcs11Info(
-  baseUrl: string = HIPKI_BASE,
-): Promise<Pkcs11InfoResponse> {
-  return requestPkcs11Info(baseUrl, true);
+ *  on an interval. Both go through the popup bridge. */
+export async function fetchPkcs11Info(): Promise<Pkcs11InfoResponse> {
+  return requestPkcs11Info(true);
 }
 
-/** Cheap probe used by the polling detector. Returns slot + token metadata
- *  without the base64-encoded certs. Matches the HiPKI "IC card function
- *  check" reference page's `POST /pkcs11info` call (no query string). */
-export async function probePkcs11Info(
-  baseUrl: string = HIPKI_BASE,
-): Promise<Pkcs11InfoResponse> {
-  return requestPkcs11Info(baseUrl, false);
+/** Cheap probe used by the polling detector. Matches the HiPKI "IC card
+ *  function check" reference page's `POST /pkcs11info` call. */
+export async function probePkcs11Info(): Promise<Pkcs11InfoResponse> {
+  return requestPkcs11Info(false);
 }
 
 async function requestPkcs11Info(
-  baseUrl: string,
   withCert: boolean,
 ): Promise<Pkcs11InfoResponse> {
-  const path = withCert ? "/pkcs11info?withcert=true" : "/pkcs11info";
-  const url = `${stripTrailingSlash(baseUrl)}${path}`;
-  // Reference `/pkcs11info` is POST even though it has no body — matches the
-  // HiPKI test page. Some LocalSignServer builds reject GET here.
-  const r = await fetch(url, { method: "POST" });
-  if (!r.ok) {
-    throw new Error(`POST /pkcs11info returned ${r.status} ${r.statusText}`);
-  }
-  const body = (await r.json()) as Pkcs11InfoResponse;
+  const body = await popupPkcs11Info<Pkcs11InfoResponse>(withCert);
   if (!Array.isArray(body?.slots)) {
     throw new Error("HiPKI /pkcs11info response missing slots array");
   }
@@ -103,28 +85,5 @@ async function requestPkcs11Info(
 export async function signTbs(
   params: SignTbsParams,
 ): Promise<CardSignResponse> {
-  const base = stripTrailingSlash(params.baseUrl ?? HIPKI_BASE);
-  const tbsPackage = JSON.stringify({
-    tbs: params.tbs,
-    pin: params.pin,
-    hashAlgorithm: "SHA256",
-    signatureType: "PKCS1",
-  });
-
-  // application/x-www-form-urlencoded with a single `tbsPackage` field
-  // mirrors Rust's `send_form(&[("tbsPackage", ...)])` exactly.
-  const body = new URLSearchParams();
-  body.append("tbsPackage", tbsPackage);
-
-  const r = await fetch(`${base}/sign`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-  if (!r.ok) {
-    // Deliberately opaque — server could echo request fields and leak the
-    // PIN into the error message / logs.
-    throw new Error(`POST /sign returned ${r.status} ${r.statusText}`);
-  }
-  return (await r.json()) as CardSignResponse;
+  return popupSign<CardSignResponse>(params.tbs, params.pin);
 }

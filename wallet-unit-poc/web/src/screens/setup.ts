@@ -13,6 +13,11 @@ import { bytesToHex } from "../bytes";
 import { humanBytes } from "../format";
 import { signTbs } from "../hipki-client";
 import { startHipkiPolling, type HipkiProbe } from "../hipki-detector";
+import {
+  closeHipkiPopup,
+  isPopupReady,
+  openHipkiPopup,
+} from "../hipki-popup";
 import { CIRCUITS } from "../manifest";
 import { Pin } from "../pin";
 import { buildCardContext } from "../pipeline";
@@ -62,6 +67,11 @@ export function mountSetup(root: HTMLElement): () => void {
           <div class="panel-title">HiPKI card</div>
           <div class="panel-body" data-testid="hipki-body">Probing…</div>
           <div class="panel-detail" data-testid="hipki-detail"></div>
+          <div class="panel-actions" data-testid="hipki-popup-actions" hidden>
+            <button class="secondary-button" data-testid="hipki-open-popup" type="button">
+              Open HiPKI bridge
+            </button>
+          </div>
         </div>
         <div class="setup-panel" data-testid="setup-pin">
           <div class="panel-title">PIN verification</div>
@@ -103,6 +113,8 @@ export function mountSetup(root: HTMLElement): () => void {
   const assetsRetry = root.querySelector<HTMLButtonElement>('[data-testid="assets-retry"]')!;
   const hipkiBody = root.querySelector<HTMLElement>('[data-testid="hipki-body"]')!;
   const hipkiDetail = root.querySelector<HTMLElement>('[data-testid="hipki-detail"]')!;
+  const popupActions = root.querySelector<HTMLElement>('[data-testid="hipki-popup-actions"]')!;
+  const openPopupBtn = root.querySelector<HTMLButtonElement>('[data-testid="hipki-open-popup"]')!;
   const pinBody = root.querySelector<HTMLElement>('[data-testid="pin-body"]')!;
   const pinInput = root.querySelector<HTMLInputElement>('[data-testid="pin-input"]')!;
   const pinVerify = root.querySelector<HTMLButtonElement>('[data-testid="pin-verify"]')!;
@@ -309,9 +321,41 @@ export function mountSetup(root: HTMLElement): () => void {
     }
   }
 
-  const poller = startHipkiPolling((probe) => {
-    void handleProbe(probe);
-  }, HIPKI_POLL_MS);
+  // The popup bridge requires a user gesture (click) before any HiPKI call
+  // can succeed — browsers pop-block `window.open` from non-gesture
+  // contexts. Show "Open HiPKI bridge" until the popup is alive; only
+  // then start polling.
+  let poller: ReturnType<typeof startHipkiPolling> | null = null;
+
+  function refreshPopupActions(): void {
+    popupActions.hidden = isPopupReady();
+  }
+
+  function startPolling(): void {
+    if (poller) return;
+    poller = startHipkiPolling((probe) => {
+      void handleProbe(probe);
+    }, HIPKI_POLL_MS);
+  }
+
+  async function onOpenPopup(): Promise<void> {
+    openPopupBtn.disabled = true;
+    try {
+      await openHipkiPopup();
+      refreshPopupActions();
+      startPolling();
+    } catch (err) {
+      $hipki.set({
+        status: "not_installed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      openPopupBtn.disabled = false;
+    }
+  }
+  openPopupBtn.addEventListener("click", () => void onOpenPopup());
+
+  refreshPopupActions();
 
   // --- PIN verification -----------------------------------------------
 
@@ -383,7 +427,8 @@ export function mountSetup(root: HTMLElement): () => void {
   if (assets.status === "pending") void downloadAssets();
 
   return () => {
-    poller.stop();
+    poller?.stop();
+    closeHipkiPopup();
     assetsRetry.removeEventListener("click", onAssetsRetry);
     pinVerify.removeEventListener("click", onPinVerify);
     pinInput.removeEventListener("input", onPinInput);

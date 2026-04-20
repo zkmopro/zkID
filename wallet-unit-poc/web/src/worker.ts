@@ -79,6 +79,7 @@ interface WorkerGlobal {
   postMessage(msg: Progress): void;
   navigator: { hardwareConcurrency?: number };
   location: { search?: string };
+  crossOriginIsolated?: boolean;
 }
 
 const workerSelf: WorkerGlobal = self as unknown as WorkerGlobal;
@@ -105,6 +106,11 @@ function post(p: Progress): void {
 }
 
 function clampThreads(): number {
+  // `wasm-bindgen-rayon` needs SharedArrayBuffer, which requires
+  // `crossOriginIsolated`. The popup bridge requires COOP
+  // `same-origin-allow-popups`, which disables isolation. Fall back to
+  // single-threaded proving so the pipeline still works, just slower.
+  if (workerSelf.crossOriginIsolated !== true) return 1;
   const override = parseThreadOverride();
   if (override != null) return override;
   const hc = (workerSelf.navigator as Navigator | undefined)?.hardwareConcurrency;
@@ -148,10 +154,14 @@ function postError(where: string, err: unknown): void {
 async function runPipeline(inputs: RunInput): Promise<void> {
   const t0 = performance.now();
   try {
-    // 0. Preflight: wasm module + thread pool + manifest.
+    // 0. Preflight: wasm module + thread pool + manifest. When
+    // `crossOriginIsolated === false` (popup-bridge mode, see vite.config.ts
+    // COOP notes), we fall back to single-threaded proving — rayon needs
+    // SharedArrayBuffer which the browser disables without isolation.
     post({ step: "preflight", status: "in_progress" });
     await init();
-    await initThreadPool(clampThreads());
+    const threads = clampThreads();
+    if (threads > 1) await initThreadPool(threads);
     await hydrateManifest();
     post({ step: "preflight", status: "done" });
     if (cancelled) return;

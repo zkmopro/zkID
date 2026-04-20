@@ -5,10 +5,7 @@ const RELEASE_BASE = "https://github.com/zkmopro/zkID/releases/download/latest";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const HIPKI_TARGET = env.VITE_HIPKI_PROXY_TARGET ?? "http://localhost:61161";
   const SMT_TARGET = env.VITE_SMT_PROXY_TARGET ?? "http://localhost:3000";
-  const VERIFIER_TARGET =
-    env.VITE_VERIFIER_PROXY_TARGET ?? "http://localhost:8080";
 
   return {
     build: { target: "es2020" },
@@ -19,7 +16,10 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       headers: {
-        "Cross-Origin-Opener-Policy": "same-origin",
+        // `same-origin-allow-popups` preserves `window.opener` for the
+        // HiPKI popupForm bridge while still scoping cross-origin tabs.
+        // Strict `same-origin` would sever `opener` for the popup.
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
         "Cross-Origin-Embedder-Policy": "require-corp",
       },
       fs: { allow: [".."] },
@@ -30,33 +30,25 @@ export default defineConfig(({ mode }) => {
           followRedirects: true,
           rewrite: (p) => p.replace(/^\/keys/, ""),
         },
-        // HiPKI LocalSignServer doesn't send CORS headers, so the browser
-        // blocks every direct cross-origin call even though the server
-        // returns 200. Proxy through Vite's dev origin so requests are
-        // same-origin from the browser's perspective.
-        "/hipki": {
-          target: HIPKI_TARGET,
-          changeOrigin: true,
-          rewrite: (p) => p.replace(/^\/hipki/, ""),
-        },
-        // moica-revocation-smt likely won't send CORS headers either.
+        // HiPKI is reached via the popupForm postMessage bridge (see
+        // `src/hipki-popup.ts`), not through a proxy — the popup is
+        // same-origin with the LocalSignServer at localhost:61161 and
+        // its fetches don't need CORS headers.
+        // moica-revocation-smt may or may not send CORS headers; proxy
+        // to dodge the question.
         "/smt": {
           target: SMT_TARGET,
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/smt/, ""),
         },
-        // go-zkid-verifier — proxied for symmetry. Set its base URL to
-        // `/verifier` to opt in.
-        "/verifier": {
-          target: VERIFIER_TARGET,
-          changeOrigin: true,
-          rewrite: (p) => p.replace(/^\/verifier/, ""),
-        },
       },
     },
     preview: {
       headers: {
-        "Cross-Origin-Opener-Policy": "same-origin",
+        // `same-origin-allow-popups` preserves `window.opener` for the
+        // HiPKI popupForm bridge while still scoping cross-origin tabs.
+        // Strict `same-origin` would sever `opener` for the popup.
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
         "Cross-Origin-Embedder-Policy": "require-corp",
       },
     },
