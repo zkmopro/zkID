@@ -16,8 +16,10 @@ pnpm install
 pnpm build:wasm
 pnpm copy:assets
 
-# Start the app. Points VITE_VERIFIER_BASE_URL at wherever go-zkid-verifier is.
-VITE_VERIFIER_BASE_URL=http://localhost:8080 pnpm dev
+# Copy .env.example → .env.local and point the four VITE_* URLs at your
+# local services (verifier, HiPKI, SMT). See .env.example for details.
+cp .env.example .env.local
+pnpm dev
 ```
 
 Open `http://localhost:5173` and click **Prove**. The first run downloads the
@@ -34,6 +36,8 @@ skip the download.
 | `src/asset-download.ts`  | Streaming fetch → `DecompressionStream('gzip')` → `SubtleCrypto.digest` verify |
 | `src/witness.ts`         | CJS→ESM shim for circom's `witness_calculator.js` (with strict-mode patch)     |
 | `src/verifier-client.ts` | `POST /challenge` + `POST /link-verify` against `go-zkid-verifier`             |
+| `src/hipki-client.ts`    | `GET /pkcs11info` + `POST /sign` against the user's HiPKI LocalSignServer      |
+| `src/smt-client.ts`      | `GET /proof/{issuer}/{serial}` against moica-revocation-smt → circuit inputs   |
 | `src/worker.ts`          | Dedicated Worker orchestrating the seven-step pipeline                         |
 | `src/ui.ts`              | nanostores atoms + DOM paint for the step list                                 |
 | `src/main.ts`            | Entry point: spawn Worker, wire Prove button, translate Progress events        |
@@ -70,6 +74,32 @@ same-origin path (or adjust `src/manifest.ts` to an absolute URL you control).
 
 Verifying keys are **not** downloaded to the browser — verification runs on the
 Go server and it has its own copy.
+
+## External services
+
+Three services the browser talks to at runtime. Each is configurable via a
+`VITE_*` env var (see `.env.example`):
+
+| Service                 | Env var                  | Default                  | Purpose                                      |
+| ----------------------- | ------------------------ | ------------------------ | -------------------------------------------- |
+| `go-zkid-verifier`      | `VITE_VERIFIER_BASE_URL` | `http://localhost:8080`  | Challenge + `link-verify`                    |
+| HiPKI LocalSignServer   | `VITE_HIPKI_BASE_URL`    | `http://localhost:61161` | `pkcs11info` + `sign` (runs on user machine) |
+| `moica-revocation-smt`  | `VITE_SMT_BASE_URL`      | `http://localhost:3000`  | SMT non-membership proofs                    |
+
+Plus `VITE_SMT_ISSUER` (default `g2`, use `g3` for RSA-4096 issuer chains).
+
+### HiPKI CORS + mixed-content caveats
+
+HiPKI is a native helper the user runs locally. The app assumes the installed
+LocalSignServer build responds with `Access-Control-Allow-Origin: *` (or the
+app origin); if it does not, the browser will block the `/pkcs11info` and
+`/sign` fetches. Symptom: a CORS preflight error in the devtools console.
+
+If you host the web app over HTTPS, the browser will also refuse
+`http://localhost:61161` requests under its mixed-content policy. Serve the
+app over plain HTTP on the user's machine (or proxy HiPKI behind the same
+origin) if you hit this — an HTTPS → HTTP LocalSignServer call is not
+recoverable from JS.
 
 ## Browser requirements
 
@@ -111,7 +141,7 @@ To force a re-download, delete the corresponding entry (or run
 ## Tests
 
 ```sh
-pnpm test         # Vitest — asset-download, verifier-client unit tests
+pnpm test         # Vitest — asset-download, verifier, hipki, smt client unit tests
 pnpm lint         # tsc --noEmit under "strict": true
 pnpm build        # Production bundle
 pnpm test:e2e     # Playwright against pnpm preview (mock verifier)

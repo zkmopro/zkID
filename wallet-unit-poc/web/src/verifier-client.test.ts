@@ -1,20 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { setupFetchMock } from "./test-utils";
 import { createChallenge, submitLinkVerify } from "./verifier-client";
 
 const VERIFIER = "http://localhost:8080";
 
 describe("verifier-client", () => {
-  const originalFetch = globalThis.fetch;
-
-  beforeEach(() => {
-    vi.stubEnv("VITE_VERIFIER_BASE_URL", VERIFIER);
-  });
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    vi.unstubAllEnvs();
-    vi.restoreAllMocks();
-  });
+  setupFetchMock({ VITE_VERIFIER_BASE_URL: VERIFIER });
 
   it("POSTs /challenge and returns the parsed body", async () => {
     const payload = {
