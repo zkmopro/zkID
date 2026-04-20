@@ -1,10 +1,11 @@
 //! Wire-encoding helpers for Circom circuit inputs.
 
+use crate::types::SmtCircuitInputs;
 use num_bigint::BigUint;
 
 /// SMT JSON fields: either cloned from a fetched proof or deterministic defaults.
 pub(crate) fn smt_fields_from_option(
-    smt_inputs: Option<&crate::smt_client::SmtCircuitInputs>,
+    smt_inputs: Option<&SmtCircuitInputs>,
     serial_decimal: String,
     sibling_depth: usize,
 ) -> (

@@ -1,6 +1,5 @@
 pub mod cert;
 pub mod circuit;
-pub mod encoding;
 pub mod split_circuits;
 pub mod types;
 

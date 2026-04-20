@@ -2,6 +2,8 @@
 /target/
 wallet-unit-poc/spartan2-wasm/target/
 wallet-unit-poc/spartan2-wasm/pkg/
+wallet-unit-poc/zkid-input-builder/target/
+wallet-unit-poc/zkid-input-builder/Cargo.lock
 
 # IDE files
 .vscode/

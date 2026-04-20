@@ -6,12 +6,16 @@ on:
             - main
         paths:
             - "wallet-unit-poc/ecdsa-spartan2/**"
+            - "wallet-unit-poc/zkid-input-builder/**"
+            - "wallet-unit-poc/spartan2-wasm/**"
             - "wallet-unit-poc/circom/circuits/**"
             - ".github/workflows/rust-tests.yaml"
             - ".github/workflows/compile-circuits.yaml"
     pull_request:
         paths:
             - "wallet-unit-poc/ecdsa-spartan2/**"
+            - "wallet-unit-poc/zkid-input-builder/**"
+            - "wallet-unit-poc/spartan2-wasm/**"
             - "wallet-unit-poc/circom/circuits/**"
             - ".github/workflows/rust-tests.yaml"
             - ".github/workflows/compile-circuits.yaml"
@@ -130,6 +134,16 @@ jobs:
               run: |
                   cd wallet-unit-poc/ecdsa-spartan2
                   cargo test --release
+
+            - name: Run zkid-input-builder unit tests
+              run: |
+                  cd wallet-unit-poc/zkid-input-builder
+                  cargo test --release
+
+            - name: Run spartan2-wasm input-builder drift test
+              run: |
+                  cd wallet-unit-poc/spartan2-wasm
+                  cargo test --release --test input_builder_drift
 
             # === Release artifacts ===
 
