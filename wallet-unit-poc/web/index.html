@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>zkID in-browser prover</title>
+  </head>
+  <body>
+    <main>
+      <h1>zkID in-browser prover</h1>
+      <p class="intro">Click <strong>Prove</strong> to run the cert-chain + device-sig pipeline in a dedicated Worker. The seven steps below advance as the Worker reports progress.</p>
+      <button data-testid="prove-button">Prove</button>
+      <ol data-testid="step-list" id="step-list"></ol>
+      <div id="result" data-testid="result"></div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

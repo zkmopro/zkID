@@ -10,3 +10,6 @@ wallet-unit-poc/spartan2-wasm/pkg/
 # OS files
 .DS_Store
 
+wallet-unit-poc/web/node_modules/
+wallet-unit-poc/web/dist/
+
