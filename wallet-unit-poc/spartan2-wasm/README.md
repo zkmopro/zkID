@@ -1,0 +1,122 @@
+# spartan2-wasm
+
+Standalone WebAssembly crate that produces the Spartan2 proving binary consumed
+by [`wallet-unit-poc/web/`](../web). It compiles the three zkID circuits
+(cert_chain_rs2048, cert_chain_rs4096, device_sig_rs2048) into a single
+`spartan2_wasm.wasm` module with wasm-bindgen + wasm-bindgen-rayon bindings.
+Verification in the production web pipeline happens server-side via
+[`go-zkid-verifier`](https://github.com/zkmopro/go-zkid-verifier/pull/8) — the
+`verify` and `link_verify` exports here exist only for the native drift test
+and in-browser debugging, not for the production flow.
+
+## Build
+
+```sh
+cd wallet-unit-poc/spartan2-wasm
+
+# Native unit tests (fast, no wasm)
+cargo test --release --lib
+
+# wasm32 build (requires nightly + rust-src — rust-toolchain.toml pins these)
+cargo +nightly build --target wasm32-unknown-unknown --release \
+  -Z build-std=panic_abort,std
+
+# Emit JS bindings + snippets/ (requires `cargo install wasm-bindgen-cli`)
+wasm-bindgen --target web --out-dir pkg \
+  target/wasm32-unknown-unknown/release/spartan2_wasm.wasm
+
+# Native drift test (slow — setup + prove across two circuits)
+cargo test --test native_drift --release
+```
+
+The drift test reads R1CS artifacts from
+`../circom/build/<circuit>/<circuit>_js/<circuit>.r1cs`. Run `yarn compile:all`
+from `wallet-unit-poc/circom/` first, or rely on CI's `compile-circuits.yaml`
+reusable workflow, which produces the same artifacts.
+
+## JS API
+
+All exports come from the generated `pkg/spartan2_wasm.js`.
+
+- `CircuitKind` — enum with numeric discriminants: `CertChainRs2048 = 0`,
+  `CertChainRs4096 = 1`, `DeviceSigRs2048 = 2`. Pass one of these to every
+  circuit-scoped call.
+- `init_thread_pool(n)` — re-export from `wasm-bindgen-rayon`. Call once after
+  module init with your chosen thread count before any `prove`.
+- `load_pk(kind, pkBytes)` — deserialize a bincode proving key and install it
+  in the per-circuit slot. One resident PK per `CircuitKind`. Call before the
+  first `prove` for that circuit.
+- `drop_pk(kind)` — free the installed PK for a given circuit (useful to
+  reclaim linear memory after proving completes).
+- `prove(kind, wtnsBytes)` → `{ proof, instance, public_values }`. `wtnsBytes`
+  is the circom `.wtns` binary, typically produced in JS with circomkit's
+  `witness_calculator.js`. `proof` and `instance` are bincode blobs; `public_values`
+  is an array of debug-formatted scalar strings.
+- `verify(proofBytes, vkBytes)` → `{ valid, public_values, error }`. Wasm-side
+  verification. Not used by the production web pipeline — present for the
+  drift test and local debugging.
+- `link_verify(certPubs, devicePubs)` → `{ ok, cert_pk_commit, device_pk_commit }`.
+  Asserts `pk_commit` equality between a cert-chain and a device-sig proof.
+  Inputs are the `public_values` arrays returned by `prove`. Not used in
+  production — the server-side verifier performs this check.
+
+## Separation from `ecdsa-spartan2`
+
+This crate has zero runtime dependency on `ecdsa-spartan2` by design. The only
+usage is a dev-dependency in `tests/native_drift.rs`, which cross-verifies
+proofs produced here against the upstream verifier to detect transcript drift.
+
+`prove_core` in `src/lib.rs` duplicates the transcript sequence from
+`ecdsa-spartan2/src/prover.rs::prove_circuit_in_memory`. If that upstream
+function changes (new transcript absorb, reordered calls, different labels),
+the drift test fails and this crate must be re-synced.
+
+Three pieces of `src/lib.rs` are load-bearing and must not be weakened:
+`prove_core` itself (do not inline into the wasm_bindgen entry point — the
+native test needs a shared path), the bounded arithmetic in `parse_witness`
+(prevents `usize` overflow crashes on 32-bit wasm), and `lock_pk_mut`'s poison
+recovery (a panicked prior `prove` must not poison the PK mutex into aborting
+the tab).
+
+## Browser requirements
+
+Rayon-based proving in wasm requires a cross-origin-isolated document:
+
+- Serve the page with `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp`.
+- Verify at runtime with `self.crossOriginIsolated === true`.
+
+The build flags needed for shared-memory threading are pre-configured in
+`.cargo/config.toml`: `-C target-feature=+atomics,+bulk-memory,+mutable-globals`
+and `-C link-arg=--shared-memory --import-memory --max-memory=4294967296`. No
+extra flags from consumers.
+
+## Thread-count guidance
+
+The web app picks `clamp(navigator.hardwareConcurrency - 1, 2, 8)`. Leaving one
+core for the main thread keeps the UI responsive during proving. The upper cap
+of 8 is not arbitrary: wasm32 has a 4 GB linear-memory ceiling, and
+`cert_chain_rs4096` proofs push close to that limit at higher thread counts due
+to per-worker scratch space.
+
+## Drift test
+
+`tests/native_drift.rs` exists because a silent transcript divergence between
+this crate and `ecdsa-spartan2` produces proofs that one side generates but
+the other cannot verify — a failure mode that only surfaces in end-to-end
+runs if left uncaught.
+
+The test runs setup locally (so it does not depend on committed PK artifacts),
+calls `prove_core` here to produce a proof and instance, then deserializes
+both into the concrete Spartan2 types exported from `ecdsa-spartan2` and calls
+`verify_circuit_with_loaded_data` to confirm acceptance. It covers at least one
+cert-chain variant and device-sig.
+
+The test runs in CI via `web-tests.yaml` on every PR that touches
+`spartan2-wasm/` or `ecdsa-spartan2/src/prover.rs`, and can be run locally on
+demand with `cargo test --test native_drift --release`.
+
+If it fails, the fix is to re-sync `prove_core` with the current
+`prove_circuit_in_memory` in `ecdsa-spartan2/src/prover.rs` — compare transcript
+absorbs, label bytes, and the order of `prep_prove` / `r1cs_instance_and_witness`
+/ `prove_inner` calls. Do not patch the drift test to pass; patch the prover.
