@@ -16,7 +16,7 @@ if [ -d "${WASM_PKG}" ]; then
   [ -d "${WASM_PKG}/snippets" ] && { rm -rf "${WEB_DIR}/src/wasm/snippets"; cp -R "${WASM_PKG}/snippets" "${WEB_DIR}/src/wasm/snippets"; }
   printf '{ "type": "module" }\n' > "${WEB_DIR}/src/wasm/package.json"
   printf 'export { default } from "./spartan2_wasm.js";\nexport * from "./spartan2_wasm.js";\n' > "${WEB_DIR}/src/wasm/index.js"
-  cp "${WASM_PKG}"/spartan2_wasm_bg.wasm "${WEB_DIR}/public/"
+  cp "${WASM_PKG}"/spartan2_wasm_bg.wasm "${WEB_DIR}/src/wasm/"
 fi
 
 # 2. Circom witness calculators (one per circuit). witness_calculator.js is
