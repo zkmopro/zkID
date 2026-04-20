@@ -122,6 +122,38 @@ h1 {
   font-size: 14px;
 }
 
+.panel-warning {
+  color: var(--error);
+  font-size: 13px;
+  font-weight: 500;
+  margin: 4px 0 8px;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.pin-input {
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  width: 120px;
+  letter-spacing: 0.2em;
+  font-family: var(--mono);
+}
+
+.pin-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 ol[data-testid="step-list"] {
   list-style: none;
   padding: 0;

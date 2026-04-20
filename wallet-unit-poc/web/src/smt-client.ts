@@ -9,8 +9,13 @@ import { stripTrailingSlash } from "./url-utils";
 
 const SMT_BASE =
   import.meta.env.VITE_SMT_BASE_URL ?? "http://localhost:3000";
-const SMT_ISSUER_DEFAULT: SmtIssuer =
-  (import.meta.env.VITE_SMT_ISSUER as SmtIssuer | undefined) ?? "g2";
+const SMT_ISSUER_DEFAULT: SmtIssuer = parseIssuer(
+  import.meta.env.VITE_SMT_ISSUER,
+);
+
+function parseIssuer(raw: unknown): SmtIssuer {
+  return raw === "g3" ? "g3" : "g2";
+}
 
 /** SMT tree depth. Must match the circuit parameter (`smtDepth = 128`). */
 export const SMT_DEPTH = 128;

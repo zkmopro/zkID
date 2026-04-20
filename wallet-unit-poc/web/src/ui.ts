@@ -11,6 +11,9 @@ import { atom, type WritableAtom } from "nanostores";
 export type Step =
   | "preflight"
   | "challenge"
+  | "sign"
+  | "smt"
+  | "build"
   | "download"
   | "load"
   | "witness"
@@ -30,6 +33,9 @@ export type StepAtom = WritableAtom<StepState>;
 export const STEP_ORDER: Step[] = [
   "preflight",
   "challenge",
+  "sign",
+  "smt",
+  "build",
   "download",
   "load",
   "witness",
@@ -39,7 +45,10 @@ export const STEP_ORDER: Step[] = [
 
 const STEP_TITLES: Record<Step, string> = {
   preflight: "Preflight",
-  challenge: "Challenge",
+  challenge: "Fetch challenge",
+  sign: "Sign with card",
+  smt: "Fetch revocation proof",
+  build: "Build circuit inputs",
   download: "Download assets",
   load: "Load proving keys",
   witness: "Calculate witnesses",
@@ -50,6 +59,9 @@ const STEP_TITLES: Record<Step, string> = {
 export const steps: Record<Step, StepAtom> = {
   preflight: atom<StepState>({ status: "pending" }),
   challenge: atom<StepState>({ status: "pending" }),
+  sign: atom<StepState>({ status: "pending" }),
+  smt: atom<StepState>({ status: "pending" }),
+  build: atom<StepState>({ status: "pending" }),
   download: atom<StepState>({ status: "pending" }),
   load: atom<StepState>({ status: "pending" }),
   witness: atom<StepState>({ status: "pending" }),

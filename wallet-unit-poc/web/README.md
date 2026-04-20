@@ -38,27 +38,34 @@ skip the download.
 | `src/verifier-client.ts` | `POST /challenge` + `POST /link-verify` against `go-zkid-verifier`             |
 | `src/hipki-client.ts`    | `GET /pkcs11info` + `POST /sign` against the user's HiPKI LocalSignServer      |
 | `src/smt-client.ts`      | `GET /proof/{issuer}/{serial}` against moica-revocation-smt → circuit inputs   |
-| `src/worker.ts`          | Dedicated Worker orchestrating the seven-step pipeline                         |
+| `src/inputs.ts`          | Wraps wasm `build_split_inputs` → `{ certJson, deviceJson }`                   |
+| `src/pipeline.ts`        | Main-thread orchestrator: challenge → sign → SMT → build → Worker.postMessage  |
+| `src/pin.ts`             | Single-use PIN wrapper; redacts on every observable surface                    |
+| `src/worker.ts`          | CPU/wasm-bound steps: preflight/download/load/witness/prove/submit             |
 | `src/store.ts`           | Discriminated-union `AppState` + `transition` reducer (landing/setup/proving)  |
 | `src/router.ts`          | Subscribes to `$state.phase` and swaps the mounted screen                      |
 | `src/screens/*.ts`       | Landing / setup / proving screen mounts                                        |
+| `src/setup-state.ts`     | `$card` + `$pin` atoms holding detected card + verified PIN                    |
 | `src/ui.ts`              | nanostores atoms + DOM paint for the step list                                 |
-| `src/main.ts`            | Entry point: mount router, spawn Worker, translate Progress events             |
+| `src/main.ts`            | Entry point: mount router, spawn Worker, bridge `phase = proving` to pipeline  |
 
 Pipeline (mirrors `src/ui.ts::Step`):
 
 ```
-preflight → challenge → download → load → witness → prove → submit → done
-                                                                     \\
-                                                                      error (at whichever step failed)
+preflight → challenge → sign → smt → build → download → load → witness → prove → submit → done
+                                                                                           \\
+                                                                                            error (at whichever step failed)
 ```
 
-`preflight` initialises the WASM module and the rayon thread pool.
-`challenge` fetches a server challenge that binds the device-sig TBS.
-`download` pulls proving keys + witness WASMs for the circuits the input
-requires. `load` deserializes each PK into the WASM prover state via
-`load_pk(kind, bytes)`. `witness` generates the `.wtns` via circom's
-JS calculator. `prove` runs Spartan2. `submit` POSTs both proofs (base64-encoded)
+Main thread owns the network + HiPKI + input-build steps; the Worker owns
+the CPU/wasm-bound ones. `preflight` initialises the WASM module + rayon
+thread pool. `challenge` fetches server challenge bytes. `sign` asks HiPKI
+to sign those bytes with the user's card. `smt` fetches the non-membership
+proof. `build` calls wasm `build_split_inputs` to produce cert-chain +
+device-sig JSON (byte-identical to the Rust CLI — drift-tested in CI).
+`download` pulls proving keys + witness WASMs. `load` deserializes each
+PK into the WASM prover state. `witness` generates the `.wtns` via
+circom's JS calculator. `prove` runs Spartan2. `submit` POSTs both proofs
 to `POST /link-verify` and surfaces the server's `verified` boolean.
 
 ## Asset sources
@@ -162,18 +169,6 @@ The e2e suite under `e2e/`:
 
 Install browsers before first run: `pnpm exec playwright install --with-deps chromium`.
 
-## Fixture inputs
-
-`public/fixtures/cert_chain_rs2048_input.json`,
-`public/fixtures/device_sig_rs2048_input.json`, and
-`public/fixtures/nullifier.txt` are gitignored placeholders. Populate them
-locally with your own test inputs (including a device-sig TBS that embeds the
-challenge the Go server will issue). **Never commit real MOICA personal data.**
-
-The live-device-signing flow (fetch challenge → sign TBS in a card reader →
-embed in circuit input) is out of scope for this app; in production this comes
-from the wallet's credential picker.
-
 ## Known limitations (v1)
 
 - No resumable downloads. A failed fetch discards partial bytes; retry
@@ -181,6 +176,7 @@ from the wallet's credential picker.
 - No `.partial` rename on writer commit — a crash mid-write can leave a
   truncated cache entry. The SHA-256 check on the next read catches this
   *only if* `manifest.json` was hydrated.
-- Live device-key signing in-browser is not implemented; see above.
 - `link_verify` runs server-side only; the WASM crate's `link_verify` export
   exists for the drift test but is not called from the production pipeline.
+- No fetch timeouts yet — if HiPKI or SMT hangs, the setup screen hangs with
+  it. Phase 5 adds `AbortSignal.timeout` + retry limiters.
