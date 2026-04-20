@@ -1,11 +1,14 @@
 //! Client for the moica-revocation-smt server.
 //!
 //! Fetches non-membership proofs and converts them to circom-compatible
-//! decimal string format.
+//! decimal string format. The circuit-input shape (`SmtCircuitInputs`) lives
+//! in `zkid-input-builder` so the browser can consume the same type.
 
 use num_bigint::BigUint;
 use serde::Deserialize;
 use std::error::Error;
+
+pub use zkid_input_builder::types::SmtCircuitInputs;
 
 /// Raw response from the SMT server `GET /proof/{issuer}/{serial}`.
 #[derive(Debug, Deserialize)]
@@ -15,17 +18,6 @@ pub struct SmtProofResponse {
     pub entry: Vec<String>,
     pub matching_entry: Option<Vec<String>>,
     pub siblings: Vec<String>,
-}
-
-/// Circuit-ready SMT inputs (all values are decimal strings).
-#[derive(Debug, Clone)]
-pub struct SmtCircuitInputs {
-    pub smt_root: String,
-    pub serial_number: String,
-    pub smt_siblings: Vec<String>,
-    pub smt_old_key: String,
-    pub smt_old_value: String,
-    pub smt_is_old0: String,
 }
 
 /// Convert a potentially 0x-prefixed hex string to a decimal string.

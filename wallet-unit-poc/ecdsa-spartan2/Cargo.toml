@@ -18,6 +18,7 @@ cert_chain_rs4096 = []
 device_sig_rs2048 = []
 
 [dependencies]
+zkid-input-builder = { path = "../zkid-input-builder" }
 spartan2 = { git = "https://github.com/0xVikasRushi/Spartan2.git", branch = "openac-sdk", default-features = false }
 web-time = "1.1"
 circom-scotia = { git = "https://github.com/0xVikasRushi/circom-scotia", branch = "main" }

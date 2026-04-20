@@ -10,6 +10,8 @@
 //! attribution below. The `tests/native_drift.rs` integration test enforces
 //! that these sequences stay in sync by cross-verifying proofs.
 
+pub mod inputs;
+
 use bellpepper_core::{num::AllocatedNum, ConstraintSystem, SynthesisError};
 use serde::{Deserialize, Serialize};
 use spartan2::{

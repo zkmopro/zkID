@@ -27,6 +27,10 @@ wasm-bindgen --target web --out-dir pkg \
 
 # Native drift test (slow — setup + prove across two circuits)
 cargo test --test native_drift --release
+
+# Input-builder drift test (fast — cross-checks JSON output against
+# ecdsa-spartan2's generate_split_inputs)
+cargo test --release --test input_builder_drift
 ```
 
 The drift test reads R1CS artifacts from
@@ -59,6 +63,18 @@ All exports come from the generated `pkg/spartan2_wasm.js`.
   Asserts `pk_commit` equality between a cert-chain and a device-sig proof.
   Inputs are the `public_values` arrays returned by `prove`. Not used in
   production — the server-side verifier performs this check.
+- `build_split_inputs(userCertDer, issuerCertDer, userSignatureB64, tbs, serialHex, smtInputs, kIssuer, kUser)` →
+  `{ cert_chain, device_sig }`. Builds the cert-chain + device-sig circuit
+  input JSON from raw card + SMT data. `smtInputs` accepts `null` (zero
+  defaults) or a snake_case `SmtCircuitInputs` object. `kIssuer` is `17` for
+  RSA-2048 issuers and `34` for RSA-4096. Delegates to the shared
+  [`zkid-input-builder`](../zkid-input-builder) crate so the browser produces
+  byte-identical JSON to `ecdsa-spartan2`'s `generate_split_inputs`. Parity
+  is pinned by `tests/input_builder_drift.rs` — the guard against
+  reintroducing PR #40's "Too many values for input signal __placeholder__"
+  witness failure.
+- `compute_pk_blind(userPkBe, tbs)` → decimal string. Exposed for UI
+  consistency checks; `build_split_inputs` already computes this internally.
 
 ## Separation from `ecdsa-spartan2`
 
