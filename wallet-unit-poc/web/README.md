@@ -45,7 +45,7 @@ skip the download.
 | `src/store.ts`           | Discriminated-union `AppState` + `transition` reducer (landing/setup/proving)  |
 | `src/router.ts`          | Subscribes to `$state.phase` and swaps the mounted screen                      |
 | `src/screens/*.ts`       | Landing / setup / proving screen mounts                                        |
-| `src/setup-state.ts`     | `$card` + `$pin` atoms holding detected card + verified PIN                    |
+| `src/setup-state.ts`     | `$hipki` + `$pin` atoms holding polling probe + verified PIN                   |
 | `src/ui.ts`              | nanostores atoms + DOM paint for the step list                                 |
 | `src/main.ts`            | Entry point: mount router, spawn Worker, bridge `phase = proving` to pipeline  |
 

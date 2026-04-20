@@ -55,8 +55,10 @@ export async function installMockServices(page: Page): Promise<void> {
   });
 
   // HiPKI --------------------------------------------------------------
+  // Matches both the polling probe (POST /pkcs11info) and the one-shot
+  // withcert=true pull (POST /pkcs11info?withcert=true).
   await page.route("**/pkcs11info*", async (route, req) => {
-    if (req.method() !== "GET") return route.fallback();
+    if (req.method() !== "POST") return route.fallback();
     await route.fulfill({
       status: 200,
       contentType: "application/json",

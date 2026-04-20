@@ -5,7 +5,7 @@ import "./style.css";
 import { runProvingPipeline } from "./pipeline";
 import { applyProgress } from "./progress";
 import { mountRouter } from "./router";
-import { $card, $pin, resetSetup } from "./setup-state";
+import { $hipki, $pin, resetSetup } from "./setup-state";
 import { dispatch, $state } from "./store";
 import { resetUi, result } from "./ui";
 import type { Progress } from "./worker";
@@ -44,9 +44,9 @@ function boot(): void {
     resetUi();
     result.set({ kind: "running" });
 
-    const cardState = $card.get();
+    const hipkiState = $hipki.get();
     const pinState = $pin.get();
-    if (cardState.status !== "ok") {
+    if (hipkiState.status !== "card_ready") {
       dispatch({
         type: "pipeline_error",
         where: "setup",
@@ -65,13 +65,12 @@ function boot(): void {
 
     try {
       await runProvingPipeline(worker, {
-        card: cardState.card,
+        card: hipkiState.card,
         pin: pinState.pin,
         // Nullifier is opaque to the prover; Phase 5 will replace this with
-        // a user-scoped identifier (deterministic hash of the card subject
-        // is the likely candidate). For now a stable placeholder keeps the
+        // a user-scoped identifier. For now a stable placeholder keeps the
         // verifier's duplicate-detection noise-free within one session.
-        nullifier: `zkid-${cardState.card.serialHex}`,
+        nullifier: `zkid-${hipkiState.card.serialHex}`,
       });
     } catch {
       // `runProvingPipeline` already dispatched `pipeline_error`; swallow

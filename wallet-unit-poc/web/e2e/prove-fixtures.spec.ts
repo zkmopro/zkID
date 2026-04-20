@@ -8,17 +8,17 @@ test("landing screen renders and Start is interactive", async ({ page }) => {
   await expect(page.getByTestId("start-button")).toBeEnabled();
 });
 
-test("Start → setup screen auto-detects card (mocked)", async ({ page }) => {
+test("Start → setup screen polls HiPKI and detects card (mocked)", async ({ page }) => {
   await installMockServices(page);
   await page.goto("/");
   await page.getByTestId("start-button").click();
   await expect(page.getByTestId("setup-assets")).toBeVisible();
   await expect(page.getByTestId("setup-hipki")).toBeVisible();
   await expect(page.getByTestId("setup-pin")).toBeVisible();
-  // HiPKI panel should transition from "detecting" to showing the card SN
-  // (bundled fixture serial) within a few seconds.
+  // Poller ticks every ~2s; the card fixture resolves to `card_ready` soon
+  // after the withcert=true pull completes.
   await expect(page.getByTestId("hipki-body")).toContainText(
-    /TEST000000000000|Test User/,
+    /Test User|Card/,
     { timeout: 15_000 },
   );
 });
@@ -28,9 +28,9 @@ test("full flow with mocks reaches terminal state", async ({ page }) => {
   await page.goto("/");
   await page.getByTestId("start-button").click();
 
-  // Wait for HiPKI auto-detect to finish.
+  // Wait for the poller to reach card_ready.
   await expect(page.getByTestId("hipki-body")).toContainText(
-    /TEST000000000000|Test User/,
+    /Test User|Card/,
     { timeout: 15_000 },
   );
   // Enter PIN + verify.

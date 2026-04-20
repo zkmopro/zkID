@@ -11,7 +11,7 @@ test("@real pipeline verifies against live services", async ({ page }) => {
   }
   await page.goto("/");
   await page.getByTestId("start-button").click();
-  await expect(page.getByTestId("hipki-body")).not.toContainText(/Not yet/, {
+  await expect(page.getByTestId("hipki-body")).toContainText(/Card/, {
     timeout: 30_000,
   });
   await page.getByTestId("pin-input").fill(pin);

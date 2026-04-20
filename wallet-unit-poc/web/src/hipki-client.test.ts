@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   fetchPkcs11Info,
+  probePkcs11Info,
   signTbs,
   type Pkcs11InfoResponse,
 } from "./hipki-client";
@@ -27,10 +28,10 @@ describe("hipki-client", () => {
   setupFetchMock({ VITE_HIPKI_BASE_URL: HIPKI });
 
   describe("fetchPkcs11Info", () => {
-    it("GETs /pkcs11info?withcert=true and parses the response", async () => {
+    it("POSTs /pkcs11info?withcert=true and parses the response", async () => {
       const fetchSpy = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
         expect(String(url)).toBe(`${HIPKI}/pkcs11info?withcert=true`);
-        expect(init?.method ?? "GET").toBe("GET");
+        expect(init?.method).toBe("POST");
         return new Response(PKCS11_FIXTURE, {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -77,6 +78,19 @@ describe("hipki-client", () => {
       }) as typeof fetch;
       globalThis.fetch = fetchSpy;
       await fetchPkcs11Info(custom);
+    });
+  });
+
+  describe("probePkcs11Info", () => {
+    it("POSTs /pkcs11info (no withcert query) for cheap polling", async () => {
+      const fetchSpy = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        expect(String(url)).toBe(`${HIPKI}/pkcs11info`);
+        expect(init?.method).toBe("POST");
+        return new Response(PKCS11_FIXTURE, { status: 200 });
+      }) as typeof fetch;
+      globalThis.fetch = fetchSpy;
+      const resp = await probePkcs11Info();
+      expect(Array.isArray(resp.slots)).toBe(true);
     });
   });
 

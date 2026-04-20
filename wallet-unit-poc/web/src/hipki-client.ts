@@ -26,10 +26,15 @@ export interface Pkcs11TokenInfo {
 }
 
 export interface Pkcs11Slot {
+  slotDescription?: string;
   token?: Pkcs11TokenInfo;
 }
 
 export interface Pkcs11InfoResponse {
+  /** LocalSignServer version, e.g. `"1.0.11"`. Present on both GET + POST. */
+  serverVersion?: string;
+  libraryDescription?: string;
+  libraryVersion?: string;
   slots: Pkcs11Slot[];
 }
 
@@ -50,13 +55,35 @@ export interface SignTbsParams {
   baseUrl?: string;
 }
 
+/** Full cert-chain lookup. Used once per proving run; the polling detector
+ *  uses `probePkcs11Info` (no `withcert=true`) which is cheap enough to hit
+ *  on an interval. */
 export async function fetchPkcs11Info(
   baseUrl: string = HIPKI_BASE,
 ): Promise<Pkcs11InfoResponse> {
-  const url = `${stripTrailingSlash(baseUrl)}/pkcs11info?withcert=true`;
-  const r = await fetch(url, { method: "GET" });
+  return requestPkcs11Info(baseUrl, true);
+}
+
+/** Cheap probe used by the polling detector. Returns slot + token metadata
+ *  without the base64-encoded certs. Matches the HiPKI "IC card function
+ *  check" reference page's `POST /pkcs11info` call (no query string). */
+export async function probePkcs11Info(
+  baseUrl: string = HIPKI_BASE,
+): Promise<Pkcs11InfoResponse> {
+  return requestPkcs11Info(baseUrl, false);
+}
+
+async function requestPkcs11Info(
+  baseUrl: string,
+  withCert: boolean,
+): Promise<Pkcs11InfoResponse> {
+  const path = withCert ? "/pkcs11info?withcert=true" : "/pkcs11info";
+  const url = `${stripTrailingSlash(baseUrl)}${path}`;
+  // Reference `/pkcs11info` is POST even though it has no body — matches the
+  // HiPKI test page. Some LocalSignServer builds reject GET here.
+  const r = await fetch(url, { method: "POST" });
   if (!r.ok) {
-    throw new Error(`GET /pkcs11info returned ${r.status} ${r.statusText}`);
+    throw new Error(`POST /pkcs11info returned ${r.status} ${r.statusText}`);
   }
   const body = (await r.json()) as Pkcs11InfoResponse;
   if (!Array.isArray(body?.slots)) {

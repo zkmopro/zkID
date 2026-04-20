@@ -1,25 +1,32 @@
-// Setup screen with three live panels:
-//   1. Artifact download — preflight-downloads PKs + witness-wasms so the
-//      proving run can skip the network burst.
-//   2. HiPKI detection — GET /pkcs11info, extract user + issuer cert,
-//      derive issuer (g2/g3) + serial.
-//   3. PIN verification — user types PIN, we issue a throwaway `sign` to
-//      validate, then lock the input. Three retries before the card locks.
+// Setup screen: three live panels drive the HiPKI + PIN + artifact
+// preflight so Continue unlocks only when all three are ready.
+//
+// HiPKI detection runs as a polling probe (see `hipki-detector.ts`) rather
+// than a one-shot button. The panel reflects whichever of
+// not_installed / no_reader / no_reader_or_card / card_inserted is currently
+// true; on `card_inserted` we run a one-shot fetchPkcs11Info(withcert=true)
+// to parse the user cert into a CardContext, flipping the panel to
+// `card_ready` which unlocks the PIN input.
 
 import { ensureAsset } from "../asset-download";
 import { bytesToHex } from "../bytes";
 import { humanBytes } from "../format";
 import { signTbs } from "../hipki-client";
+import { startHipkiPolling, type HipkiProbe } from "../hipki-detector";
 import { CIRCUITS } from "../manifest";
 import { Pin } from "../pin";
 import { buildCardContext } from "../pipeline";
-import { $card, $pin, type CardState, type PinState } from "../setup-state";
+import {
+  $hipki,
+  $pin,
+  isCardReady,
+  type HipkiState,
+  type PinState,
+} from "../setup-state";
 import { dispatch } from "../store";
 
-// Three attempts before the Taiwan Citizen Card locks. We count ourselves
-// rather than relying on HiPKI's `last_error` codes since those vary across
-// LocalSignServer builds.
 const MAX_PIN_ATTEMPTS = 3;
+const HIPKI_POLL_MS = 2000;
 
 /** HiPKI `/sign` rejects empty input, so we sign a stable non-empty string
  *  to validate the PIN without consuming a card challenge. */
@@ -53,19 +60,15 @@ export function mountSetup(root: HTMLElement): () => void {
         </div>
         <div class="setup-panel" data-testid="setup-hipki">
           <div class="panel-title">HiPKI card</div>
-          <div class="panel-body" data-testid="hipki-body">Not yet detected.</div>
-          <div class="panel-actions">
-            <button class="secondary-button" data-testid="hipki-retry" type="button">
-              Detect card
-            </button>
-          </div>
+          <div class="panel-body" data-testid="hipki-body">Probing…</div>
+          <div class="panel-detail" data-testid="hipki-detail"></div>
         </div>
         <div class="setup-panel" data-testid="setup-pin">
           <div class="panel-title">PIN verification</div>
           <div class="panel-warning">
             Wrong PIN three times will lock your Taiwan Citizen Card.
           </div>
-          <div class="panel-body" data-testid="pin-body">Detect your card first.</div>
+          <div class="panel-body" data-testid="pin-body">Waiting for card…</div>
           <div class="panel-actions">
             <input
               class="pin-input"
@@ -96,12 +99,10 @@ export function mountSetup(root: HTMLElement): () => void {
     </section>
   `;
 
-  // Query nodes once. Template above is co-located with these lookups so
-  // typing them non-null is safe; `!` kept for brevity.
   const assetsBody = root.querySelector<HTMLElement>('[data-testid="assets-body"]')!;
   const assetsRetry = root.querySelector<HTMLButtonElement>('[data-testid="assets-retry"]')!;
   const hipkiBody = root.querySelector<HTMLElement>('[data-testid="hipki-body"]')!;
-  const hipkiRetry = root.querySelector<HTMLButtonElement>('[data-testid="hipki-retry"]')!;
+  const hipkiDetail = root.querySelector<HTMLElement>('[data-testid="hipki-detail"]')!;
   const pinBody = root.querySelector<HTMLElement>('[data-testid="pin-body"]')!;
   const pinInput = root.querySelector<HTMLInputElement>('[data-testid="pin-input"]')!;
   const pinVerify = root.querySelector<HTMLButtonElement>('[data-testid="pin-verify"]')!;
@@ -109,7 +110,10 @@ export function mountSetup(root: HTMLElement): () => void {
   const continueBtn = root.querySelector<HTMLButtonElement>('[data-testid="continue-button"]')!;
 
   let assets: AssetsState = { status: "pending" };
-  const paintAssets = (): void => {
+
+  // --- Painters -------------------------------------------------------
+
+  function paintAssets(): void {
     switch (assets.status) {
       case "pending":
         assetsBody.textContent = "Ready to download.";
@@ -131,89 +135,95 @@ export function mountSetup(root: HTMLElement): () => void {
         assetsRetry.disabled = false;
         break;
     }
-    updateContinueButton();
-  };
+    refreshContinue();
+  }
 
-  const paintHipki = (state: CardState): void => {
+  function paintHipki(state: HipkiState): void {
     switch (state.status) {
-      case "pending":
-        hipkiBody.textContent = "Not yet detected.";
-        hipkiRetry.disabled = false;
-        hipkiRetry.textContent = "Detect card";
+      case "probing":
+        hipkiBody.textContent = "Probing HiPKI LocalSignServer…";
+        hipkiDetail.textContent = "";
         break;
-      case "detecting":
-        hipkiBody.textContent = "Contacting HiPKI LocalSignServer…";
-        hipkiRetry.disabled = true;
+      case "not_installed":
+        hipkiBody.textContent = "HiPKI client not detected";
+        hipkiDetail.textContent =
+          "Install the HiPKI LocalSignServer on this machine and keep it running.";
         break;
-      case "ok": {
-        const subj = state.subjectDN ? ` — ${state.subjectDN}` : "";
-        hipkiBody.textContent = `Card ${state.cardSN ?? "(no serial)"}${subj}`;
-        hipkiRetry.disabled = false;
-        hipkiRetry.textContent = "Re-detect";
+      case "no_reader":
+        hipkiBody.textContent = "No card reader plugged in";
+        hipkiDetail.textContent = state.serverVersion
+          ? `LocalSignServer v${state.serverVersion}`
+          : "";
         break;
-      }
-      case "error":
-        hipkiBody.textContent = `Error: ${state.message}`;
-        hipkiRetry.disabled = false;
-        hipkiRetry.textContent = "Try again";
+      case "no_reader_or_card":
+        hipkiBody.textContent = "Reader present, but no card inserted";
+        hipkiDetail.textContent =
+          state.slots.length > 0
+            ? `Reader: ${state.slots.join(", ")}`
+            : "";
+        break;
+      case "card_inserted":
+        hipkiBody.textContent = `Card detected — ${state.cardSN}`;
+        hipkiDetail.textContent = "Reading certificate…";
+        break;
+      case "card_ready":
+        hipkiBody.textContent = `Card ${state.cardSN}${state.subjectDN ? ` — ${state.subjectDN}` : ""}`;
+        hipkiDetail.textContent = state.serverVersion
+          ? `LocalSignServer v${state.serverVersion}`
+          : "";
         break;
     }
-    // PIN input is only usable once the card is detected.
-    const cardOk = state.status === "ok";
-    const pinNow = $pin.get();
-    if (!cardOk) {
-      pinInput.disabled = true;
-      pinVerify.disabled = true;
-      pinBody.textContent = "Detect your card first.";
-    } else if (pinNow.status !== "locked") {
-      pinInput.disabled = false;
-      pinVerify.disabled = pinInput.value.length < 6;
-    }
-    updateContinueButton();
-  };
+    refreshPinControls();
+    refreshContinue();
+  }
 
-  const paintPin = (state: PinState): void => {
+  function paintPin(state: PinState): void {
     switch (state.status) {
       case "pending":
-        pinBody.textContent = $card.get().status === "ok"
+        pinBody.textContent = isCardReady()
           ? "Enter your PIN, then Verify."
-          : "Detect your card first.";
+          : "Waiting for card…";
         break;
       case "verifying":
         pinBody.textContent = "Verifying…";
-        pinVerify.disabled = true;
         break;
       case "locked":
         pinBody.textContent = "PIN verified. Ready to prove.";
         pinInput.value = "";
-        pinInput.disabled = true;
-        pinVerify.disabled = true;
         break;
       case "error":
         pinBody.textContent = `Error: ${state.message} (${state.attemptsRemaining} attempts left)`;
-        pinVerify.disabled = pinInput.value.length < 6;
         break;
     }
-    updateContinueButton();
-  };
-
-  function updateContinueButton(): void {
-    const ready =
-      assets.status === "ok" &&
-      $card.get().status === "ok" &&
-      $pin.get().status === "locked";
-    continueBtn.disabled = !ready;
+    refreshPinControls();
+    refreshContinue();
   }
 
-  // --- asset download ---------------------------------------------------
+  function refreshPinControls(): void {
+    const ready = isCardReady();
+    const pinNow = $pin.get();
+    const locked = pinNow.status === "locked";
+    const verifying = pinNow.status === "verifying";
+    pinInput.disabled = !ready || locked || verifying;
+    const shortPin = pinInput.value.length < 6;
+    pinVerify.disabled = !ready || locked || verifying || shortPin;
+  }
+
+  function refreshContinue(): void {
+    const pinNow = $pin.get();
+    continueBtn.disabled = !(
+      assets.status === "ok" &&
+      isCardReady() &&
+      pinNow.status === "locked"
+    );
+  }
+
+  // --- Asset download -------------------------------------------------
+
   async function downloadAssets(): Promise<void> {
     assets = { status: "downloading", label: "starting", bytesDone: 0, bytesTotal: 0 };
     paintAssets();
     try {
-      // Preflight-download all three circuits' PK + witness-wasm. The Worker
-      // checks OPFS first, so this is strictly a UX move — progress is visible
-      // before proving starts, and a failure here is a clear setup-phase error
-      // rather than a mid-proof surprise.
       for (const key of Object.keys(CIRCUITS) as Array<keyof typeof CIRCUITS>) {
         const m = CIRCUITS[key];
         await ensureAsset(m.pkUrl, `${key}_pk`, m.expected.pk, (p) => {
@@ -242,28 +252,72 @@ export function mountSetup(root: HTMLElement): () => void {
     paintAssets();
   }
 
-  // --- HiPKI detection --------------------------------------------------
-  async function detectCard(): Promise<void> {
-    $card.set({ status: "detecting" });
-    try {
-      const detected = await buildCardContext();
-      $card.set({
-        status: "ok",
-        card: detected.card,
-        subjectDN: detected.subjectDN,
-        cardSN: detected.cardSN,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      $card.set({ status: "error", message });
+  // --- HiPKI polling --------------------------------------------------
+  //
+  // On each probe change, update `$hipki`. When we transition into
+  // `card_inserted`, kick off the one-shot withcert=true pull to parse the
+  // user cert into a CardContext. If the card is pulled, drop any locked
+  // PIN — it may no longer match the inserted card.
+
+  /** Invalidate a verified PIN: card changed or went away, so a prior
+   *  `locked`/`verifying` state no longer refers to the current card. */
+  function dropStalePin(): void {
+    const pinNow = $pin.get();
+    if (pinNow.status === "locked" || pinNow.status === "verifying") {
+      $pin.set({ status: "pending" });
     }
   }
 
+  let lastCardSN: string | null = null;
+  async function handleProbe(probe: HipkiProbe): Promise<void> {
+    if (probe.status !== "card_inserted") {
+      lastCardSN = null;
+      $hipki.set(probe);
+      dropStalePin();
+      return;
+    }
+    if (probe.cardSN === lastCardSN) return;
+    lastCardSN = probe.cardSN;
+    $hipki.set(probe);
+    dropStalePin();
 
-  // --- PIN verification -------------------------------------------------
+    const expectedSN = probe.cardSN;
+    try {
+      const detected = await buildCardContext();
+      // Guard against a stale resolution: if the card was pulled (status
+      // flipped away from card_inserted) or swapped (probe moved to a
+      // different SN), discard this result and let the newer probe win.
+      const now = $hipki.get();
+      if (now.status !== "card_inserted" || now.cardSN !== expectedSN) return;
+      $hipki.set({
+        status: "card_ready",
+        card: detected.card,
+        cardSN: detected.cardSN ?? probe.cardSN,
+        subjectDN: detected.subjectDN,
+        serverVersion: probe.serverVersion,
+      });
+    } catch (err) {
+      // Transient enrichment failure (timeout, 5xx, card pulled mid-fetch).
+      // Clear lastCardSN so the next poll tick retries; otherwise the SN
+      // match at line 279 would keep us stuck on the error state until the
+      // user physically re-inserts the card.
+      lastCardSN = null;
+      $hipki.set({
+        status: "not_installed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const poller = startHipkiPolling((probe) => {
+    void handleProbe(probe);
+  }, HIPKI_POLL_MS);
+
+  // --- PIN verification -----------------------------------------------
+
   async function verifyPin(): Promise<void> {
-    const cardState = $card.get();
-    if (cardState.status !== "ok") return;
+    const hipkiState = $hipki.get();
+    if (hipkiState.status !== "card_ready") return;
     const raw = pinInput.value;
     if (raw.length < 6 || raw.length > 8) return;
 
@@ -272,52 +326,41 @@ export function mountSetup(root: HTMLElement): () => void {
       prior.status === "error" ? prior.attemptsRemaining : MAX_PIN_ATTEMPTS;
     if (attemptsRemaining <= 0) return;
 
-    $pin.set({ status: "verifying" });
-    // Wipe the input box immediately so a later render doesn't re-expose it.
+    const cardSN = hipkiState.cardSN;
+    $pin.set({ status: "verifying", cardSN });
     const candidatePin = new Pin(raw);
     pinInput.value = "";
 
     try {
       const resp = await signTbs({ tbs: PIN_TEST_TBS_HEX, pin: candidatePin.consume() });
       if (resp.ret_code !== 0 || resp.last_error !== 0) {
-        const remaining = attemptsRemaining - 1;
         $pin.set({
           status: "error",
           message: `HiPKI rejected PIN (ret_code=${resp.ret_code})`,
-          attemptsRemaining: remaining,
+          attemptsRemaining: attemptsRemaining - 1,
         });
         return;
       }
-      // Happy path. Store a *fresh* Pin (the one we just consumed is spent)
-      // so the proving run can issue its own /sign with a real challenge.
       $pin.set({
         status: "locked",
         pin: new Pin(raw),
+        cardSN,
         attemptsRemaining,
       });
     } catch (err) {
-      const remaining = attemptsRemaining - 1;
-      const message = err instanceof Error ? err.message : String(err);
-      $pin.set({ status: "error", message, attemptsRemaining: remaining });
+      $pin.set({
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+        attemptsRemaining: attemptsRemaining - 1,
+      });
     }
   }
 
-  // --- handlers + subscriptions ----------------------------------------
-  const onAssetsRetry = () => {
-    void downloadAssets();
-  };
-  const onHipkiRetry = () => {
-    void detectCard();
-  };
-  const onPinVerify = () => {
-    void verifyPin();
-  };
-  const onPinInput = () => {
-    const cardOk = $card.get().status === "ok";
-    const pinNow = $pin.get();
-    pinVerify.disabled =
-      !cardOk || pinNow.status === "locked" || pinInput.value.length < 6;
-  };
+  // --- Handlers + subscriptions ---------------------------------------
+
+  const onAssetsRetry = () => void downloadAssets();
+  const onPinVerify = () => void verifyPin();
+  const onPinInput = () => refreshPinControls();
   const onContinue = () => {
     if (continueBtn.disabled) return;
     dispatch({ type: "continue" });
@@ -325,43 +368,28 @@ export function mountSetup(root: HTMLElement): () => void {
   const onBack = () => dispatch({ type: "reset" });
 
   assetsRetry.addEventListener("click", onAssetsRetry);
-  hipkiRetry.addEventListener("click", onHipkiRetry);
   pinVerify.addEventListener("click", onPinVerify);
   pinInput.addEventListener("input", onPinInput);
   continueBtn.addEventListener("click", onContinue);
   backBtn.addEventListener("click", onBack);
 
-  const unsubCard = $card.listen(paintCardAndRefresh);
-  const unsubPin = $pin.listen(paintPinAndRefresh);
-  function paintCardAndRefresh(state: CardState): void {
-    paintHipki(state);
-    paintPin($pin.get());
-  }
-  function paintPinAndRefresh(state: PinState): void {
-    paintPin(state);
-  }
+  const unsubHipki = $hipki.listen((state) => paintHipki(state));
+  const unsubPin = $pin.listen((state) => paintPin(state));
 
-  // Initial paint
   paintAssets();
-  paintHipki($card.get());
+  paintHipki($hipki.get());
   paintPin($pin.get());
 
-  // Auto-kick asset download on first mount (but not on Retry re-mount when
-  // the user bounced back to landing and clicked Start again — they can hit
-  // Download manually).
   if (assets.status === "pending") void downloadAssets();
-  // Auto-detect card if nothing's there yet; keep prior state otherwise.
-  if ($card.get().status === "pending") void detectCard();
 
   return () => {
+    poller.stop();
     assetsRetry.removeEventListener("click", onAssetsRetry);
-    hipkiRetry.removeEventListener("click", onHipkiRetry);
     pinVerify.removeEventListener("click", onPinVerify);
     pinInput.removeEventListener("input", onPinInput);
     continueBtn.removeEventListener("click", onContinue);
     backBtn.removeEventListener("click", onBack);
-    unsubCard();
+    unsubHipki();
     unsubPin();
   };
 }
-
