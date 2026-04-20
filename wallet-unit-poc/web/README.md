@@ -39,8 +39,11 @@ skip the download.
 | `src/hipki-client.ts`    | `GET /pkcs11info` + `POST /sign` against the user's HiPKI LocalSignServer      |
 | `src/smt-client.ts`      | `GET /proof/{issuer}/{serial}` against moica-revocation-smt → circuit inputs   |
 | `src/worker.ts`          | Dedicated Worker orchestrating the seven-step pipeline                         |
+| `src/store.ts`           | Discriminated-union `AppState` + `transition` reducer (landing/setup/proving)  |
+| `src/router.ts`          | Subscribes to `$state.phase` and swaps the mounted screen                      |
+| `src/screens/*.ts`       | Landing / setup / proving screen mounts                                        |
 | `src/ui.ts`              | nanostores atoms + DOM paint for the step list                                 |
-| `src/main.ts`            | Entry point: spawn Worker, wire Prove button, translate Progress events        |
+| `src/main.ts`            | Entry point: mount router, spawn Worker, translate Progress events             |
 
 Pipeline (mirrors `src/ui.ts::Step`):
 

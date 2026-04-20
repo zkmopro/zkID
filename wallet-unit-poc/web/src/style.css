@@ -2,10 +2,13 @@
   --text: #2a2732;
   --text-muted: #6b6375;
   --bg: #fff;
+  --panel-bg: #fafafb;
   --border: #e5e4e7;
   --accent: #aa3bff;
   --accent-bg: rgba(170, 59, 255, 0.08);
   --accent-border: rgba(170, 59, 255, 0.5);
+  --secondary-text: #4a4753;
+  --secondary-border: #d4d2d8;
   --success: #0f9d58;
   --error: #d93025;
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
@@ -22,10 +25,13 @@
     --text: #f3f4f6;
     --text-muted: #9ca3af;
     --bg: #16171d;
+    --panel-bg: #1c1d24;
     --border: #2e303a;
     --accent: #c084fc;
     --accent-bg: rgba(192, 132, 252, 0.12);
     --accent-border: rgba(192, 132, 252, 0.55);
+    --secondary-text: #d1d5db;
+    --secondary-border: #3a3c47;
     --success: #81c995;
     --error: #f28b82;
   }
@@ -40,6 +46,9 @@ main {
   max-width: 720px;
   margin: 0 auto;
   padding: 48px 24px;
+}
+
+.screen {
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -57,26 +66,60 @@ h1 {
   color: var(--text-muted);
 }
 
-button[data-testid="prove-button"] {
+.primary-button,
+.secondary-button {
   align-self: flex-start;
   font: inherit;
   font-weight: 600;
   padding: 8px 16px;
   border-radius: 6px;
+  cursor: pointer;
+  transition: filter 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.primary-button {
   border: 1px solid var(--accent-border);
   color: var(--accent);
   background: var(--accent-bg);
-  cursor: pointer;
-  transition: filter 0.15s, border-color 0.15s;
+}
+.primary-button:hover:not([disabled]) { filter: brightness(1.05); }
+.primary-button[disabled] { cursor: not-allowed; opacity: 0.6; }
+
+.secondary-button {
+  border: 1px solid var(--secondary-border);
+  color: var(--secondary-text);
+  background: transparent;
+}
+.secondary-button:hover:not([disabled]) { background: var(--panel-bg); }
+
+.button-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
-button[data-testid="prove-button"]:hover:not([disabled]) {
-  filter: brightness(1.05);
+.setup-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-button[data-testid="prove-button"][disabled] {
-  cursor: not-allowed;
-  opacity: 0.6;
+.setup-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--panel-bg);
+}
+
+.panel-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.panel-body {
+  color: var(--text-muted);
+  font-size: 14px;
 }
 
 ol[data-testid="step-list"] {
@@ -170,6 +213,10 @@ li.step[data-status="error"] .step-label {
 }
 #result[data-kind="error"] .result-line {
   color: var(--error);
+}
+
+.proving-actions[hidden] {
+  display: none;
 }
 
 @keyframes spin {
