@@ -20,16 +20,11 @@ pub struct CertOffsets {
 
 /// Strip leading zero bytes from a DER INTEGER before hex-encoding.
 pub fn serial_bytes_to_hex_trimmed(serial_bytes: &[u8]) -> String {
-    let trimmed: Vec<u8> = serial_bytes
-        .iter()
-        .skip_while(|&&b| b == 0)
-        .copied()
-        .collect();
-    hex::encode(if trimmed.is_empty() {
-        serial_bytes
-    } else {
-        &trimmed
-    })
+    let first_nonzero = serial_bytes.iter().position(|&b| b != 0);
+    match first_nonzero {
+        Some(i) => hex::encode(&serial_bytes[i..]),
+        None => hex::encode(serial_bytes),
+    }
 }
 
 /// Find the RSA modulus and subject DN byte offsets in a DER-encoded certificate.

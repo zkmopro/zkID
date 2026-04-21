@@ -91,8 +91,8 @@ pub fn generate_split_inputs(
     let pk_blind = BigUint::from_bytes_be(&pk_blind_hash).to_string();
 
     let serial_decimal = BigUint::parse_bytes(serial_hex.as_bytes(), 16)
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| "0".to_string());
+        .ok_or_else(|| format!("serial_hex is not valid hex: {serial_hex:?}"))?
+        .to_string();
 
     let (smt_root, smt_serial, smt_siblings, smt_old_key, smt_old_value, smt_is_old0) =
         smt_fields_from_option(smt_inputs, serial_decimal, SMT_DEPTH);
