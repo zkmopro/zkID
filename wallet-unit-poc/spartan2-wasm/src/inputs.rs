@@ -8,10 +8,11 @@
 //! before it can reach the browser and reproduce PR #40's
 //! `Too many values for input signal __placeholder__` failure.
 
+use rsa::{pkcs8::DecodePublicKey, traits::PublicKeyParts, RsaPublicKey};
 use serde::Serialize;
 use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::prelude::*;
-use x509_cert::{der::Decode, Certificate};
+use x509_cert::{der::{Decode, Encode}, Certificate};
 use zkid_input_builder::{generate_split_inputs, types::SmtCircuitInputs, MAX_CERT_CHAIN_LENGTH};
 
 /// Two-JSON return shape. `cert_chain` + `device_sig` match the keys the
@@ -122,6 +123,33 @@ pub fn build_split_inputs(
     let serializer = Serializer::new().serialize_maps_as_objects(true);
     out.serialize(&serializer)
         .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Parse an X.509 certificate DER and return the RSA modulus bit width of
+/// its subjectPublicKey. Used by the web app to deterministically select
+/// `cert_chain_rs2048` vs `cert_chain_rs4096` from the detected card's
+/// issuer cert, rather than the previous fragile DN-regex match that
+/// picked the wrong circuit (kIssuer=17, 2057-bit cap) for MOICA-G3
+/// cards with 4096-bit issuer keys.
+#[wasm_bindgen]
+pub fn cert_modulus_bits(cert_der: &[u8]) -> Result<u32, JsError> {
+    let cert = Certificate::from_der(cert_der)
+        .map_err(|e| JsError::new(&format!("cert DER parse: {e}")))?;
+    let spki_der = cert
+        .tbs_certificate
+        .subject_public_key_info
+        .to_der()
+        .map_err(|e| JsError::new(&format!("SPKI encode: {e}")))?;
+    let pubkey = RsaPublicKey::from_public_key_der(&spki_der)
+        .map_err(|e| JsError::new(&format!("not an RSA cert: {e}")))?;
+    let modulus_bytes = pubkey.n().to_bytes_be();
+    let leading_zeros = modulus_bytes
+        .iter()
+        .next()
+        .map(|b| b.leading_zeros())
+        .unwrap_or(0);
+    let bits = modulus_bytes.len() as u32 * 8 - leading_zeros;
+    Ok(bits)
 }
 
 /// Compute `pk_blind = SHA-256(user_pk_be || tbs || "zkID/pk-commit/v1")`.

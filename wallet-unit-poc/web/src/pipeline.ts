@@ -3,6 +3,8 @@
 // and handing the inputs off to the already-warm Worker for the CPU/wasm
 // proving steps. Submission is owned by the Review screen via main.ts.
 
+import init, { cert_modulus_bits } from "./wasm/spartan2_wasm.js";
+
 import { base64ToBytes, challengeBytesToTbs } from "./bytes";
 import { fetchPkcs11Info, signTbs } from "./hipki-client";
 import { buildInputs } from "./inputs";
@@ -168,10 +170,34 @@ export async function runProvingPipeline(
   worker.postMessage(msg);
 }
 
-/** Issuer DN → `g2` / `g3`. MOICA-G2 issues RSA-2048 certs, MOICA-G3 RSA-4096. */
-function deriveIssuer(issuerDn: string | undefined): SmtIssuer {
-  if (!issuerDn) return "g2";
-  return /g3|4096|root\s*ca\s*g3/i.test(issuerDn) ? "g3" : "g2";
+let wasmInit: Promise<unknown> | null = null;
+async function ensureWasm(): Promise<void> {
+  if (!wasmInit) wasmInit = init();
+  await wasmInit;
+}
+
+/** Route by the issuer cert's actual RSA modulus width. The previous DN-regex
+ *  match was fragile: MOICA-G3 cards whose issuer DN didn't contain "G3" /
+ *  "4096" silently picked the rs2048 circuit (kIssuer=17, 2057-bit cap) and
+ *  blew up at `RSAVerifier65537` line 44 when the 4096-bit modulus truncated.
+ *  A card is G3 iff its issuer cert's modulus is wider than 2048 bits. */
+async function deriveIssuerFromCert(
+  issuerCertDer: Uint8Array,
+): Promise<{ issuer: SmtIssuer; kIssuer: 17 | 34; certKind: CircuitKind }> {
+  await ensureWasm();
+  const bits = cert_modulus_bits(issuerCertDer);
+  if (bits > 2048) {
+    return {
+      issuer: "g3",
+      kIssuer: 34,
+      certKind: "cert_chain_rs4096",
+    };
+  }
+  return {
+    issuer: "g2",
+    kIssuer: 17,
+    certKind: "cert_chain_rs2048",
+  };
 }
 
 /** Fetch + parse the HiPKI pkcs11info response into a `CardContext`.
@@ -197,15 +223,13 @@ export async function buildCardContext(
   if (!userEntry) throw new Error("HiPKI: no user cert in token");
   if (!caEntry) throw new Error("HiPKI: no 'CA Cert' entry in token");
 
-  const issuer = deriveIssuer(userEntry.issuerDN);
-  const kIssuer: 17 | 34 = issuer === "g3" ? 34 : 17;
-  const certKind: CircuitKind =
-    issuer === "g3" ? "cert_chain_rs4096" : "cert_chain_rs2048";
+  const issuerCertDer = base64ToBytes(caEntry.certb64);
+  const { issuer, kIssuer, certKind } = await deriveIssuerFromCert(issuerCertDer);
 
   return {
     card: {
       userCertDer: base64ToBytes(userEntry.certb64),
-      issuerCertDer: base64ToBytes(caEntry.certb64),
+      issuerCertDer,
       serialHex: deriveSerialHex(userEntry.sn, token.serialNumber),
       kIssuer,
       issuer,

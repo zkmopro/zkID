@@ -23,6 +23,7 @@ getrandom = { version = "0.2", features = ["js"] }
 x509-cert = "0.2"
 sha2 = "0.10"
 num-bigint = "0.4"
+rsa = "0.9"
 
 [dev-dependencies]
 # For native-target drift tests ONLY — never compiled for wasm32.
