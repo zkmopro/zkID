@@ -1,77 +1,144 @@
-// Translates Worker Progress events into `ui.ts` step-atom + result-atom
-// updates and dispatches FSM terminal events on `done` / `error`.
+// Translates Worker Progress events into UI atom updates and FSM dispatches.
+// Warmup events feed `$warmup` (setup Assets panel); proving events feed
+// the 6-step list + `result`. `proving_complete` carries proof bytes that
+// the FSM packages into a ProvingRun for the Review screen.
 
 import { humanBytes } from "./format";
+import type { CircuitKind as Kind } from "./manifest";
+import { $warmup } from "./setup-state";
 import { dispatch } from "./store";
-import { result, STEP_ORDER, steps, type Step, type StepStatus } from "./ui";
+import {
+  STEP_ORDER,
+  markDone,
+  markError,
+  markInProgress,
+  result,
+  steps,
+  type Step,
+} from "./ui";
 import type { Progress } from "./worker";
 
-function downloadLabel(p: Extract<Progress, { step: "download" }>): string {
-  if (!p.asset) return "";
-  const done = humanBytes(p.bytesDone);
-  const total = humanBytes(p.bytesTotal);
-  if (done && total) return `${p.asset} — ${done} / ${total}`;
-  if (done) return `${p.asset} — ${done}`;
-  return p.asset;
+const KIND_LABEL: Record<Kind, string> = {
+  cert_chain_rs2048: "cert_chain_rs2048",
+  cert_chain_rs4096: "cert_chain_rs4096",
+  device_sig_rs2048: "device_sig_rs2048",
+};
+
+type WarmupEvent = Extract<Progress, { step: "warmup" }>;
+type WitnessEvent = Extract<Progress, { step: "witness" }>;
+type ProveEvent = Extract<Progress, { step: "prove" }>;
+type ProvingCompleteEvent = Extract<Progress, { step: "proving_complete" }>;
+type ErrorEvent = Extract<Progress, { step: "error" }>;
+
+function warmupSublabel(p: WarmupEvent): string {
+  switch (p.phase) {
+    case "init":
+      return "initializing wasm runtime";
+    case "threads":
+      return "starting thread pool";
+    case "manifest":
+      return "loading manifest";
+    case "download": {
+      const done = humanBytes(p.bytesDone);
+      const total = humanBytes(p.bytesTotal);
+      const asset = p.asset ?? "asset";
+      if (done && total) return `downloading ${asset} — ${done} / ${total}`;
+      if (done) return `downloading ${asset} — ${done}`;
+      return `downloading ${asset}`;
+    }
+    case "load":
+      return p.kind ? `loading ${KIND_LABEL[p.kind]}` : "loading proving keys";
+    default:
+      return "";
+  }
 }
 
-function markPrior(step: Step, status: StepStatus): void {
+function markPriorStepsDone(step: Step): void {
   for (const s of STEP_ORDER) {
     if (s === step) return;
     const cur = steps[s].get();
     if (cur.status === "pending" || cur.status === "in_progress") {
-      steps[s].set({ ...cur, status });
+      markDone(s, cur.label);
     }
+  }
+}
+
+function applyWitness(p: WitnessEvent): void {
+  if (!p.kind) return;
+  const step: Step = p.kind === "device_sig_rs2048" ? "prove_device" : "prove_cert";
+  if (p.status === "in_progress") {
+    markPriorStepsDone(step);
+    markInProgress(step, "witness");
+  }
+  // `done` for witness is a sub-phase; the subsequent `prove` in_progress
+  // event overwrites the label.
+}
+
+function applyProve(p: ProveEvent): void {
+  if (!p.kind) return;
+  const step: Step = p.kind === "device_sig_rs2048" ? "prove_device" : "prove_cert";
+  if (p.status === "in_progress") {
+    markPriorStepsDone(step);
+    markInProgress(step, p.phase === "prep" ? "prep" : "proving");
+  } else {
+    markDone(step);
   }
 }
 
 export function applyProgress(p: Progress): void {
   switch (p.step) {
-    case "preflight":
-    case "download":
-    case "load":
-    case "witness":
-    case "prove":
-    case "submit": {
-      const stepKey = p.step;
-      const atomRef = steps[stepKey];
-      let label = "";
-      if (p.step === "download") label = downloadLabel(p);
-      else if (
-        (p.step === "load" || p.step === "witness" || p.step === "prove") &&
-        "kind" in p &&
-        p.kind
-      ) {
-        label = p.step === "prove" && p.phase ? `${p.kind} (${p.phase})` : p.kind;
-      }
-      if (p.status === "in_progress") {
-        markPrior(stepKey, "done");
-        atomRef.set({ status: "in_progress", label });
-      } else {
-        atomRef.set({ status: "done", label });
-      }
+    case "warmup": {
+      $warmup.set({
+        status: "running",
+        sublabel: warmupSublabel(p),
+        bytesDone: p.bytesDone,
+        bytesTotal: p.bytesTotal,
+      });
       return;
     }
-    case "done": {
+    case "warmup_done": {
+      $warmup.set({ status: "ready" });
+      return;
+    }
+    case "witness": {
+      applyWitness(p);
+      return;
+    }
+    case "prove": {
+      applyProve(p);
+      return;
+    }
+    case "proving_complete": {
+      const done = p as ProvingCompleteEvent;
+      // Backstop: mark every step done so the UI is consistent even if a
+      // per-step event was dropped or raced before teardown.
       for (const s of STEP_ORDER) {
         const cur = steps[s].get();
-        if (cur.status !== "error") {
-          steps[s].set({ ...cur, status: "done" });
-        }
+        if (cur.status !== "error") markDone(s, cur.label);
       }
-      result.set({
-        kind: "done",
-        verified: p.verified,
-        durationMs: p.durationMs,
-      });
       dispatch({
-        type: "proving_done",
-        verified: p.verified,
-        durationMs: p.durationMs,
+        type: "proving_complete",
+        run: {
+          challengeId: done.challengeId,
+          certChainType:
+            done.certKind === "cert_chain_rs4096" ? "rs4096" : "rs2048",
+          certProofBytes: done.certProofBytes,
+          deviceProofBytes: done.deviceProofBytes,
+          nullifier: done.nullifier,
+          certKind: done.certKind,
+          provingMs: done.provingMs,
+        },
       });
       return;
     }
     case "error": {
+      const e = p as ErrorEvent;
+      // Warmup errors route to $warmup (Assets panel); proving errors land
+      // on whichever proving step is live.
+      if (e.where === "warmup") {
+        $warmup.set({ status: "error", message: e.message });
+        return;
+      }
       let target: Step | undefined;
       for (const s of STEP_ORDER) {
         if (steps[s].get().status === "in_progress") {
@@ -87,14 +154,12 @@ export function applyProgress(p: Progress): void {
           }
         }
       }
-      if (target) {
-        steps[target].set({ status: "error", error: p.message });
-      }
-      result.set({ kind: "error", message: `${p.where}: ${p.message}` });
+      if (target) markError(target, e.message);
+      result.set({ kind: "error", message: `${e.where}: ${e.message}` });
       dispatch({
         type: "pipeline_error",
-        where: p.where,
-        message: p.message,
+        where: e.where,
+        message: e.message,
       });
       return;
     }

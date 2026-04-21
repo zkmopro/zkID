@@ -1,5 +1,14 @@
 // Byte-array conversion helpers. Tight, shared across clients + pipeline.
 
+/** Byte-for-byte parity with the native Rust prover: `challenge_bytes` is an
+ *  opaque string. HiPKI signs it verbatim; the RS256 circuit consumes its
+ *  UTF-8 bytes (identical to ASCII for hex chars). Do NOT hex-decode — the
+ *  server can emit odd-length strings, and hex-decoding would diverge from
+ *  the native prover even on even-length inputs. */
+export function challengeBytesToTbs(challengeBytes: string): Uint8Array {
+  return new TextEncoder().encode(challengeBytes);
+}
+
 export function hexToBytes(hex: string): Uint8Array {
   const clean = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex;
   if (clean.length % 2 !== 0) {

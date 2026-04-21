@@ -1,10 +1,9 @@
-// Main-thread proving orchestrator. Lives between the setup screen (which
-// gathers HiPKI cert + PIN) and the Worker (which runs CPU/wasm-bound steps).
-//
-// No fixture path, no default-JSON fallback. If any step throws, the step
-// row + result banner show the error and the FSM transitions to `error`.
+// Main-thread proving orchestrator. Lives between the setup screen and the
+// Worker, running the network/IO pipeline (challenge → sign → smt → build)
+// and handing the inputs off to the already-warm Worker for the CPU/wasm
+// proving steps. Submission is owned by the Review screen via main.ts.
 
-import { base64ToBytes, bytesToHex, hexToBytes } from "./bytes";
+import { base64ToBytes, challengeBytesToTbs } from "./bytes";
 import { fetchPkcs11Info, signTbs } from "./hipki-client";
 import { buildInputs } from "./inputs";
 import type { CircuitKind } from "./manifest";
@@ -12,8 +11,8 @@ import type { Pin } from "./pin";
 import { dispatch } from "./store";
 import { fetchSmtProof, type SmtIssuer } from "./smt-client";
 import { result, steps, type Step } from "./ui";
-import { createChallenge } from "./verifier-client";
-import type { RunInput, WorkerInMsg } from "./worker";
+import type { Challenge } from "./verifier-client";
+import type { ProveInput, WorkerInMsg } from "./worker";
 
 export interface CardContext {
   userCertDer: Uint8Array;
@@ -27,9 +26,8 @@ export interface CardContext {
   slotDescription?: string;
 }
 
-/** What `buildCardContext` returns — the pipeline context plus the humanised
- *  fields the setup screen needs for the panel display. Folding both into one
- *  call keeps the HiPKI round-trip count at one. */
+/** Pipeline context plus the humanised fields the setup panel displays.
+ *  Folded into one return so HiPKI is hit just once. */
 export interface DetectedCard {
   card: CardContext;
   subjectDN?: string;
@@ -40,9 +38,12 @@ export interface ProvingContext {
   card: CardContext;
   pin: Pin;
   nullifier: string;
-  /** Aborts in-flight network calls when the user navigates away from the
-   *  proving phase. The CPU/wasm work in the Worker is cancelled separately
-   *  by the caller (Worker terminate or `cancel` message). */
+  /** Pre-fetched by the Ready screen so the Start-proving click reaches
+   *  window.open with user-activation still live. An awaited fetch here
+   *  would consume activation and get the HiPKI popup blocked. */
+  challenge: Challenge;
+  /** Aborts in-flight network calls on phase exit. CPU/wasm work in the
+   *  Worker is cancelled separately by the caller. */
   signal?: AbortSignal;
 }
 
@@ -80,9 +81,8 @@ function checkAborted(signal: AbortSignal | undefined): void {
 }
 
 /** Step runner: set spinner → run body → mark done → surface errors through
- *  `fail`. Returning the body's value lets callers chain without the
- *  `let x: T; try { x = ... }; x!.foo` dance. AbortError / PipelineAborted
- *  bypass `fail` so cancellation doesn't paint a fake error in the UI. */
+ *  `fail`. AbortError / PipelineAborted bypass `fail` so cancellation doesn't
+ *  paint a fake error in the UI. */
 async function stage<T>(
   step: Step,
   run: () => Promise<T>,
@@ -99,26 +99,37 @@ async function stage<T>(
   }
 }
 
+/** Run the main-thread portion of the proving pipeline (challenge → sign →
+ *  smt → build) and hand off to the warm Worker. Returns once the `prove`
+ *  message is posted; per-step progress + terminal events flow back through
+ *  `progress.ts`. Caller owns Worker lifecycle. */
 export async function runProvingPipeline(
   worker: Worker,
   ctx: ProvingContext,
 ): Promise<void> {
-  const { signal } = ctx;
+  const { signal, challenge } = ctx;
 
-  const challenge = await stage(
-    "challenge",
-    () => createChallenge({ signal }),
-    (ch) => `id=${ch.id}`,
-  );
-  checkAborted(signal);
-  const tbs = hexToBytes(challenge.bytes);
+  // Pre-fetched by the Ready screen — paint the row as done immediately.
+  // There must be NO awaited work between here and the `signTbs` call
+  // below so the user-activation window from the Start-proving click is
+  // still live when `window.open` fires inside the popup bridge.
+  stepDone("challenge", `id=${challenge.challenge_id}`);
+  // Byte-for-byte parity with the native prover: `challenge_bytes` is an
+  // opaque string. HiPKI signs it as-is; the circuit consumes its UTF-8
+  // bytes. Do NOT hex-decode — the server can emit odd-length strings,
+  // and hex-decoding would diverge from the Rust CLI even on even-length
+  // inputs.
+  const tbs = challengeBytesToTbs(challenge.challenge_bytes);
 
-  // The HiPKI popup is user-driven and can't be cancelled mid-flight.
-  // We let the popup complete naturally and bail on the next abort check.
+  // The HiPKI popup is user-driven and can't be cancelled mid-flight; we
+  // let it complete naturally and bail on the next abort check.
   const userSignatureB64 = await stage("sign", async () => {
     const sig = await signTbs({
-      tbs: bytesToHex(tbs),
-      pin: ctx.pin.consume(),
+      tbs: challenge.challenge_bytes,
+      // `read()` — NOT `consume()` — because the session-locked Pin is
+      // reused across "Retry proving" / "Prove again". `setup-state.ts::
+      // resetSetup` calls `destroy()` on FSM reset → landing.
+      pin: ctx.pin.read(),
       slotDescription: ctx.card.slotDescription,
     });
     if (sig.ret_code !== 0 || sig.last_error !== 0) {
@@ -149,53 +160,15 @@ export async function runProvingPipeline(
   );
   checkAborted(signal);
 
-  // Hand off to Worker. Its Progress events drive the remaining steps
-  // (download/load/witness/prove/submit) via `progress.ts::applyProgress`.
-  // Worker cancellation is handled by the caller — terminating the worker
-  // or sending `{type: "cancel"}` is what stops the CPU/wasm work.
-  const input: RunInput = {
+  const input: ProveInput = {
     certJson,
     deviceJson,
     certKind: ctx.card.certKind,
-    challengeId: challenge.id,
+    challengeId: challenge.challenge_id,
     nullifier: ctx.nullifier,
   };
-  const msg: WorkerInMsg = { type: "run", input };
-  await waitForWorkerTerminal(worker, signal, () => worker.postMessage(msg));
-}
-
-/** Resolves on the next `done` or `error` Progress event the Worker posts.
- *  If the AbortSignal fires first, throws `PipelineAborted` so the caller
- *  swallows it without painting a duplicate FSM error. */
-function waitForWorkerTerminal(
-  worker: Worker,
-  signal: AbortSignal | undefined,
-  kickoff: () => void,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onMessage = (ev: MessageEvent) => {
-      const p = ev.data as { step: string };
-      if (p.step === "done" || p.step === "error") {
-        cleanup();
-        resolve();
-      }
-    };
-    const onAbort = () => {
-      cleanup();
-      reject(new PipelineAborted());
-    };
-    function cleanup(): void {
-      worker.removeEventListener("message", onMessage);
-      signal?.removeEventListener("abort", onAbort);
-    }
-    if (signal?.aborted) {
-      reject(new PipelineAborted());
-      return;
-    }
-    worker.addEventListener("message", onMessage);
-    signal?.addEventListener("abort", onAbort);
-    kickoff();
-  });
+  const msg: WorkerInMsg = { type: "prove", input };
+  worker.postMessage(msg);
 }
 
 /** Issuer DN → `g2` / `g3`. MOICA-G2 issues RSA-2048 certs, MOICA-G3 RSA-4096. */
@@ -204,12 +177,10 @@ function deriveIssuer(issuerDn: string | undefined): SmtIssuer {
   return /g3|4096|root\s*ca\s*g3/i.test(issuerDn) ? "g3" : "g2";
 }
 
-/** Fetch + parse the HiPKI pkcs11info response into a `CardContext` plus the
- *  humanised fields the setup panel shows. When `slotDescription` is
- *  supplied we require the response to contain that exact slot — anything
- *  else (silent scoping failure on an older LocalSignServer, race with a
- *  card pull) throws so the user doesn't end up signing with a different
- *  physical reader than the one they picked. */
+/** Fetch + parse the HiPKI pkcs11info response into a `CardContext`.
+ *  When `slotDescription` is supplied, require the response to contain
+ *  that exact slot so a silent scoping failure can't route the signature
+ *  to a different physical reader than the one the user picked. */
 export async function buildCardContext(
   slotDescription?: string,
 ): Promise<DetectedCard> {

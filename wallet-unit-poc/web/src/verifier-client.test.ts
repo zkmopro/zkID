@@ -10,8 +10,8 @@ describe("verifier-client", () => {
 
   it("POSTs /challenge and returns the parsed body", async () => {
     const payload = {
-      id: "abc",
-      bytes: "AAAA",
+      challenge_id: "abc",
+      challenge_bytes: "AAAA",
       expires_at: "2026-04-20T12:00:00Z",
     };
     const fetchSpy = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -32,6 +32,17 @@ describe("verifier-client", () => {
       async () => new Response("", { status: 503, statusText: "Unavailable" }),
     ) as typeof fetch;
     await expect(createChallenge()).rejects.toThrow(/503/);
+  });
+
+  it("throws when /challenge response is missing challenge_id or challenge_bytes", async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ id: "abc", bytes: "AA", expires_at: "x" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    ) as typeof fetch;
+    await expect(createChallenge()).rejects.toThrow(/unexpected response shape/);
   });
 
   it("base64-encodes proofs and POSTs to /link-verify", async () => {

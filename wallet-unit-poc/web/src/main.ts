@@ -1,21 +1,29 @@
-// Entry point. Boots the router, owns the Worker lifecycle, and bridges
-// `phase = "proving"` to the real HiPKI + SMT + wasm-input-builder pipeline.
+// Entry point. Boots the router, owns the Worker lifecycle, and drives the
+// phase-specific orchestration (warmup on setup, prove on proving, submit
+// on submitting, teardown on landing).
 //
-// Cancellation: each proving run owns an AbortController. Leaving the
-// `proving` phase aborts the controller (cancels in-flight network calls)
-// and terminates the Worker (stops CPU/wasm work mid-step), then a fresh
-// Worker is spawned for the next run. The replace-the-worker approach
-// avoids a runId-tagging dance in every Worker → main message and keeps
-// stale `done`/`error` events from racing a new run's UI.
+// Cancellation: each proving run owns an AbortController that is aborted on
+// any transition out of `proving`. Because `prove()` is blocking wasm, real
+// mid-flight cancellation terminates the Worker, which discards the warm PK
+// state — the user lands back on setup with the Assets panel showing
+// "not warmed" so they explicitly re-warm before retrying.
 
 import "./style.css";
-import { runProvingPipeline } from "./pipeline";
+import { $challenge, clearChallenge } from "./challenge-state";
+import { runProvingPipeline, PipelineAborted } from "./pipeline";
 import { applyProgress } from "./progress";
 import { mountRouter } from "./router";
-import { $hipki, $pin, resetSetup } from "./setup-state";
-import { dispatch, $state } from "./store";
+import {
+  $hipki,
+  $pin,
+  $warmup,
+  resetSetup,
+} from "./setup-state";
+import { dispatch, $state, type AppState } from "./store";
+type Phase = AppState["phase"];
 import { resetUi, result } from "./ui";
-import type { Progress } from "./worker";
+import { submitLinkVerify } from "./verifier-client";
+import type { Progress, WorkerInMsg } from "./worker";
 
 function boot(): void {
   const root = document.querySelector<HTMLElement>("#app");
@@ -25,8 +33,9 @@ function boot(): void {
 
   mountRouter(root);
 
-  let worker = spawnWorker();
+  let worker: Worker | null = null;
   let runController: AbortController | null = null;
+  let submitController: AbortController | null = null;
 
   function spawnWorker(): Worker {
     const w = new Worker(new URL("./worker.ts", import.meta.url), {
@@ -42,34 +51,46 @@ function boot(): void {
     return w;
   }
 
-  function cancelActiveRun(): void {
-    if (!runController) return;
-    runController.abort();
-    runController = null;
-    worker.terminate();
-    worker = spawnWorker();
+  function ensureWorker(): Worker {
+    if (!worker) worker = spawnWorker();
+    return worker;
   }
 
-  $state.listen(async (state) => {
-    // Any transition out of `proving` while a run is alive aborts it.
-    // This covers Retry (proving → error → reset → landing) as well as
-    // Back navigation in the proving screen once a Cancel button lands.
-    if (state.phase !== "proving") cancelActiveRun();
+  function terminateWorker(): void {
+    if (!worker) return;
+    // Drop handlers before terminate() so any already-queued messages can't
+    // reach the FSM after we've decided to tear the Worker down.
+    worker.onmessage = null;
+    worker.onerror = null;
+    worker.terminate();
+    worker = null;
+  }
 
-    if (state.phase === "landing") {
-      // Dropping setup state on return-to-landing ensures the next pass
-      // re-detects the card and re-verifies the PIN — we don't leak a stale
-      // `Pin` across sessions.
-      resetSetup();
-      return;
-    }
-    if (state.phase !== "proving") return;
+  function abortActiveRun(): void {
+    runController?.abort();
+    runController = null;
+  }
 
+  function killWorkerForCancel(): void {
+    // `prove()` is blocking wasm with no other interrupt — the only way to
+    // stop mid-proving is to terminate. Flip warmup back to idle so the
+    // Assets panel reflects that a fresh load is needed before the next run.
+    terminateWorker();
+    $warmup.set({ status: "idle" });
+  }
+
+  function cancelActiveSubmit(): void {
+    submitController?.abort();
+    submitController = null;
+  }
+
+  async function handleProvingPhase(): Promise<void> {
     resetUi();
     result.set({ kind: "running" });
 
     const hipkiState = $hipki.get();
     const pinState = $pin.get();
+    const challengeState = $challenge.get();
     if (hipkiState.status !== "card_ready") {
       dispatch({
         type: "pipeline_error",
@@ -86,22 +107,140 @@ function boot(): void {
       });
       return;
     }
+    if ($warmup.get().status !== "ready") {
+      dispatch({
+        type: "pipeline_error",
+        where: "setup",
+        message: "proving runtime not warmed",
+      });
+      return;
+    }
+    if (challengeState.status !== "ready") {
+      // Ready screen gates Start proving on a ready challenge; guard
+      // anyway because a late fetch here would consume user-activation
+      // and get the HiPKI popup blocked.
+      dispatch({
+        type: "pipeline_error",
+        where: "challenge",
+        message: "challenge not pre-fetched",
+      });
+      return;
+    }
 
     runController = new AbortController();
     const myController = runController;
     try {
-      await runProvingPipeline(worker, {
+      await runProvingPipeline(ensureWorker(), {
         card: hipkiState.card,
         pin: pinState.pin,
         nullifier: `zkid-${hipkiState.card.serialHex}`,
+        challenge: challengeState.challenge,
         signal: myController.signal,
       });
-    } catch {
-      // `runProvingPipeline` already dispatched `pipeline_error` on real
-      // failures and threw `PipelineAborted` on cancellation. Either way
-      // the listener doesn't need to surface a duplicate here.
+    } catch (err) {
+      if (err instanceof PipelineAborted) return;
+      // Throws inside `stage()` already dispatched `pipeline_error` via
+      // fail(). Any throw before the first stage (e.g., encoding the TBS,
+      // a missing Worker) would otherwise vanish — dispatch here so the
+      // user sees an error screen instead of an infinite spinner.
+      if ($state.get().phase === "proving") {
+        const message = err instanceof Error ? err.message : String(err);
+        dispatch({ type: "pipeline_error", where: "proving", message });
+      }
     } finally {
       if (runController === myController) runController = null;
+    }
+  }
+
+  async function handleSubmittingPhase(state: Extract<AppState, { phase: "submitting" }>): Promise<void> {
+    cancelActiveSubmit();
+    submitController = new AbortController();
+    const mine = submitController;
+    const t0 = performance.now();
+    try {
+      const res = await submitLinkVerify(
+        {
+          challengeId: state.run.challengeId,
+          certChainType: state.run.certChainType,
+          certChainProofBytes: state.run.certProofBytes,
+          deviceSigProofBytes: state.run.deviceProofBytes,
+          nullifier: state.run.nullifier,
+        },
+        { signal: mine.signal },
+      );
+      const submitMs = performance.now() - t0;
+      dispatch({
+        type: "submit_complete",
+        verified: res.verified,
+        submitMs,
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      const message = err instanceof Error ? err.message : String(err);
+      dispatch({ type: "pipeline_error", where: "submit", message });
+    } finally {
+      if (submitController === mine) submitController = null;
+    }
+  }
+
+  function triggerWarmupIfIdle(): void {
+    if ($warmup.get().status === "idle") {
+      const w = ensureWorker();
+      const msg: WorkerInMsg = { type: "warmup" };
+      w.postMessage(msg);
+    }
+  }
+
+  // The Assets panel flips `$warmup` back to `idle` on Retry/Re-download.
+  // Re-kick warmup here so the screen doesn't need direct Worker access.
+  $warmup.listen((warmup) => {
+    if (warmup.status !== "idle") return;
+    if ($state.get().phase !== "setup") return;
+    triggerWarmupIfIdle();
+  });
+
+  let prevPhase: Phase = $state.get().phase;
+  $state.listen(async (state) => {
+    const wasProving = prevPhase === "proving";
+    prevPhase = state.phase;
+
+    // Abort active controllers on any transition out of their phase.
+    if (state.phase !== "proving") abortActiveRun();
+    if (state.phase !== "submitting") cancelActiveSubmit();
+
+    switch (state.phase) {
+      case "landing":
+        // Full reset: drop setup atoms + pre-fetched challenge, terminate
+        // the Worker so next session starts fresh.
+        resetSetup();
+        clearChallenge();
+        terminateWorker();
+        $warmup.set({ status: "idle" });
+        return;
+      case "setup":
+        // Reaching setup from proving means the user cancelled mid-run.
+        // Kill the warm Worker and drop any stale challenge so the next
+        // Ready mount fetches a fresh one (single-use).
+        if (wasProving) killWorkerForCancel();
+        clearChallenge();
+        triggerWarmupIfIdle();
+        return;
+      case "ready":
+        return;
+      case "review":
+        // Challenge was consumed by this proving run (single-use); drop
+        // it so any later retry re-enters Ready and fetches a fresh one.
+        clearChallenge();
+        return;
+      case "proving":
+        await handleProvingPhase();
+        return;
+      case "submitting":
+        await handleSubmittingPhase(state);
+        return;
+      case "result":
+      case "error":
+        return;
     }
   });
 }

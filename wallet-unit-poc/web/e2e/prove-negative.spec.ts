@@ -1,6 +1,6 @@
-// Negative-path coverage for the proving flow. Each test installs a mock
-// shape that breaks one specific stage and asserts the UI surfaces the
-// failure cleanly (no infinite spinner, no swallowed error, Retry visible).
+// Negative-path coverage: each test installs a mock shape that breaks one
+// stage and asserts the UI surfaces the failure cleanly (no infinite
+// spinner, no swallowed error, a way back).
 
 import { test, expect } from "@playwright/test";
 import { installMockServices } from "./mock-services";
@@ -39,7 +39,7 @@ test("wrong PIN decrements the attempt counter and locks at zero", async ({
   await expect(page.getByTestId("pin-verify")).toBeDisabled();
 });
 
-test("verifier 500 surfaces the error and Retry stays available", async ({
+test("verifier 500 surfaces on submit and leaves Prove-again reachable", async ({
   page,
 }) => {
   await installMockServices(page, { linkVerifyStatus: 500 });
@@ -51,15 +51,25 @@ test("verifier 500 surfaces the error and Retry stays available", async ({
 
   await page.getByTestId("pin-input").fill("123456");
   await page.getByTestId("pin-verify").click();
-  await expect(page.getByTestId("pin-body")).toContainText(/Ready to prove/, {
+  await expect(page.getByTestId("pin-body")).toContainText(/Locked/, {
     timeout: 10_000,
   });
   await expect(page.getByTestId("continue-button")).toBeEnabled({
-    timeout: 60_000,
+    timeout: 120_000,
   });
   await page.getByTestId("continue-button").click();
+  await page.getByTestId("start-proving").click();
 
-  // Verifier 500 surfaces in either a step-error row or the result banner.
-  await page.getByTestId("step-error").waitFor({ timeout: 120_000 });
-  await expect(page.getByTestId("retry-button")).toBeVisible();
+  // Proofs generate fine; the 500 hits when the user clicks Send.
+  await expect(page.getByTestId("review-send")).toBeVisible({
+    timeout: 10 * 60_000,
+  });
+  await page.getByTestId("review-send").click();
+
+  // Submit failure routes to the error screen; Prove again / Home
+  // buttons are visible so the user is never stuck.
+  await expect(page.getByTestId("result-error")).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByTestId("result-prove-again")).toBeVisible();
 });

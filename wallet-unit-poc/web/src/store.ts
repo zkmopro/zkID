@@ -1,22 +1,49 @@
 // App-level finite state machine.
 //
-// The router subscribes to `$state.phase` and mounts the matching screen.
-// Per-step progress atoms still live in `ui.ts`; this store owns only the
-// phase transitions that decide which screen is visible.
+// Flow: landing → setup → ready → proving → review → submitting → result.
+// Each arrow is driven by an explicit user action. This store owns phase
+// transitions and the transient ProvingRun blob that carries proof bytes
+// from `proving` through `review` / `submitting`. Per-step progress atoms
+// live in `ui.ts`.
 
 import { atom, type WritableAtom } from "nanostores";
+
+import type { CircuitKind } from "./manifest";
+
+export interface ProvingRun {
+  challengeId: string;
+  certChainType: "rs2048" | "rs4096";
+  certProofBytes: Uint8Array;
+  deviceProofBytes: Uint8Array;
+  nullifier: string;
+  certKind: CircuitKind;
+  provingMs: number;
+}
 
 export type AppState =
   | { phase: "landing" }
   | { phase: "setup" }
-  | { phase: "proving" }
-  | { phase: "result"; verified: boolean; durationMs: number }
+  | { phase: "ready" }
+  | { phase: "proving"; startedAt: number }
+  | { phase: "review"; run: ProvingRun }
+  | { phase: "submitting"; run: ProvingRun; startedAt: number }
+  | {
+      phase: "result";
+      verified: boolean;
+      provingMs: number;
+      submitMs: number;
+    }
   | { phase: "error"; where: string; message: string };
 
 export type AppEvent =
   | { type: "start" }
-  | { type: "continue" }
-  | { type: "proving_done"; verified: boolean; durationMs: number }
+  | { type: "setup_complete" }
+  | { type: "start_proving" }
+  | { type: "proving_complete"; run: ProvingRun }
+  | { type: "send_proof" }
+  | { type: "submit_complete"; verified: boolean; submitMs: number }
+  | { type: "retry_proving" }
+  | { type: "reset_to_setup" }
   | { type: "pipeline_error"; where: string; message: string }
   | { type: "reset" };
 
@@ -25,23 +52,65 @@ export function transition(state: AppState, event: AppEvent): AppState {
   switch (event.type) {
     case "start":
       return state.phase === "landing" ? { phase: "setup" } : state;
-    case "continue":
-      return state.phase === "setup" ? { phase: "proving" } : state;
-    case "proving_done":
+    case "setup_complete":
+      return state.phase === "setup" ? { phase: "ready" } : state;
+    case "start_proving":
+      return state.phase === "ready"
+        ? { phase: "proving", startedAt: performance.now() }
+        : state;
+    case "proving_complete":
       return state.phase === "proving"
+        ? { phase: "review", run: event.run }
+        : state;
+    case "send_proof":
+      return state.phase === "review"
+        ? {
+            phase: "submitting",
+            run: state.run,
+            startedAt: performance.now(),
+          }
+        : state;
+    case "submit_complete":
+      return state.phase === "submitting"
         ? {
             phase: "result",
             verified: event.verified,
-            durationMs: event.durationMs,
+            provingMs: state.run.provingMs,
+            submitMs: event.submitMs,
           }
         : state;
-    case "pipeline_error":
-      // setup-origin errors (fixture load, HiPKI detect) surface through the
-      // same terminal path as proving-origin errors; Phase 4 adds setup-phase
-      // producers.
-      return state.phase === "proving" || state.phase === "setup"
-        ? { phase: "error", where: event.where, message: event.message }
+    case "retry_proving":
+      // From review, discard the ProvingRun; from result, the card + PIN +
+      // warm runtime are still valid. Either way, go to ready — no setup
+      // work is redone.
+      return state.phase === "review" || state.phase === "result"
+        ? { phase: "ready" }
         : state;
+    case "reset_to_setup":
+      // "Back to setup" from ready/review and "Cancel" from proving. Setup
+      // atoms ($hipki/$pin) are preserved; resetSetup() only fires on
+      // reset → landing.
+      switch (state.phase) {
+        case "ready":
+        case "review":
+        case "proving":
+          return { phase: "setup" };
+        default:
+          return state;
+      }
+    case "pipeline_error":
+      // Only route errors from active phases. Landing / result / error
+      // are terminal — errors from those states are ignored.
+      switch (state.phase) {
+        case "setup":
+        case "ready":
+        case "proving":
+        case "review":
+        case "submitting":
+          return { phase: "error", where: event.where, message: event.message };
+        default:
+          return state;
+      }
     case "reset":
       return { phase: "landing" };
   }

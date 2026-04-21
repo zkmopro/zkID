@@ -1,16 +1,13 @@
-// Playwright mocks for every external service the Phase 4 pipeline hits.
+// Playwright mocks for every external service the pipeline hits.
 //
-// HiPKI uses LocalSignServer's popupForm postMessage bridge (see
-// `src/hipki-popup.ts`) so its XHRs are issued from the popup window itself,
-// out of reach of `page.route()`. The popup module exposes a test-mode
-// override via `globalThis.__HIPKI_TEST_HANDLER__`; we inject ours via
-// `addInitScript` before any app code runs.
+// HiPKI XHRs come from the popupForm postMessage bridge popup window, out
+// of reach of `page.route()`. The popup module exposes a test override via
+// `globalThis.__HIPKI_TEST_HANDLER__`; we inject it through `addInitScript`
+// before any app code runs. Verifier and SMT mocks stay on `page.route()`
+// since those calls are issued from the app origin.
 //
-// The verifier and SMT mocks stay on `page.route()` because those calls
-// are issued from the app origin.
-//
-// The cert fixtures re-use `ecdsa-spartan2/tests/testdata/*.json` so schema
-// drift between the Rust and TS sides surfaces in e2e too.
+// Cert fixtures re-use `ecdsa-spartan2/tests/testdata/*.json` so Rust/TS
+// schema drift surfaces in e2e too.
 
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
@@ -54,8 +51,8 @@ export async function installMockServices(
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        id: "e2e-challenge-0001",
-        bytes: "deadbeef",
+        challenge_id: "e2e-challenge-0001",
+        challenge_bytes: "deadbeef",
         expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
       }),
     });
@@ -114,9 +111,9 @@ interface PopupHandlerOpts {
   signRejectsPin: boolean;
 }
 
-/** Install a popup test-handler before app boot. The handler runs inside the
- *  page context so it has to be self-contained — no closures over Node-side
- *  state. We pass the fixture text as JSON-serialisable args. */
+/** Install the popup test handler before app boot. The handler runs in
+ *  page context and must be self-contained — pass fixture text as
+ *  JSON-serialisable args rather than closing over Node state. */
 async function installHipkiPopupHandler(
   page: Page,
   opts: PopupHandlerOpts,

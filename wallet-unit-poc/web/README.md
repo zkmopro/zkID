@@ -2,9 +2,39 @@
 
 Vite + TypeScript app that runs cert-chain + device-sig Spartan2 proving fully
 in the browser using [`../spartan2-wasm`](../spartan2-wasm). Verification is
-**server-side** via [`go-zkid-verifier`](https://github.com/zkmopro/go-zkid-verifier/pull/8)
+**server-side** via [`go-zkid-verifier`](https://github.com/zkmopro/go-zkid-verifier)
 (the app POSTs the two proofs to `POST /link-verify`). A dedicated Web Worker
-drives the pipeline; the main thread renders a seven-step progress list.
+handles the heavy wasm work; the main thread orchestrates the user-gated
+checkpoint flow.
+
+## Flow
+
+Six screens, each gated by an explicit user action:
+
+```
+landing → setup → ready → proving → review → submitting → result
+  │        │       │        │         │         │           │
+Start    Continue  Start    (auto)    Send     (auto)      Prove again
+         to prov  proving           proof                  / Home
+```
+
+- **Setup** has three panels (proving runtime download + wasm/thread-pool
+  warmup, HiPKI card detect + read, PIN verify with 3-attempt lockout).
+  The **Continue to proving** button is disabled until all three are green.
+- **Ready** is a confirmation gate — user reviews the card + runtime state
+  before the proving run begins (which will open a HiPKI popup to sign a
+  fresh challenge).
+- **Proving** runs 6 steps: fetch challenge → sign with card → fetch
+  revocation proof → build inputs → prove cert-chain → prove device-sig.
+  Per-step durations appear as each step completes. Cancel returns the
+  user to setup.
+- **Review** shows proof sizes + nullifier + proving time. Proofs live
+  only in memory at this point — nothing has been sent to the verifier.
+  **Send proof to verifier** submits; **Retry proving** discards and
+  fetches a fresh challenge.
+- **Submitting** is a single-spinner screen for the `/link-verify` POST.
+- **Result** shows verified/not-verified with both timings. **Prove again**
+  returns to ready and reuses the warm runtime + card + PIN.
 
 ## Quickstart
 
@@ -22,10 +52,10 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Open `http://localhost:5173` and click **Prove**. The first run downloads the
-proving keys + witness-gen WASMs from the GitHub Release (proxied through the
-Vite dev server to work around CORS) and caches them locally; subsequent runs
-skip the download.
+Open `http://localhost:5173` and click **Start**. On first entry to the setup
+screen, the Worker downloads the proving keys + witness-gen WASMs from the
+GitHub Release (proxied through the Vite dev server to work around CORS) and
+caches them locally; subsequent runs skip the download.
 
 ## Architecture
 
@@ -39,34 +69,46 @@ skip the download.
 | `src/hipki-client.ts`    | `GET /pkcs11info` + `POST /sign` against the user's HiPKI LocalSignServer      |
 | `src/smt-client.ts`      | `GET /proof/{issuer}/{serial}` against moica-revocation-smt → circuit inputs   |
 | `src/inputs.ts`          | Wraps wasm `build_split_inputs` → `{ certJson, deviceJson }`                   |
-| `src/pipeline.ts`        | Main-thread orchestrator: challenge → sign → SMT → build → Worker.postMessage  |
+| `src/pipeline.ts`        | Main-thread pipeline: challenge → sign → SMT → build → postMessage to Worker   |
 | `src/pin.ts`             | Single-use PIN wrapper; redacts on every observable surface                    |
-| `src/worker.ts`          | CPU/wasm-bound steps: preflight/download/load/witness/prove/submit             |
-| `src/store.ts`           | Discriminated-union `AppState` + `transition` reducer (landing/setup/proving)  |
+| `src/worker.ts`          | Two Worker modes: `warmup` (download + load PKs) and `prove` (witness + prove) |
+| `src/store.ts`           | Discriminated-union `AppState` + `transition` reducer + `ProvingRun` type      |
 | `src/router.ts`          | Subscribes to `$state.phase` and swaps the mounted screen                      |
-| `src/screens/*.ts`       | Landing / setup / proving screen mounts                                        |
-| `src/setup-state.ts`     | `$hipki` + `$pin` atoms holding polling probe + verified PIN                   |
-| `src/ui.ts`              | nanostores atoms + DOM paint for the step list                                 |
-| `src/main.ts`            | Entry point: mount router, spawn Worker, bridge `phase = proving` to pipeline  |
+| `src/screens/*.ts`       | Landing / setup / ready / proving / review / submitting / result mounts        |
+| `src/setup-state.ts`     | `$hipki`, `$pin`, `$warmup` atoms + derived `$setupReady`                      |
+| `src/ui.ts`              | 6-step atoms + DOM paint for the proving screen with per-step durations        |
+| `src/main.ts`            | Entry point: owns Worker lifecycle, drives warmup/prove/submit per phase       |
 
 Pipeline (mirrors `src/ui.ts::Step`):
 
 ```
-preflight → challenge → sign → smt → build → download → load → witness → prove → submit → done
-                                                                                           \\
-                                                                                            error (at whichever step failed)
+challenge → sign → smt → build → prove_cert → prove_device → proving_complete
+                                                                │
+                                                                ▼
+                                                    review → send → submitting → result
+                                                             │
+                                                     error (at whichever step failed)
 ```
 
 Main thread owns the network + HiPKI + input-build steps; the Worker owns
-the CPU/wasm-bound ones. `preflight` initialises the WASM module + rayon
-thread pool. `challenge` fetches server challenge bytes. `sign` asks HiPKI
-to sign those bytes with the user's card. `smt` fetches the non-membership
-proof. `build` calls wasm `build_split_inputs` to produce cert-chain +
-device-sig JSON (byte-identical to the Rust CLI — drift-tested in CI).
-`download` pulls proving keys + witness WASMs. `load` deserializes each
-PK into the WASM prover state. `witness` generates the `.wtns` via
-circom's JS calculator. `prove` runs Spartan2. `submit` POSTs both proofs
-to `POST /link-verify` and surfaces the server's `verified` boolean.
+the CPU/wasm-bound ones. The Worker has **two modes**:
+
+- **`warmup`** runs once during setup (kicked by `main.ts` on entry to the
+  setup phase). It initializes the wasm module, starts the rayon thread
+  pool, hydrates the circuit manifest, downloads every proving key +
+  witness wasm, and calls `load_pk` to park each PK in the per-kind static
+  Mutex slot. Witness-wasm bytes are cached on the Worker so the prove
+  mode can skip another OPFS round-trip.
+- **`prove`** runs on `start_proving`, takes the pre-built JSON inputs plus
+  the cert-chain kind, and runs witness+prove for each circuit. The
+  terminal event `proving_complete` carries the two proof byte-blobs back
+  to the main thread; `main.ts` parks them in the `review` phase's
+  `ProvingRun` payload until the user clicks Send.
+
+Submission (`POST /link-verify`) runs on the main thread so the user can
+explicitly gate it from the Review screen. Verification itself is
+server-side — the wasm crate's `verify` / `link_verify` are drift-test
+only and never called here.
 
 ## Asset sources
 

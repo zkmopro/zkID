@@ -14,3 +14,8 @@ export function humanBytes(
   }
   return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[i]}`;
 }
+
+export function formatDuration(ms: number): string {
+  if (ms < 1_000) return `${ms.toFixed(0)} ms`;
+  return `${(ms / 1_000).toFixed(1)} s`;
+}

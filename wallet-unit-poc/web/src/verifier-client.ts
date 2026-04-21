@@ -1,12 +1,15 @@
-// Client for github.com/zkmopro/go-zkid-verifier REST API.
-// API shape sourced from go-zkid-verifier PR #8 (challenge/handler.go):
-//   POST /challenge                           → { id, bytes, expires_at }
-//   POST /link-verify  (2 MB body limit)      → { verified, nullifier, id_verified?, persisted? }
-//   POST /verify-tbs   (legacy, not used here)
+// Client for the go-zkid-verifier REST API.
 //
-// The 2 MB body limit matters: base64 inflates payloads ~33%, so the raw proof
-// cap before encoding is ~1.5 MB. We set a conservative per-proof raw cap of
-// 700 KB that surfaces a clean error instead of letting the server 413.
+// Wire shape (snake_case, byte-for-byte with the native Rust client):
+//   POST /challenge    → { challenge_id, challenge_bytes, expires_at }
+//   POST /link-verify  → { verified, nullifier, id_verified?, persisted? }
+//
+// Keeping the server's exact field names on the interface avoids a remap
+// layer where a TS-side rename would silently cast to `undefined` at
+// runtime — the `createChallenge` shape guard enforces this invariant.
+//
+// The verifier has a 2 MB body limit; base64 inflates ~33%, so we cap
+// each raw proof at 700 KB to surface a clean error before the server 413s.
 
 import { composeSignal, parsePositiveInt } from "./abort-utils";
 
@@ -16,8 +19,8 @@ const VERIFIER_BASE =
 const MAX_RAW_PROOF_BYTES = 700 * 1024;
 
 export interface Challenge {
-  id: string;
-  bytes: string;
+  challenge_id: string;
+  challenge_bytes: string;
   expires_at: string;
 }
 
@@ -60,7 +63,19 @@ export async function createChallenge(
   if (!r.ok) {
     throw new Error(`POST /challenge returned ${r.status} ${r.statusText}`);
   }
-  return (await r.json()) as Challenge;
+  const body = (await r.json()) as Partial<Challenge>;
+  // Runtime shape guard. The `as Challenge` cast alone is unsound — if the
+  // server ever changes field names, downstream code would read `undefined`
+  // and break silently. Fail fast here instead.
+  if (
+    typeof body?.challenge_id !== "string" ||
+    typeof body?.challenge_bytes !== "string"
+  ) {
+    throw new Error(
+      `POST /challenge: unexpected response shape (got keys: ${Object.keys(body ?? {}).join(", ") || "none"})`,
+    );
+  }
+  return body as Challenge;
 }
 
 export async function submitLinkVerify(

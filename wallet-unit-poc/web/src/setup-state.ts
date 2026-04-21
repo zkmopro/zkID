@@ -1,16 +1,12 @@
-// Setup-screen state. Lives outside the FSM store's phase union because
-// these values survive Retry: after proving, we want to re-prove without
-// re-detecting the card or re-typing the PIN.
+// Setup-screen state. Lives outside the FSM phase union so it survives
+// Retry — after proving, the user can re-prove without re-detecting the
+// card or re-typing the PIN.
 //
-// Two-step HiPKI flow (mirrors selfTest.htm):
-//   1. user clicks "Detect readers" → popup runs `CheckEnvir` → we get
-//      back a slot list with optional `token` per slot. UI flips to
-//      `readers_listed` and renders a picker.
-//   2. user picks a slot + clicks "Read card" → popup runs `GetUserCert`
-//      scoped to that `slotDescription` → we parse the cert into a
-//      CardContext. UI flips to `card_ready` which unlocks PIN entry.
+// HiPKI is a two-step click flow: `Detect readers` (CheckEnvir) lists
+// slots; the user picks one and clicks `Read card` (GetUserCert scoped
+// to that slot) to parse the cert and unlock PIN entry.
 
-import { atom, type WritableAtom } from "nanostores";
+import { atom, computed, type ReadableAtom, type WritableAtom } from "nanostores";
 
 import type { CardContext } from "./pipeline";
 import type { Pin } from "./pin";
@@ -57,18 +53,45 @@ export type PinState =
       attemptsRemaining: number;
     };
 
+/** Worker warmup status. Drives the Assets panel and contributes to
+ *  `$setupReady`. */
+export type WarmupState =
+  | { status: "idle" }
+  | { status: "running"; sublabel: string; bytesDone?: number; bytesTotal?: number }
+  | { status: "ready" }
+  | { status: "error"; message: string };
+
 export const $hipki: WritableAtom<HipkiState> = atom<HipkiState>({
   status: "probing",
 });
 export const $pin: WritableAtom<PinState> = atom<PinState>({
   status: "pending",
 });
+export const $warmup: WritableAtom<WarmupState> = atom<WarmupState>({
+  status: "idle",
+});
 
-/** Reset both atoms. Called on FSM `reset`. Does NOT clear the underlying
- *  `Pin` value since its own `consume()` is the authoritative sink. */
+/** Derived: true when all three setup panels are green. Gates Continue. */
+export const $setupReady: ReadableAtom<boolean> = computed(
+  [$warmup, $hipki, $pin],
+  (warmup, hipki, pin) =>
+    warmup.status === "ready" &&
+    hipki.status === "card_ready" &&
+    pin.status === "locked",
+);
+
+/** Reset every setup atom. Called on FSM `reset` → landing. Explicitly
+ *  destroys the stored Pin so its internal slot is nulled before the atom
+ *  drops the reference — the GC timing shouldn't be what makes the secret
+ *  unreachable. */
 export function resetSetup(): void {
+  const pinNow = $pin.get();
+  if (pinNow.status === "locked") {
+    pinNow.pin.destroy();
+  }
   $hipki.set({ status: "probing" });
   $pin.set({ status: "pending" });
+  $warmup.set({ status: "idle" });
 }
 
 /** Single source of truth for "card is parsed and ready for PIN entry". */
@@ -81,7 +104,10 @@ export function isCardReady(): boolean {
  *  no longer has selected. */
 export function dropStalePin(): void {
   const pinNow = $pin.get();
-  if (pinNow.status === "locked" || pinNow.status === "verifying") {
+  if (pinNow.status === "locked") {
+    pinNow.pin.destroy();
+    $pin.set({ status: "pending" });
+  } else if (pinNow.status === "verifying") {
     $pin.set({ status: "pending" });
   }
 }

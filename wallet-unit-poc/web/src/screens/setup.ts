@@ -1,16 +1,7 @@
-// Setup screen: three click-driven panels gate Continue.
-//
-// Two-step HiPKI flow mirrors selfTest.htm:
-//   1. "Detect readers" → popup CheckEnvir → enumerate slots → render
-//      picker. User sees one row per reader with the card serial if
-//      inserted, or a "no card" hint.
-//   2. "Read card" (after picking a slot) → popup GetUserCert scoped to
-//      that slotDescription → parse cert into CardContext → unlock PIN.
-//
-// Each step is one popup, one response, popup self-closes. Popup needs
-// a user gesture so we never auto-trigger.
+// Setup screen: three click-driven panels (Assets warmup, HiPKI card,
+// PIN verify) gate Continue via `$setupReady`. PIN is single-use and
+// locks after 3 wrong attempts (the card itself locks in hardware).
 
-import { ensureAsset } from "../asset-download";
 import { bytesToHex } from "../bytes";
 import { escapeAttr, escapeText } from "../dom-utils";
 import { humanBytes } from "../format";
@@ -19,17 +10,19 @@ import {
   signTbs,
   type Pkcs11InfoResponse,
 } from "../hipki-client";
-import { CIRCUITS } from "../manifest";
 import { Pin } from "../pin";
 import { buildCardContext } from "../pipeline";
 import {
   $hipki,
   $pin,
+  $setupReady,
+  $warmup,
   dropStalePin,
   isCardReady,
   type HipkiState,
   type PinState,
   type ReaderSlot,
+  type WarmupState,
 } from "../setup-state";
 import { dispatch } from "../store";
 
@@ -41,15 +34,8 @@ const PIN_TEST_TBS_HEX = bytesToHex(
   new TextEncoder().encode("zkID-pin-test"),
 );
 
-type AssetsState =
-  | { status: "pending" }
-  | { status: "downloading"; label: string; bytesDone: number; bytesTotal: number }
-  | { status: "ok" }
-  | { status: "error"; message: string };
-
-/** Attempts remaining for the next verify call. `error` carries the residual
- *  count from the last failure; everything else means we haven't burned an
- *  attempt yet, so the budget resets to the full `MAX_PIN_ATTEMPTS`. */
+/** Attempts remaining for the next verify call. Only `error` carries a
+ *  residual count; every other status resets to `MAX_PIN_ATTEMPTS`. */
 function attemptsRemainingFrom(state: PinState): number {
   return state.status === "error" ? state.attemptsRemaining : MAX_PIN_ATTEMPTS;
 }
@@ -71,11 +57,11 @@ export function mountSetup(root: HTMLElement): () => void {
       </p>
       <div class="setup-panels">
         <div class="setup-panel" data-testid="setup-assets">
-          <div class="panel-title">Proving artifacts</div>
-          <div class="panel-body" data-testid="assets-body">Ready to download.</div>
+          <div class="panel-title">Proving runtime</div>
+          <div class="panel-body" data-testid="assets-body">Preparing proving runtime…</div>
           <div class="panel-actions">
-            <button class="secondary-button" data-testid="assets-retry" type="button">
-              Download
+            <button class="secondary-button" data-testid="assets-retry" type="button" hidden>
+              Retry
             </button>
           </div>
         </div>
@@ -96,7 +82,7 @@ export function mountSetup(root: HTMLElement): () => void {
         <div class="setup-panel" data-testid="setup-pin">
           <div class="panel-title">PIN verification</div>
           <div class="panel-warning" data-testid="pin-warning">
-            Wrong PIN three times will lock your Taiwan Citizen Card.
+            You have 3 attempts. A third wrong PIN will lock your Taiwan Citizen Card and require an in-person unlock at a HiPKI kiosk.
           </div>
           <div class="panel-body" data-testid="pin-body">Detect and read your card first.</div>
           <div class="panel-actions">
@@ -115,6 +101,9 @@ export function mountSetup(root: HTMLElement): () => void {
             <button class="secondary-button" data-testid="pin-verify" type="button" disabled>
               Verify PIN
             </button>
+            <span class="pin-lock-badge" data-testid="pin-lock-badge" hidden>
+              Locked for this session
+            </span>
           </div>
         </div>
       </div>
@@ -123,7 +112,7 @@ export function mountSetup(root: HTMLElement): () => void {
           Back
         </button>
         <button class="primary-button" data-testid="continue-button" type="button" disabled>
-          Continue
+          Continue to proving
         </button>
       </div>
     </section>
@@ -131,6 +120,7 @@ export function mountSetup(root: HTMLElement): () => void {
 
   const assetsBody = root.querySelector<HTMLElement>('[data-testid="assets-body"]')!;
   const assetsRetry = root.querySelector<HTMLButtonElement>('[data-testid="assets-retry"]')!;
+  const assetsPanel = root.querySelector<HTMLElement>('[data-testid="setup-assets"]')!;
   const hipkiBody = root.querySelector<HTMLElement>('[data-testid="hipki-body"]')!;
   const hipkiDetail = root.querySelector<HTMLElement>('[data-testid="hipki-detail"]')!;
   const readersEl = root.querySelector<HTMLElement>('[data-testid="hipki-readers"]')!;
@@ -140,42 +130,47 @@ export function mountSetup(root: HTMLElement): () => void {
   const pinBody = root.querySelector<HTMLElement>('[data-testid="pin-body"]')!;
   const pinInput = root.querySelector<HTMLInputElement>('[data-testid="pin-input"]')!;
   const pinVerify = root.querySelector<HTMLButtonElement>('[data-testid="pin-verify"]')!;
+  const pinLockBadge = root.querySelector<HTMLElement>('[data-testid="pin-lock-badge"]')!;
   const pinPanel = root.querySelector<HTMLElement>('[data-testid="setup-pin"]')!;
   const backBtn = root.querySelector<HTMLButtonElement>('[data-testid="back-button"]')!;
   const continueBtn = root.querySelector<HTMLButtonElement>('[data-testid="continue-button"]')!;
 
-  let assets: AssetsState = { status: "pending" };
-
   // --- Painters -------------------------------------------------------
 
-  function paintAssets(): void {
-    switch (assets.status) {
-      case "pending":
-        assetsBody.textContent = "Ready to download.";
-        assetsRetry.textContent = "Download";
-        assetsRetry.disabled = false;
+  function paintWarmup(state: WarmupState): void {
+    assetsPanel.classList.remove("setup-panel-ok");
+    switch (state.status) {
+      case "idle":
+        assetsBody.textContent = "Preparing proving runtime…";
+        assetsRetry.hidden = true;
         break;
-      case "downloading":
-        assetsBody.textContent = `${assets.label} — ${humanBytes(assets.bytesDone, "0 B")} / ${humanBytes(assets.bytesTotal, "0 B")}`;
-        assetsRetry.disabled = true;
+      case "running": {
+        const bytes =
+          state.bytesDone && state.bytesTotal
+            ? ` — ${humanBytes(state.bytesDone, "0 B")} / ${humanBytes(state.bytesTotal, "0 B")}`
+            : "";
+        assetsBody.textContent = `${state.sublabel}${bytes}`;
+        assetsRetry.hidden = true;
         break;
-      case "ok":
-        assetsBody.textContent = "Cached. Ready to prove.";
+      }
+      case "ready":
+        assetsBody.textContent = "Proving runtime ready.";
+        assetsPanel.classList.add("setup-panel-ok");
+        assetsRetry.hidden = false;
         assetsRetry.textContent = "Re-download";
         assetsRetry.disabled = false;
         break;
       case "error":
-        assetsBody.textContent = `Error: ${assets.message}`;
+        assetsBody.textContent = `Error: ${state.message}`;
+        assetsRetry.hidden = false;
         assetsRetry.textContent = "Retry";
         assetsRetry.disabled = false;
         break;
     }
-    refreshContinue();
   }
 
-  // Cache of the slot list last rendered so we can rebuild the DOM only
-  // when the slot set itself changes, not on every selection change.
-  // Rebuilding on selection would destroy focus and drop in-flight clicks
+  // Rebuild reader rows only when the slot *set* changes, not on selection
+  // changes — a full rebuild would destroy focus and drop in-flight clicks
   // on adjacent rows.
   let renderedSlotsKey: string | null = null;
 
@@ -220,8 +215,7 @@ export function mountSetup(root: HTMLElement): () => void {
         });
       });
     }
-    // Sync `checked` without touching the rest of the DOM so focus and any
-    // mid-flight click on a different row are preserved.
+    // Sync `checked` only — preserves focus and any mid-flight click.
     readersEl.querySelectorAll<HTMLInputElement>('input[type="radio"]').forEach((el) => {
       el.checked = el.value === selected;
     });
@@ -298,17 +292,15 @@ export function mountSetup(root: HTMLElement): () => void {
         break;
     }
     refreshPinControls();
-    refreshContinue();
   }
 
   function paintPin(state: PinState): void {
-    // Reset modifier classes; each branch sets the one it needs.
     pinPanel.classList.remove("setup-panel-ok");
     pinBody.classList.remove("pin-body-ok", "pin-body-error");
-    // The lock-warning is only relevant before success — hide it once
-    // verified so the user gets a clean "ready" surface, not a red hint
-    // that suggests their correct PIN was risky.
+    // Hide the 3-attempt lock-warning once verified so the ready surface
+    // doesn't suggest the correct PIN was risky.
     pinWarning.hidden = state.status === "locked";
+    pinLockBadge.hidden = state.status !== "locked";
 
     switch (state.status) {
       case "pending":
@@ -320,7 +312,7 @@ export function mountSetup(root: HTMLElement): () => void {
         pinBody.textContent = "Verifying via HiPKI popup…";
         break;
       case "locked":
-        pinBody.textContent = "PIN verified. Ready to prove.";
+        pinBody.textContent = "PIN verified. Locked for this session.";
         pinBody.classList.add("pin-body-ok");
         pinPanel.classList.add("setup-panel-ok");
         pinInput.value = "";
@@ -336,7 +328,6 @@ export function mountSetup(root: HTMLElement): () => void {
         break;
     }
     refreshPinControls();
-    refreshContinue();
   }
 
   function refreshPinControls(): void {
@@ -347,51 +338,21 @@ export function mountSetup(root: HTMLElement): () => void {
     const remaining = attemptsRemainingFrom(pinNow);
     const lockedOut = remaining <= 0 && !locked;
     pinInput.disabled = !ready || locked || verifying || lockedOut;
+    pinInput.readOnly = locked;
     const shortPin = pinInput.value.length < 6;
     pinVerify.disabled = !ready || locked || verifying || lockedOut || shortPin;
+    pinVerify.hidden = locked;
   }
 
-  function refreshContinue(): void {
-    const pinNow = $pin.get();
-    continueBtn.disabled = !(
-      assets.status === "ok" &&
-      isCardReady() &&
-      pinNow.status === "locked"
-    );
+  function refreshContinue(ready: boolean): void {
+    continueBtn.disabled = !ready;
   }
 
-  // --- Asset download -------------------------------------------------
+  // --- Warmup retry ---------------------------------------------------
 
-  async function downloadAssets(): Promise<void> {
-    assets = { status: "downloading", label: "starting", bytesDone: 0, bytesTotal: 0 };
-    paintAssets();
-    try {
-      for (const key of Object.keys(CIRCUITS) as Array<keyof typeof CIRCUITS>) {
-        const m = CIRCUITS[key];
-        await ensureAsset(m.pkUrl, `${key}_pk`, m.expected.pk, (p) => {
-          assets = {
-            status: "downloading",
-            label: `${key} pk`,
-            bytesDone: p.bytesDone ?? 0,
-            bytesTotal: p.bytesTotal ?? 0,
-          };
-          paintAssets();
-        });
-        await ensureAsset(m.witnessWasmUrl, `${key}_wgen`, m.expected.witnessWasm, (p) => {
-          assets = {
-            status: "downloading",
-            label: `${key} witness-wasm`,
-            bytesDone: p.bytesDone ?? 0,
-            bytesTotal: p.bytesTotal ?? 0,
-          };
-          paintAssets();
-        });
-      }
-      assets = { status: "ok" };
-    } catch (err) {
-      assets = { status: "error", message: err instanceof Error ? err.message : String(err) };
-    }
-    paintAssets();
+  function retryWarmup(): void {
+    // main.ts listens for idle warmup during the setup phase and re-kicks.
+    $warmup.set({ status: "idle" });
   }
 
   // --- HiPKI two-step ------------------------------------------------
@@ -402,7 +363,6 @@ export function mountSetup(root: HTMLElement): () => void {
     try {
       const resp = await probePkcs11Info();
       const slots = summariseSlots(resp);
-      // Default selection: first slot with a card; otherwise first slot.
       const defaultSelect =
         slots.find((s) => s.cardSN)?.slotDescription ?? slots[0]?.slotDescription;
       $hipki.set({
@@ -488,14 +448,14 @@ export function mountSetup(root: HTMLElement): () => void {
 
   // --- Handlers + subscriptions ---------------------------------------
 
-  const onAssetsRetry = () => void downloadAssets();
+  const onAssetsRetry = () => retryWarmup();
   const onDetect = () => void detectReaders();
   const onRead = () => void readSelectedCard();
   const onPinVerify = () => void verifyPin();
   const onPinInput = () => refreshPinControls();
   const onContinue = () => {
     if (continueBtn.disabled) return;
-    dispatch({ type: "continue" });
+    dispatch({ type: "setup_complete" });
   };
   const onBack = () => dispatch({ type: "reset" });
 
@@ -507,14 +467,15 @@ export function mountSetup(root: HTMLElement): () => void {
   continueBtn.addEventListener("click", onContinue);
   backBtn.addEventListener("click", onBack);
 
+  const unsubWarmup = $warmup.listen((state) => paintWarmup(state));
   const unsubHipki = $hipki.listen((state) => paintHipki(state));
   const unsubPin = $pin.listen((state) => paintPin(state));
+  const unsubReady = $setupReady.listen((ready) => refreshContinue(ready));
 
-  paintAssets();
+  paintWarmup($warmup.get());
   paintHipki($hipki.get());
   paintPin($pin.get());
-
-  if (assets.status === "pending") void downloadAssets();
+  refreshContinue($setupReady.get());
 
   return () => {
     assetsRetry.removeEventListener("click", onAssetsRetry);
@@ -524,8 +485,9 @@ export function mountSetup(root: HTMLElement): () => void {
     pinInput.removeEventListener("input", onPinInput);
     continueBtn.removeEventListener("click", onContinue);
     backBtn.removeEventListener("click", onBack);
+    unsubWarmup();
     unsubHipki();
     unsubPin();
+    unsubReady();
   };
 }
-

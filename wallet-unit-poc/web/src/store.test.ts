@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { transition, type AppEvent, type AppState } from "./store";
+import { transition, type AppEvent, type AppState, type ProvingRun } from "./store";
+
+function makeRun(overrides: Partial<ProvingRun> = {}): ProvingRun {
+  return {
+    challengeId: "ch-abcdef",
+    certChainType: "rs2048",
+    certProofBytes: new Uint8Array([1, 2, 3]),
+    deviceProofBytes: new Uint8Array([4, 5, 6]),
+    nullifier: "zkid-0x01",
+    certKind: "cert_chain_rs2048",
+    provingMs: 1234,
+    ...overrides,
+  };
+}
 
 describe("transition", () => {
   it("landing + start → setup", () => {
@@ -9,44 +22,135 @@ describe("transition", () => {
     });
   });
 
-  it("setup + continue → proving", () => {
-    expect(transition({ phase: "setup" }, { type: "continue" })).toEqual({
-      phase: "proving",
+  it("setup + setup_complete → ready", () => {
+    expect(
+      transition({ phase: "setup" }, { type: "setup_complete" }),
+    ).toEqual({ phase: "ready" });
+  });
+
+  it("ready + start_proving → proving with startedAt", () => {
+    const next = transition({ phase: "ready" }, { type: "start_proving" });
+    expect(next.phase).toBe("proving");
+    if (next.phase === "proving") {
+      expect(typeof next.startedAt).toBe("number");
+    }
+  });
+
+  it("proving + proving_complete → review carries run", () => {
+    const run = makeRun();
+    const next = transition(
+      { phase: "proving", startedAt: 0 },
+      { type: "proving_complete", run },
+    );
+    expect(next.phase).toBe("review");
+    if (next.phase === "review") {
+      expect(next.run).toBe(run);
+    }
+  });
+
+  it("review + send_proof → submitting preserves run", () => {
+    const run = makeRun();
+    const next = transition(
+      { phase: "review", run },
+      { type: "send_proof" },
+    );
+    expect(next.phase).toBe("submitting");
+    if (next.phase === "submitting") {
+      expect(next.run).toBe(run);
+      expect(typeof next.startedAt).toBe("number");
+    }
+  });
+
+  it("submitting + submit_complete → result carries both timings", () => {
+    const run = makeRun({ provingMs: 500 });
+    const next = transition(
+      { phase: "submitting", run, startedAt: 0 },
+      { type: "submit_complete", verified: true, submitMs: 200 },
+    );
+    expect(next).toEqual({
+      phase: "result",
+      verified: true,
+      provingMs: 500,
+      submitMs: 200,
     });
   });
 
-  it("proving + proving_done → result", () => {
-    expect(
-      transition(
-        { phase: "proving" },
-        { type: "proving_done", verified: true, durationMs: 1234 },
-      ),
-    ).toEqual({ phase: "result", verified: true, durationMs: 1234 });
+  it("review + retry_proving → ready discards the run", () => {
+    const next = transition(
+      { phase: "review", run: makeRun() },
+      { type: "retry_proving" },
+    );
+    expect(next).toEqual({ phase: "ready" });
   });
 
-  it("proving + pipeline_error → error", () => {
-    expect(
-      transition(
-        { phase: "proving" },
-        { type: "pipeline_error", where: "witness", message: "boom" },
-      ),
-    ).toEqual({ phase: "error", where: "witness", message: "boom" });
+  it("result + retry_proving → ready (Prove again keeps warm runtime)", () => {
+    const next = transition(
+      { phase: "result", verified: true, provingMs: 1, submitMs: 2 },
+      { type: "retry_proving" },
+    );
+    expect(next).toEqual({ phase: "ready" });
   });
 
-  it("setup + pipeline_error → error (fixture-load failures surface before proving starts)", () => {
+  it("ready + reset_to_setup → setup", () => {
+    expect(
+      transition({ phase: "ready" }, { type: "reset_to_setup" }),
+    ).toEqual({ phase: "setup" });
+  });
+
+  it("review + reset_to_setup → setup", () => {
     expect(
       transition(
-        { phase: "setup" },
-        { type: "pipeline_error", where: "fixtures", message: "404" },
+        { phase: "review", run: makeRun() },
+        { type: "reset_to_setup" },
       ),
-    ).toEqual({ phase: "error", where: "fixtures", message: "404" });
+    ).toEqual({ phase: "setup" });
+  });
+
+  it("proving + reset_to_setup → setup (cancel)", () => {
+    expect(
+      transition(
+        { phase: "proving", startedAt: 123 },
+        { type: "reset_to_setup" },
+      ),
+    ).toEqual({ phase: "setup" });
+  });
+
+  it("pipeline_error routes active phases to error", () => {
+    const activePhases: AppState[] = [
+      { phase: "setup" },
+      { phase: "ready" },
+      { phase: "proving", startedAt: 0 },
+      { phase: "review", run: makeRun() },
+      { phase: "submitting", run: makeRun(), startedAt: 0 },
+    ];
+    for (const s of activePhases) {
+      expect(
+        transition(s, { type: "pipeline_error", where: "x", message: "y" }),
+      ).toEqual({ phase: "error", where: "x", message: "y" });
+    }
+  });
+
+  it("pipeline_error from terminal phases is ignored", () => {
+    const terminals: AppState[] = [
+      { phase: "landing" },
+      { phase: "result", verified: true, provingMs: 1, submitMs: 2 },
+      { phase: "error", where: "x", message: "y" },
+    ];
+    for (const s of terminals) {
+      expect(
+        transition(s, { type: "pipeline_error", where: "a", message: "b" }),
+      ).toEqual(s);
+    }
   });
 
   it("any + reset → landing", () => {
     const states: AppState[] = [
       { phase: "setup" },
-      { phase: "proving" },
-      { phase: "result", verified: false, durationMs: 10 },
+      { phase: "ready" },
+      { phase: "proving", startedAt: 0 },
+      { phase: "review", run: makeRun() },
+      { phase: "submitting", run: makeRun(), startedAt: 0 },
+      { phase: "result", verified: false, provingMs: 10, submitMs: 5 },
       { phase: "error", where: "x", message: "y" },
     ];
     for (const s of states) {
@@ -56,29 +160,36 @@ describe("transition", () => {
 
   it("illegal transitions return current state unchanged", () => {
     const cases: Array<[AppState, AppEvent]> = [
-      // `start` only valid from landing.
+      // start only valid from landing.
       [{ phase: "setup" }, { type: "start" }],
-      [{ phase: "proving" }, { type: "start" }],
-      // `continue` only valid from setup.
-      [{ phase: "landing" }, { type: "continue" }],
-      [{ phase: "proving" }, { type: "continue" }],
-      // `proving_done` only valid from proving.
+      [{ phase: "ready" }, { type: "start" }],
+      // setup_complete only valid from setup.
+      [{ phase: "landing" }, { type: "setup_complete" }],
+      [{ phase: "ready" }, { type: "setup_complete" }],
+      // start_proving only valid from ready.
+      [{ phase: "setup" }, { type: "start_proving" }],
+      [{ phase: "proving", startedAt: 0 }, { type: "start_proving" }],
+      // proving_complete only valid from proving.
+      [{ phase: "ready" }, { type: "proving_complete", run: makeRun() }],
+      // send_proof only valid from review.
+      [{ phase: "ready" }, { type: "send_proof" }],
       [
-        { phase: "landing" },
-        { type: "proving_done", verified: true, durationMs: 1 },
+        { phase: "proving", startedAt: 0 },
+        { type: "send_proof" },
       ],
+      // submit_complete only valid from submitting.
       [
-        { phase: "setup" },
-        { type: "proving_done", verified: true, durationMs: 1 },
+        { phase: "review", run: makeRun() },
+        { type: "submit_complete", verified: true, submitMs: 1 },
       ],
-      // `pipeline_error` not valid from landing / result / error.
+      // retry_proving only valid from review / result.
+      [{ phase: "ready" }, { type: "retry_proving" }],
+      [{ phase: "landing" }, { type: "retry_proving" }],
+      // reset_to_setup not valid from landing / submitting / result / error.
+      [{ phase: "landing" }, { type: "reset_to_setup" }],
       [
-        { phase: "landing" },
-        { type: "pipeline_error", where: "x", message: "y" },
-      ],
-      [
-        { phase: "result", verified: true, durationMs: 1 },
-        { type: "pipeline_error", where: "x", message: "y" },
+        { phase: "submitting", run: makeRun(), startedAt: 0 },
+        { type: "reset_to_setup" },
       ],
     ];
     for (const [state, event] of cases) {

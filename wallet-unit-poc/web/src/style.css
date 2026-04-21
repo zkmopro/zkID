@@ -305,6 +305,94 @@ li.step[data-status="error"] .step-label {
   display: none;
 }
 
+.pin-lock-badge {
+  font-size: 13px;
+  color: var(--success);
+  font-weight: 500;
+  padding: 4px 8px;
+  border: 1px solid var(--success);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+}
+
+.ready-summary,
+.review-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--panel-bg);
+}
+
+.ready-row,
+.review-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.ready-label,
+.review-label {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.ready-value,
+.review-value {
+  color: var(--text);
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.review-value.mono {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.review-guardrail {
+  border: 1px solid var(--error);
+  color: var(--error);
+  border-radius: 8px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--error) 6%, transparent);
+  font-size: 14px;
+}
+
+.result-banner {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--panel-bg);
+}
+
+.result-banner[data-kind="done"] {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 6%, var(--panel-bg));
+}
+.result-banner[data-kind="done"] .result-line {
+  color: var(--success);
+  font-weight: 500;
+}
+.result-banner[data-kind="error"] {
+  border-color: var(--error);
+  background: color-mix(in srgb, var(--error) 6%, var(--panel-bg));
+}
+.result-banner[data-kind="error"] .result-line {
+  color: var(--error);
+}
+
+.single-step {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
