@@ -75,7 +75,7 @@ caches them locally; subsequent runs skip the download.
 | `src/smt-local.ts`       | Worker-side SMT engine: loads Go `smt.wasm`, streams snapshot, serves proofs  |
 | `src/smt-snapshot.ts`    | Binary snapshot parser (header + node chunking); engine-agnostic              |
 | `src/inputs.ts`          | Wraps wasm `build_split_inputs` → `{ certJson, deviceJson }`                   |
-| `src/pipeline.ts`        | Main-thread pipeline: challenge → sign → SMT → build → postMessage to Worker   |
+| `src/pipeline.ts`        | Main-thread sign-phase pipeline on /: challenge → sign → SMT → build → `ProveInput` |
 | `src/pin.ts`             | Single-use PIN wrapper; redacts on every observable surface                    |
 | `src/worker.ts`          | Two Worker modes: `warmup` (download + load PKs) and `prove` (witness + prove) |
 | `src/store.ts`           | Discriminated-union `AppState` + `transition` reducer + `ProvingRun` type      |
@@ -83,7 +83,9 @@ caches them locally; subsequent runs skip the download.
 | `src/screens/*.ts`       | Landing / setup / ready / proving / review / submitting / result mounts        |
 | `src/setup-state.ts`     | `$hipki`, `$pin`, `$warmup` atoms + derived `$setupReady`                      |
 | `src/ui.ts`              | 6-step atoms + DOM paint for the proving screen with per-step durations        |
-| `src/main.ts`            | Entry point: owns Worker lifecycle, drives warmup/prove/submit per phase       |
+| `src/storage-handoff.ts` | sessionStorage channel that carries `ProveInput` from `/` to `/prove`          |
+| `src/sign-main.ts`       | `/` entry point: sign route (landing/setup/ready + sign-phase pipeline)        |
+| `src/prove-main.ts`      | `/prove` entry point: cross-origin-isolated proving route (warmup + prove)     |
 
 Pipeline (mirrors `src/ui.ts::Step`):
 
@@ -222,17 +224,46 @@ without one of these helpers. The browser cannot reach the user's
 localhost LocalSignServer from a remote origin under any combination of
 CORS / mixed-content rules.
 
-## Browser requirements
+## Browser requirements — two-route COOP
 
-The app uses the HiPKI popupForm bridge, which requires
-`Cross-Origin-Opener-Policy: same-origin-allow-popups` to keep
-`window.opener` alive across the cross-origin popup. Combined with
-`Cross-Origin-Embedder-Policy: require-corp`, this leaves
-`crossOriginIsolated === false` and disables `SharedArrayBuffer`.
-The Worker detects this and falls back to single-threaded proving
-(`src/worker.ts::clampThreads`). Multi-thread proving requires moving
-HiPKI behind a same-origin proxy so COOP can be tightened to
-`same-origin` — out of scope for v1.
+The app is served as **two same-origin documents** with different
+`Cross-Origin-Opener-Policy` headers so the HiPKI popup and the rayon
+thread pool can both work:
+
+| Route    | COOP                         | `crossOriginIsolated` | Runs                                              |
+| -------- | ---------------------------- | --------------------- | ------------------------------------------------- |
+| `/`      | `same-origin-allow-popups`   | `false`               | Landing, setup, ready, HiPKI sign, SMT, build     |
+| `/prove` | `same-origin`                | `true`                | Worker warmup + witness + prove (rayon threads)   |
+
+When the user clicks **Start proving** on `/`, the sign-phase pipeline
+runs (challenge → sign → SMT → build) and the resulting `ProveInput` is
+handed off via `sessionStorage` (see `src/storage-handoff.ts`). A hard
+navigation to `/prove` lands in the isolated document, where a fresh
+Worker does warmup (fast — OPFS re-hits the already-cached PKs) and then
+runs the prove. `wasm-bindgen-rayon` picks up `SharedArrayBuffer` and
+`clampThreads` scales the pool up; the fallback to single-threaded is
+kept for hosts that can't serve path-scoped headers.
+
+The Vite dev server enforces this split via a tiny middleware plugin
+(`coopPerPath` in `vite.config.ts`). Production hosts need the same
+scoping:
+
+- **Netlify / Cloudflare Pages / any `_headers`-aware host** —
+  `public/_headers` in this repo is read as-is.
+- **nginx** —
+  ```nginx
+  location = /prove       { more_set_headers "Cross-Origin-Opener-Policy: same-origin"; }
+  location = /prove.html  { more_set_headers "Cross-Origin-Opener-Policy: same-origin"; }
+  location /              { more_set_headers "Cross-Origin-Opener-Policy: same-origin-allow-popups"; }
+  # COEP: require-corp on every location
+  ```
+- **Cloudflare Workers / Pages Functions** — route-match on `/prove*`
+  and set `same-origin`; else set `same-origin-allow-popups`. Always
+  set `Cross-Origin-Embedder-Policy: require-corp`.
+
+If the chosen host cannot serve path-scoped headers, the fallback is the
+single-threaded path (serve `same-origin-allow-popups` globally). The
+app still works; proving is just slower.
 
 ## Thread-count policy
 
