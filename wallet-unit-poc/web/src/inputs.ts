@@ -12,7 +12,8 @@ import type { SmtCircuitInputs } from "./smt-client";
 
 let wasmInit: Promise<unknown> | null = null;
 
-async function ensureWasm(): Promise<void> {
+/** Idempotent wasm-bindgen init shared across callers on the main thread. */
+export async function ensureWasm(): Promise<void> {
   if (!wasmInit) wasmInit = init();
   await wasmInit;
 }

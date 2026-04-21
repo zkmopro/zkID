@@ -22,6 +22,12 @@ import {
   hydrateManifest,
   type CircuitKind as Kind,
 } from "./manifest";
+import {
+  convertSmtProofToCircuitInputs,
+  type SmtCircuitInputs,
+  type SmtIssuer,
+} from "./smt-client";
+import { loadSmtEngine, type SmtEngine, type SmtLoadPhase } from "./smt-local";
 import { calculateWitness } from "./witness";
 
 // Worker message contract -------------------------------------------------
@@ -36,6 +42,8 @@ export interface ProveInput {
 
 export type WorkerInMsg =
   | { type: "warmup" }
+  | { type: "load_smt"; issuer: SmtIssuer }
+  | { type: "smt_proof"; requestId: string; serialHex: string }
   | { type: "prove"; input: ProveInput }
   | { type: "cancel" };
 
@@ -51,6 +59,25 @@ export type Progress =
       kind?: Kind;
     }
   | { step: "warmup_done" }
+  // SMT engine lifecycle events feed the setup-screen Revocation panel.
+  | {
+      step: "smt_load";
+      phase: SmtLoadPhase;
+      issuer: SmtIssuer;
+      bytesDone: number;
+      bytesTotal: number;
+    }
+  | {
+      step: "smt_ready";
+      issuer: SmtIssuer;
+      rootHex: string;
+      crlNumber: string;
+    }
+  // SMT proof request/response. `requestId` pairs back to a pending Promise
+  // on the main thread; the Promise resolver is installed via addEventListener
+  // and ignored by the progress.ts router.
+  | { step: "smt_proof_done"; requestId: string; inputs: SmtCircuitInputs }
+  | { step: "smt_proof_error"; requestId: string; message: string }
   // Proving events drive the proving-screen step list.
   | { step: "witness"; status: "in_progress" | "done"; kind?: Kind }
   | {
@@ -86,9 +113,14 @@ let cancelled = false;
 let warming = false;
 let proving = false;
 let warmed = false;
+let smtLoading = false;
 
 // witness-wasm kept in-memory after warmup (skips OPFS during prove).
 const witnessCache: Partial<Record<Kind, Uint8Array>> = {};
+// Engines are keyed per-issuer; the first card-read wins and subsequent
+// requests for other issuers are served fresh. In practice only one issuer
+// is loaded per session (users don't swap MOICA-G2 for G3 mid-flow).
+const smtEngines: Partial<Record<SmtIssuer, SmtEngine>> = {};
 
 // tsconfig lib is ES2023 + DOM (no WebWorker lib); cast to a narrow shape
 // covering the APIs we actually use.
@@ -116,6 +148,30 @@ workerSelf.onmessage = (ev: MessageEvent<WorkerInMsg>) => {
     runWarmup().finally(() => {
       warming = false;
     });
+    return;
+  }
+  if (data.type === "load_smt") {
+    if (smtLoading) return;
+    if (smtEngines[data.issuer]) {
+      // Already loaded — re-emit the ready event so late subscribers
+      // (e.g., a re-mounted setup panel) see it.
+      const engine = smtEngines[data.issuer]!;
+      post({
+        step: "smt_ready",
+        issuer: engine.issuer,
+        rootHex: engine.rootHex,
+        crlNumber: engine.crlNumber.toString(),
+      });
+      return;
+    }
+    smtLoading = true;
+    runLoadSmt(data.issuer).finally(() => {
+      smtLoading = false;
+    });
+    return;
+  }
+  if (data.type === "smt_proof") {
+    runSmtProof(data.requestId, data.serialHex);
     return;
   }
   if (data.type === "prove") {
@@ -254,6 +310,51 @@ async function runWarmup(): Promise<void> {
     post({ step: "warmup_done" });
   } catch (err) {
     postError("warmup", err);
+  }
+}
+
+async function runLoadSmt(issuer: SmtIssuer): Promise<void> {
+  try {
+    const engine = await loadSmtEngine(issuer, (p) => {
+      post({
+        step: "smt_load",
+        phase: p.phase,
+        issuer,
+        bytesDone: p.bytesDone,
+        bytesTotal: p.bytesTotal,
+      });
+    });
+    smtEngines[issuer] = engine;
+    post({
+      step: "smt_ready",
+      issuer: engine.issuer,
+      rootHex: engine.rootHex,
+      crlNumber: engine.crlNumber.toString(),
+    });
+  } catch (err) {
+    postError("smt_load", err);
+  }
+}
+
+function runSmtProof(requestId: string, serialHex: string): void {
+  try {
+    // First loaded engine wins; serialHex does not carry issuer information,
+    // so the main thread is responsible for calling load_smt with the correct
+    // issuer for the card currently in use.
+    const engine =
+      smtEngines.g2 ?? smtEngines.g3 ?? (undefined as SmtEngine | undefined);
+    if (!engine) {
+      throw new Error("SMT engine not loaded; call load_smt first");
+    }
+    const resp = engine.createProof(serialHex);
+    const inputs = convertSmtProofToCircuitInputs(resp);
+    post({ step: "smt_proof_done", requestId, inputs });
+  } catch (err) {
+    post({
+      step: "smt_proof_error",
+      requestId,
+      message: errorMessage(err),
+    });
   }
 }
 

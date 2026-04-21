@@ -3,9 +3,11 @@
 // and handing the inputs off to the already-warm Worker for the CPU/wasm
 // proving steps. Submission is owned by the Review screen via main.ts.
 
+import { cert_modulus_bits, cert_serial_hex } from "./wasm/spartan2_wasm.js";
+
 import { base64ToBytes, challengeBytesToTbs } from "./bytes";
 import { fetchPkcs11Info, signTbs } from "./hipki-client";
-import { buildInputs } from "./inputs";
+import { buildInputs, ensureWasm } from "./inputs";
 import type { CircuitKind } from "./manifest";
 import type { Pin } from "./pin";
 import { dispatch } from "./store";
@@ -121,35 +123,59 @@ export async function runProvingPipeline(
   // inputs.
   const tbs = challengeBytesToTbs(challenge.challenge_bytes);
 
-  // The HiPKI popup is user-driven and can't be cancelled mid-flight; we
-  // let it complete naturally and bail on the next abort check.
-  const userSignatureB64 = await stage("sign", async () => {
-    const sig = await signTbs({
-      tbs: challenge.challenge_bytes,
-      pin: ctx.pin.consume(),
-      slotDescription: ctx.card.slotDescription,
+  // The HiPKI popup is user-driven and can't be cancelled mid-flight; we let
+  // it complete naturally and bail on the next abort check. `/sign` returns
+  // the cert whose private key produced the signature — MOICA tokens carry
+  // multiple user certs, and `/pkcs11info` may hand back a different one.
+  // Key the proving inputs off this cert, not the one cached during setup.
+  const { signatureB64: userSignatureB64, userCertDer: signedUserCertDer } =
+    await stage("sign", async () => {
+      const sig = await signTbs({
+        tbs: challenge.challenge_bytes,
+        pin: ctx.pin.consume(),
+        slotDescription: ctx.card.slotDescription,
+      });
+      if (sig.ret_code !== 0 || sig.last_error !== 0) {
+        throw new Error(
+          `HiPKI sign failed: ret_code=${sig.ret_code} last_error=${sig.last_error}`,
+        );
+      }
+      if (!sig.certb64) {
+        throw new Error("HiPKI sign response missing certb64 (needed to proof-match the signing key)");
+      }
+      return {
+        signatureB64: sig.signature,
+        userCertDer: base64ToBytes(sig.certb64),
+      };
     });
-    if (sig.ret_code !== 0 || sig.last_error !== 0) {
-      throw new Error(
-        `HiPKI sign failed: ret_code=${sig.ret_code} last_error=${sig.last_error}`,
-      );
-    }
-    return sig.signature;
-  });
   checkAborted(signal);
 
-  const smtInputs = await stage("smt", () =>
-    fetchSmtProof({
-      issuer: ctx.card.issuer,
-      serialHex: ctx.card.serialHex,
-      signal,
-    }),
-  );
+  await ensureWasm();
+  const signedSerialHex = cert_serial_hex(signedUserCertDer);
+  const signedNullifier = `zkid-${signedSerialHex}`;
+
+  const smtInputs = await stage(
+    "smt",
+    async () => {
+      const t0 = performance.now();
+      const inputs = await fetchSmtProof(worker, {
+        issuer: ctx.card.issuer,
+        serialHex: signedSerialHex,
+        signal,
+      });
+      return { inputs, ms: Math.round(performance.now() - t0) };
+    },
+    ({ ms }) => `MerkleProof in ${ms}ms`,
+  ).then((x) => x.inputs);
   checkAborted(signal);
 
   const { certJson, deviceJson } = await stage("build", () =>
     buildInputs({
-      card: ctx.card,
+      card: {
+        ...ctx.card,
+        userCertDer: signedUserCertDer,
+        serialHex: signedSerialHex,
+      },
       userSignatureB64,
       tbs,
       smtInputs,
@@ -162,16 +188,24 @@ export async function runProvingPipeline(
     deviceJson,
     certKind: ctx.card.certKind,
     challengeId: challenge.challenge_id,
-    nullifier: ctx.nullifier,
+    nullifier: signedNullifier,
   };
   const msg: WorkerInMsg = { type: "prove", input };
   worker.postMessage(msg);
 }
 
-/** Issuer DN → `g2` / `g3`. MOICA-G2 issues RSA-2048 certs, MOICA-G3 RSA-4096. */
-function deriveIssuer(issuerDn: string | undefined): SmtIssuer {
-  if (!issuerDn) return "g2";
-  return /g3|4096|root\s*ca\s*g3/i.test(issuerDn) ? "g3" : "g2";
+/** Route to rs2048 / rs4096 by the issuer cert's actual modulus width, not
+ *  by guessing from the issuer DN — MOICA-G3 issuer DNs don't always carry
+ *  "G3" or "4096", and picking rs2048 for a 4096-bit key would truncate the
+ *  modulus into 17*121=2057 bits and fail the cert-chain RSA verify. */
+async function deriveIssuerFromCert(
+  issuerCertDer: Uint8Array,
+): Promise<{ issuer: SmtIssuer; kIssuer: 17 | 34; certKind: CircuitKind }> {
+  await ensureWasm();
+  const bits = cert_modulus_bits(issuerCertDer);
+  return bits > 2048
+    ? { issuer: "g3", kIssuer: 34, certKind: "cert_chain_rs4096" }
+    : { issuer: "g2", kIssuer: 17, certKind: "cert_chain_rs2048" };
 }
 
 /** Fetch + parse the HiPKI pkcs11info response into a `CardContext`.
@@ -197,15 +231,13 @@ export async function buildCardContext(
   if (!userEntry) throw new Error("HiPKI: no user cert in token");
   if (!caEntry) throw new Error("HiPKI: no 'CA Cert' entry in token");
 
-  const issuer = deriveIssuer(userEntry.issuerDN);
-  const kIssuer: 17 | 34 = issuer === "g3" ? 34 : 17;
-  const certKind: CircuitKind =
-    issuer === "g3" ? "cert_chain_rs4096" : "cert_chain_rs2048";
+  const issuerCertDer = base64ToBytes(caEntry.certb64);
+  const { issuer, kIssuer, certKind } = await deriveIssuerFromCert(issuerCertDer);
 
   return {
     card: {
       userCertDer: base64ToBytes(userEntry.certb64),
-      issuerCertDer: base64ToBytes(caEntry.certb64),
+      issuerCertDer,
       serialHex: deriveSerialHex(userEntry.sn, token.serialNumber),
       kIssuer,
       issuer,

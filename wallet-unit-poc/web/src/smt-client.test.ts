@@ -1,188 +1,258 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   convertSmtProofToCircuitInputs,
   fetchSmtProof,
   SMT_DEPTH,
+  type SmtCircuitInputs,
   type SmtProofResponse,
 } from "./smt-client";
-import { setupFetchMock } from "./test-utils";
 
-const SMT = "http://localhost:3000";
-
-describe("smt-client", () => {
-  setupFetchMock({ VITE_SMT_BASE_URL: SMT, VITE_SMT_ISSUER: "g2" });
-
-  describe("convertSmtProofToCircuitInputs", () => {
-    it("converts 0x-prefixed hex to decimal across every field", () => {
-      const resp: SmtProofResponse = {
-        root: "0x2a", // 42
-        entry: ["0x270f"], // 9999
-        matchingEntry: ["0x7", "0xb"], // 7, 11
-        siblings: ["0x64", "0x65", "0xff"], // 100, 101, 255
-      };
-      const out = convertSmtProofToCircuitInputs(resp);
-      expect(out.smt_root).toBe("42");
-      expect(out.serial_number).toBe("9999");
-      expect(out.smt_old_key).toBe("7");
-      expect(out.smt_old_value).toBe("11");
-      expect(out.smt_is_old0).toBe("0");
-      expect(out.smt_siblings.slice(0, 3)).toEqual(["100", "101", "255"]);
-      expect(out.smt_siblings).toHaveLength(SMT_DEPTH);
-      expect(out.smt_siblings.slice(3).every((s) => s === "0")).toBe(true);
-    });
-
-    it("passes through values that are already decimal", () => {
-      const resp: SmtProofResponse = {
-        root: "42",
-        entry: ["9999"],
-        siblings: ["100", "101"],
-      };
-      const out = convertSmtProofToCircuitInputs(resp);
-      expect(out.smt_root).toBe("42");
-      expect(out.serial_number).toBe("9999");
-      expect(out.smt_siblings[0]).toBe("100");
-    });
-
-    it("pads siblings to SMT_DEPTH with zeros", () => {
-      const resp: SmtProofResponse = {
-        root: "0x1",
-        entry: ["0x2"],
-        siblings: ["0x3"],
-      };
-      const out = convertSmtProofToCircuitInputs(resp);
-      expect(out.smt_siblings).toHaveLength(SMT_DEPTH);
-      expect(out.smt_siblings[0]).toBe("3");
-      expect(out.smt_siblings[127]).toBe("0");
-    });
-
-    it("truncates siblings longer than depth", () => {
-      // Use plain decimal strings so assertions are readable; pass-through
-      // preserves them unchanged.
-      const siblings = Array.from({ length: SMT_DEPTH + 5 }, (_, i) =>
-        String(i + 1),
-      );
-      const resp: SmtProofResponse = {
-        root: "0x1",
-        entry: ["0x2"],
-        siblings,
-      };
-      const out = convertSmtProofToCircuitInputs(resp);
-      expect(out.smt_siblings).toHaveLength(SMT_DEPTH);
-      expect(out.smt_siblings[0]).toBe("1");
-      expect(out.smt_siblings[SMT_DEPTH - 1]).toBe(String(SMT_DEPTH));
-    });
-
-    it("sets smt_is_old0=1 when matchingEntry is absent", () => {
-      const resp: SmtProofResponse = {
-        root: "0x1",
-        entry: ["0x2"],
-        siblings: [],
-      };
-      const out = convertSmtProofToCircuitInputs(resp);
-      expect(out.smt_old_key).toBe("0");
-      expect(out.smt_old_value).toBe("0");
-      expect(out.smt_is_old0).toBe("1");
-    });
-
-    it("sets smt_is_old0=1 when matchingEntry has < 2 elements", () => {
-      const resp: SmtProofResponse = {
-        root: "0x1",
-        entry: ["0x2"],
-        matchingEntry: ["0x7"],
-        siblings: [],
-      };
-      const out = convertSmtProofToCircuitInputs(resp);
-      expect(out.smt_is_old0).toBe("1");
-    });
-
-    it("accepts a custom depth", () => {
-      const resp: SmtProofResponse = {
-        root: "0x1",
-        entry: ["0x2"],
-        siblings: [],
-      };
-      const out = convertSmtProofToCircuitInputs(resp, 8);
-      expect(out.smt_siblings).toHaveLength(8);
-    });
-
-    it("throws on empty entry array", () => {
-      const resp = { root: "0x1", entry: [], siblings: [] } as SmtProofResponse;
-      expect(() => convertSmtProofToCircuitInputs(resp)).toThrow(/empty entry/);
-    });
-
-    it("throws when siblings is missing", () => {
-      const resp = {
-        root: "0x1",
-        entry: ["0x2"],
-      } as unknown as SmtProofResponse;
-      expect(() => convertSmtProofToCircuitInputs(resp)).toThrow(/siblings/);
-    });
+describe("convertSmtProofToCircuitInputs", () => {
+  it("converts 0x-prefixed hex to decimal across every field", () => {
+    const resp: SmtProofResponse = {
+      root: "0x2a", // 42
+      entry: ["0x270f"], // 9999
+      matchingEntry: ["0x7", "0xb"], // 7, 11
+      siblings: ["0x64", "0x65", "0xff"], // 100, 101, 255
+    };
+    const out = convertSmtProofToCircuitInputs(resp);
+    expect(out.smt_root).toBe("42");
+    expect(out.serial_number).toBe("9999");
+    expect(out.smt_old_key).toBe("7");
+    expect(out.smt_old_value).toBe("11");
+    expect(out.smt_is_old0).toBe("0");
+    expect(out.smt_siblings.slice(0, 3)).toEqual(["100", "101", "255"]);
+    expect(out.smt_siblings).toHaveLength(SMT_DEPTH);
+    expect(out.smt_siblings.slice(3).every((s) => s === "0")).toBe(true);
   });
 
-  describe("fetchSmtProof", () => {
-    it("GETs /proof/{issuer}/{serialHex} and returns circuit inputs", async () => {
-      const fetchSpy = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-        expect(String(url)).toBe(`${SMT}/proof/g2/0xdeadbeef`);
-        expect(init?.method ?? "GET").toBe("GET");
-        const body: SmtProofResponse = {
-          root: "0x2a",
-          entry: ["0x270f"],
-          matchingEntry: ["0x7", "0xb"],
-          siblings: ["0x64"],
-        };
-        return new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
+  it("accepts bare hex (no 0x prefix) — the form smt.wasm emits", () => {
+    // `bigToHex` in moica-revocation-smt/server/wasm/main.go writes bare
+    // hex via big.Int.Text(16); this is the contract the worker consumes.
+    const resp: SmtProofResponse = {
+      root: "2a",
+      entry: ["270f"],
+      matchingEntry: ["7", "b"],
+      siblings: ["64", "65", "ff"],
+    };
+    const out = convertSmtProofToCircuitInputs(resp);
+    expect(out.smt_root).toBe("42");
+    expect(out.serial_number).toBe("9999");
+    expect(out.smt_old_key).toBe("7");
+    expect(out.smt_old_value).toBe("11");
+    expect(out.smt_siblings.slice(0, 3)).toEqual(["100", "101", "255"]);
+  });
+
+  it("treats \"0\" consistently across prefix and bare forms", () => {
+    const resp: SmtProofResponse = {
+      root: "0",
+      entry: ["0x0"],
+      siblings: [],
+    };
+    const out = convertSmtProofToCircuitInputs(resp);
+    expect(out.smt_root).toBe("0");
+    expect(out.serial_number).toBe("0");
+  });
+
+  it("pads siblings to SMT_DEPTH with zeros", () => {
+    const resp: SmtProofResponse = {
+      root: "1",
+      entry: ["2"],
+      siblings: ["3"],
+    };
+    const out = convertSmtProofToCircuitInputs(resp);
+    expect(out.smt_siblings).toHaveLength(SMT_DEPTH);
+    expect(out.smt_siblings[0]).toBe("3");
+    expect(out.smt_siblings[127]).toBe("0");
+  });
+
+  it("truncates siblings longer than depth", () => {
+    const siblings = Array.from({ length: SMT_DEPTH + 5 }, (_, i) =>
+      (i + 1).toString(16),
+    );
+    const resp: SmtProofResponse = {
+      root: "1",
+      entry: ["2"],
+      siblings,
+    };
+    const out = convertSmtProofToCircuitInputs(resp);
+    expect(out.smt_siblings).toHaveLength(SMT_DEPTH);
+    expect(out.smt_siblings[0]).toBe("1");
+  });
+
+  it("sets smt_is_old0=1 when matchingEntry is absent", () => {
+    const resp: SmtProofResponse = {
+      root: "1",
+      entry: ["2"],
+      siblings: [],
+    };
+    const out = convertSmtProofToCircuitInputs(resp);
+    expect(out.smt_old_key).toBe("0");
+    expect(out.smt_old_value).toBe("0");
+    expect(out.smt_is_old0).toBe("1");
+  });
+
+  it("sets smt_is_old0=1 when matchingEntry has < 2 elements", () => {
+    const resp: SmtProofResponse = {
+      root: "1",
+      entry: ["2"],
+      matchingEntry: ["7"],
+      siblings: [],
+    };
+    const out = convertSmtProofToCircuitInputs(resp);
+    expect(out.smt_is_old0).toBe("1");
+  });
+
+  it("accepts a custom depth", () => {
+    const resp: SmtProofResponse = { root: "1", entry: ["2"], siblings: [] };
+    const out = convertSmtProofToCircuitInputs(resp, 8);
+    expect(out.smt_siblings).toHaveLength(8);
+  });
+
+  it("throws on empty entry array", () => {
+    const resp = { root: "1", entry: [], siblings: [] } as SmtProofResponse;
+    expect(() => convertSmtProofToCircuitInputs(resp)).toThrow(/empty entry/);
+  });
+
+  it("throws when siblings is missing", () => {
+    const resp = { root: "1", entry: ["2"] } as unknown as SmtProofResponse;
+    expect(() => convertSmtProofToCircuitInputs(resp)).toThrow(/siblings/);
+  });
+});
+
+describe("fetchSmtProof (worker wrapper)", () => {
+  function makeFakeWorker(options: {
+    onProof?: (serialHex: string, requestId: string) => SmtProofResponse;
+    onError?: (serialHex: string, requestId: string) => string;
+  }): Worker {
+    const listeners: Array<(ev: MessageEvent<unknown>) => void> = [];
+    const worker = {
+      postMessage(msg: unknown) {
+        queueMicrotask(() => {
+          const req = msg as {
+            type: string;
+            requestId: string;
+            serialHex: string;
+          };
+          if (req.type !== "smt_proof") return;
+          try {
+            if (options.onError) {
+              const message = options.onError(req.serialHex, req.requestId);
+              dispatch({
+                step: "smt_proof_error",
+                requestId: req.requestId,
+                message,
+              });
+              return;
+            }
+            const resp = options.onProof!(req.serialHex, req.requestId);
+            dispatch({
+              step: "smt_proof_done",
+              requestId: req.requestId,
+              inputs: convertSmtProofToCircuitInputs(resp),
+            });
+          } catch (err) {
+            dispatch({
+              step: "smt_proof_error",
+              requestId: req.requestId,
+              message: err instanceof Error ? err.message : String(err),
+            });
+          }
         });
-      }) as typeof fetch;
-      globalThis.fetch = fetchSpy;
+      },
+      addEventListener(
+        _type: "message",
+        listener: (ev: MessageEvent<unknown>) => void,
+      ) {
+        listeners.push(listener);
+      },
+      removeEventListener(
+        _type: "message",
+        listener: (ev: MessageEvent<unknown>) => void,
+      ) {
+        const idx = listeners.indexOf(listener);
+        if (idx >= 0) listeners.splice(idx, 1);
+      },
+    } as unknown as Worker;
+    function dispatch(data: unknown): void {
+      const ev = { data } as MessageEvent<unknown>;
+      for (const l of listeners.slice()) l(ev);
+    }
+    return worker;
+  }
 
-      const out = await fetchSmtProof({ serialHex: "0xdeadbeef" });
-      expect(out.smt_root).toBe("42");
-      expect(out.serial_number).toBe("9999");
-      expect(out.smt_siblings).toHaveLength(SMT_DEPTH);
+  it("resolves with circuit inputs on smt_proof_done", async () => {
+    const worker = makeFakeWorker({
+      onProof: (serialHex) => ({
+        root: "2a",
+        entry: [serialHex.replace(/^0x/i, "")],
+        matchingEntry: ["7", "b"],
+        siblings: ["64"],
+      }),
     });
+    const out: SmtCircuitInputs = await fetchSmtProof(worker, {
+      serialHex: "0xdeadbeef",
+    });
+    expect(out.smt_root).toBe("42");
+    expect(out.serial_number).toBe(BigInt("0xdeadbeef").toString(10));
+    expect(out.smt_siblings).toHaveLength(SMT_DEPTH);
+    expect(out.smt_is_old0).toBe("0");
+  });
 
-    it("uses the configured issuer env var by default (g2)", async () => {
-      globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
-        expect(String(url)).toContain("/proof/g2/");
-        return new Response(
-          JSON.stringify({ root: "0x1", entry: ["0x2"], siblings: [] }),
-          { status: 200 },
-        );
-      }) as typeof fetch;
-      await fetchSmtProof({ serialHex: "0x2" });
+  it("rejects on smt_proof_error with the worker's message", async () => {
+    const worker = makeFakeWorker({
+      onError: () => "engine not loaded",
     });
+    await expect(
+      fetchSmtProof(worker, { serialHex: "0x1" }),
+    ).rejects.toThrow(/engine not loaded/);
+  });
 
-    it("accepts an explicit issuer override (g3 for RSA-4096)", async () => {
-      globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
-        expect(String(url)).toContain("/proof/g3/");
-        return new Response(
-          JSON.stringify({ root: "0x1", entry: ["0x2"], siblings: [] }),
-          { status: 200 },
-        );
-      }) as typeof fetch;
-      await fetchSmtProof({ issuer: "g3", serialHex: "0x2" });
+  it("rejects immediately when the signal is already aborted", async () => {
+    const worker = makeFakeWorker({
+      onProof: () => ({ root: "1", entry: ["2"], siblings: [] }),
     });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      fetchSmtProof(worker, { serialHex: "0x1", signal: controller.signal }),
+    ).rejects.toThrow(/aborted/i);
+  });
 
-    it("URL-encodes path segments so odd issuer / serial strings don't break", async () => {
-      globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
-        // A slash in the serial should be percent-encoded, not treated as a segment.
-        expect(String(url)).toContain("/proof/g2/ab%2Fcd");
-        return new Response(
-          JSON.stringify({ root: "0x1", entry: ["0x2"], siblings: [] }),
-          { status: 200 },
-        );
-      }) as typeof fetch;
-      await fetchSmtProof({ serialHex: "ab/cd" });
+  it("rejects when the signal fires before the worker responds", async () => {
+    // Worker that never responds.
+    const worker = {
+      postMessage() {},
+      addEventListener() {},
+      removeEventListener() {},
+    } as unknown as Worker;
+    const controller = new AbortController();
+    const p = fetchSmtProof(worker, {
+      serialHex: "0x1",
+      signal: controller.signal,
     });
+    controller.abort();
+    await expect(p).rejects.toThrow(/aborted/i);
+  });
 
-    it("throws on non-2xx response", async () => {
-      globalThis.fetch = vi.fn(
-        async () => new Response("", { status: 404, statusText: "Not Found" }),
-      ) as typeof fetch;
-      await expect(fetchSmtProof({ serialHex: "0x1" })).rejects.toThrow(/404/);
+  it("ignores messages intended for other requests", async () => {
+    // Two sequential requests — we want the second one to NOT pick up the
+    // first one's smt_proof_done reply.
+    let seen = 0;
+    const worker = makeFakeWorker({
+      onProof: () => {
+        seen += 1;
+        return {
+          root: seen.toString(16),
+          entry: [seen.toString(16)],
+          siblings: [],
+        };
+      },
     });
+    const a = await fetchSmtProof(worker, { serialHex: "0x1" });
+    const b = await fetchSmtProof(worker, { serialHex: "0x2" });
+    expect(a.smt_root).toBe("1");
+    expect(b.smt_root).toBe("2");
   });
 });

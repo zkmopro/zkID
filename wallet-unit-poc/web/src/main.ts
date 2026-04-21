@@ -16,9 +16,11 @@ import { mountRouter } from "./router";
 import {
   $hipki,
   $pin,
+  $smt,
   $warmup,
   resetSetup,
 } from "./setup-state";
+import { getSmtTestProof } from "./smt-client";
 import { dispatch, $state, type AppState } from "./store";
 type Phase = AppState["phase"];
 import { resetUi, result } from "./ui";
@@ -73,10 +75,11 @@ function boot(): void {
 
   function killWorkerForCancel(): void {
     // `prove()` is blocking wasm with no other interrupt — the only way to
-    // stop mid-proving is to terminate. Flip warmup back to idle so the
-    // Assets panel reflects that a fresh load is needed before the next run.
+    // stop mid-proving is to terminate. Flip warmup and SMT back to idle so
+    // the panels reflect that a fresh load is needed before the next run.
     terminateWorker();
     $warmup.set({ status: "idle" });
+    $smt.set({ status: "idle" });
   }
 
   function cancelActiveSubmit(): void {
@@ -191,12 +194,57 @@ function boot(): void {
     }
   }
 
+  // Triggered by HiPKI reaching `card_ready`: the Worker now knows the
+  // issuer and can download/ingest the per-issuer SMT snapshot. Separate
+  // from warmup because warmup fires on setup entry (before any card is
+  // read) and loading both g2 and g3 snapshots would waste ~94 MB of
+  // bandwidth on a card the user isn't holding.
+  function triggerLoadSmtForCard(): void {
+    const hipki = $hipki.get();
+    if (hipki.status !== "card_ready") return;
+    const smt = $smt.get();
+    if (smt.status === "running") return;
+    if (smt.status === "ready" && smt.issuer === hipki.card.issuer) return;
+    // Playwright / vitest escape hatch: when a fixture proof is seeded on
+    // the page global, skip the Worker round-trip entirely and flip the
+    // panel to ready synchronously. Worker globals are isolated so the
+    // hook can't propagate automatically.
+    if (getSmtTestProof()) {
+      $smt.set({
+        status: "ready",
+        issuer: hipki.card.issuer,
+        rootHex: "test",
+        crlNumber: "0",
+      });
+      return;
+    }
+    const w = ensureWorker();
+    const msg: WorkerInMsg = { type: "load_smt", issuer: hipki.card.issuer };
+    w.postMessage(msg);
+  }
+
   // The Assets panel flips `$warmup` back to `idle` on Retry/Re-download.
   // Re-kick warmup here so the screen doesn't need direct Worker access.
   $warmup.listen((warmup) => {
     if (warmup.status !== "idle") return;
     if ($state.get().phase !== "setup") return;
     triggerWarmupIfIdle();
+  });
+
+  // Two listeners both feed `triggerLoadSmtForCard`, guarded by its running/
+  // ready short-circuit so they never double-post:
+  //   - $hipki → card_ready: first time the issuer is known, start the load.
+  //   - $smt → idle: user clicked Retry/Re-download on the Revocation panel;
+  //     the screen can't reach the Worker directly, so it just flips the atom.
+  $hipki.listen((hipki) => {
+    if (hipki.status !== "card_ready") return;
+    if ($state.get().phase !== "setup") return;
+    triggerLoadSmtForCard();
+  });
+  $smt.listen((smt) => {
+    if (smt.status !== "idle") return;
+    if ($state.get().phase !== "setup") return;
+    triggerLoadSmtForCard();
   });
 
   // Phases where the session Pin may have been consumed (sign step ran).

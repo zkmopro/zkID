@@ -38,11 +38,18 @@ for the drift test.
 landing  →  setup  →  proving  →  result
                        │
                        ├── main thread:  challenge → sign → smt → build inputs
-                       │                  (HiPKI popup) (SMT)    (zkid-input-builder via wasm)
+                       │                  (HiPKI popup) (worker RPC) (zkid-input-builder via wasm)
                        │
-                       └── Worker:       preflight → download → load → witness → prove → submit
-                                          (asset cache)        (PK)    (witnesscalc) (Spartan2) (verifier)
+                       └── Worker:       preflight → download → load → load_smt → smt_proof → witness → prove → submit
+                                          (asset cache)        (PK)    (Go smt.wasm + snapshot) (witnesscalc) (Spartan2) (verifier)
 ```
+
+Revocation is local. During setup, after HiPKI returns the card's issuer,
+the Worker downloads the per-issuer SMT snapshot from
+`moica-revocation-smt` release `snapshot-latest`, loads the Go-compiled
+`smt.wasm`, and rebuilds the tree in memory. The `smt` step in the proving
+pipeline is a main-thread → Worker RPC; no network traffic. See
+"Revocation proof (local-first)" below.
 
 The main thread owns network + HiPKI + input building. The Worker owns
 CPU/wasm work. They communicate via a tiny `WorkerInMsg` /
@@ -147,9 +154,10 @@ locked. The implementation is in `src/screens/setup.ts::paintPin` and
 ## Cancellation
 
 Each proving run owns an `AbortController` in `src/main.ts`. Leaving the
-`proving` phase aborts the controller (cancels in-flight HiPKI / SMT /
-verifier requests via `AbortSignal`) and terminates the Worker. A fresh
-Worker is spawned for the next run.
+`proving` phase aborts the controller (cancels in-flight HiPKI /
+verifier requests via `AbortSignal`; the SMT step is now a synchronous
+Worker RPC so there's nothing to cancel mid-flight) and terminates the
+Worker. A fresh Worker is spawned for the next run.
 
 The replace-the-worker approach avoids tagging every Worker → main
 message with a runId for stale-event filtering. The Worker init cost
@@ -158,11 +166,12 @@ message with a runId for stale-event filtering. The Worker init cost
 `src/pipeline.ts::PipelineAborted` is the sentinel thrown when the signal
 fires; `main.ts` swallows it without dispatching a duplicate FSM error.
 
-Network clients (`src/verifier-client.ts`, `src/smt-client.ts`) compose
-the caller's `AbortSignal` with an `AbortSignal.timeout(...)` so a hung
-upstream can't leave the UI spinning forever. Defaults: 15s for the
-verifier, 10s for the SMT server. Override via `VITE_VERIFIER_TIMEOUT_MS`
-/ `VITE_SMT_TIMEOUT_MS`.
+The verifier client (`src/verifier-client.ts`) composes the caller's
+`AbortSignal` with an `AbortSignal.timeout(...)` so a hung upstream can't
+leave the UI spinning forever. Default 15s, override via
+`VITE_VERIFIER_TIMEOUT_MS`. `src/smt-client.ts` no longer issues network
+requests — proof queries are Worker RPCs that resolve in microseconds
+against the already-loaded local tree.
 
 The HiPKI popup is user-driven and not directly cancellable from the main
 thread; it has its own internal timeout (`hipki-popup.ts`,
@@ -187,6 +196,78 @@ This is the load-bearing guarantee for in-browser proving: a one-byte
 disagreement between the wasm builder and the Rust CLI reference is
 exactly the class of failure that produces `Too many values for input
 signal __placeholder__` (PR #40 root cause).
+
+## Revocation proof (local-first)
+
+Revocation is verified by a Sparse Merkle Tree non-membership proof over
+the user's certificate serial. The original design hit a REST endpoint
+(`GET /proof/{issuer}/{serial}`) on `moica-revocation-smt`. That leaked
+the serial to a third party on every proof attempt — a direct contradiction
+of the "privacy-preserving identity verification" premise. The web prover
+now rebuilds the tree in-browser.
+
+**Assets.** `moica-revocation-smt` release `snapshot-latest` publishes:
+
+- `smt.wasm` — Go SMT engine, ~3.5 MB, Poseidon-P256 (same hash the
+  zkID cert-chain circuit consumes — zero hash-compat risk).
+- `wasm_exec.js` — Go's JS runtime shim (~17 KB).
+- `g2-tree-snapshot.bin.gz`, `g3-tree-snapshot.bin.gz` — per-issuer tree
+  state in the binary format defined by
+  [moica-revocation-smt PR #22](https://github.com/moven0831/moica-revocation-smt/pull/22).
+  ~73 MB gzipped for G2, ~21 MB for G3.
+
+**Binary layout** (BigEndian):
+
+```
+Header (52 bytes):
+  [0:2]   magic       u16  0x534D ("SM")
+  [2:4]   version     u16  1
+  [4:8]   nodeCount   u32
+  [8:40]  rootHash    [32]byte
+  [40:44] depth       u32  (always 128 for zkID)
+  [44:52] crlNumber   u64
+
+Per node:
+  [0:1]   type        u8   0=branch, 1=leaf
+  [1:33]  hash        [32]byte
+  Branch: [33:65] left, [65:97] right        (97 bytes)
+  Leaf:   [33:65] key, [65:97] value,
+          [97:129] entryMark                 (129 bytes)
+```
+
+**Flow.**
+
+1. Setup entry kicks off the proving runtime warmup (PKs + witnesscalc).
+   This is issuer-independent and runs in the Worker.
+2. User reads their card via HiPKI. `$hipki` reaches `card_ready` with
+   the issuer derived from the subject DN.
+3. `main.ts` posts `{type:"load_smt", issuer}` to the Worker. The Worker
+   downloads `smt.wasm` + `wasm_exec.js` + the per-issuer snapshot via
+   the same `ensureAsset` pipeline used for PKs (OPFS cache + gzip
+   decompress + SHA-256 verify when `snapshot-manifest.json` is present).
+4. The Worker instantiates the Go runtime, calls `smtInitTree`, streams
+   the snapshot in 10,000-node chunks via `smtAddNodeChunk` (yielding to
+   the event loop between batches so cancel messages can land), then
+   calls `smtFinalize`.
+5. The panel flips to `ready`; `$setupReady` now requires all four
+   panels green (warmup, card, revocation, PIN) before Continue enables.
+6. During proving, the `smt` step is a Worker RPC: `main.ts` posts
+   `{type:"smt_proof", requestId, serialHex}`, the Worker calls
+   `smtCreateProof` against the loaded tree, converts the response to
+   the circuit-input shape via `convertSmtProofToCircuitInputs`, and
+   replies with `{step:"smt_proof_done", requestId, inputs}`.
+
+**Trust model.** The app trusts the GitHub Release blob (PKs and SMT
+snapshot alike). On-chain cross-verification of the snapshot root against
+the Arbitrum Sepolia `SMTRootStorage` contract would tighten this further
+and is tracked as a follow-up — it needs an RPC endpoint + ethers.js and
+isn't load-bearing for the current demo.
+
+**Test escape hatch.** `globalThis.__SMT_TEST_PROOF__` on the main thread
+(seeded by Playwright via `page.addInitScript`) short-circuits both
+`load_smt` and the proof RPC. Worker globals are isolated so the hook
+can't live in the Worker; keeping it on the main thread avoids bundling
+Go `smt.wasm` or a fake tree into the e2e harness.
 
 ## Asset cache
 
@@ -221,7 +302,9 @@ and Continue is unblocked immediately.
 - `src/screens/{landing,setup,proving}.ts` — screen renderers.
 - `src/hipki-popup.ts` — popupForm postMessage bridge.
 - `src/hipki-client.ts` — typed HiPKI surface; delegates to the popup.
-- `src/smt-client.ts` — moica-revocation-smt client with timeout.
+- `src/smt-client.ts` — main-thread wrapper that RPCs the Worker's SMT engine.
+- `src/smt-local.ts` — Worker-side Go SMT engine + streaming snapshot loader.
+- `src/smt-snapshot.ts` — binary-format parser for the PR #22 snapshot layout.
 - `src/verifier-client.ts` — go-zkid-verifier client with timeout.
 - `src/pipeline.ts` — main-thread orchestrator (challenge → sign → smt →
   build → Worker handoff).

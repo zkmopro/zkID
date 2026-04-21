@@ -8,10 +8,15 @@
 //! before it can reach the browser and reproduce PR #40's
 //! `Too many values for input signal __placeholder__` failure.
 
+use rsa::{pkcs8::DecodePublicKey, traits::PublicKeyParts, RsaPublicKey};
 use serde::Serialize;
+use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::prelude::*;
-use x509_cert::{der::Decode, Certificate};
-use zkid_input_builder::{generate_split_inputs, types::SmtCircuitInputs, MAX_CERT_CHAIN_LENGTH};
+use x509_cert::{der::{Decode, Encode}, Certificate};
+use zkid_input_builder::{
+    cert::serial_bytes_to_hex_trimmed, generate_split_inputs, types::SmtCircuitInputs,
+    MAX_CERT_CHAIN_LENGTH,
+};
 
 /// Two-JSON return shape. `cert_chain` + `device_sig` match the keys the
 /// circom witness calculator expects in its input file.
@@ -112,7 +117,40 @@ pub fn build_split_inputs(
     )
     .map_err(|e| JsError::new(&e))?;
 
-    serde_wasm_bindgen::to_value(&out).map_err(|e| JsError::new(&e.to_string()))
+    // `serde_json::Value::Object` would otherwise serialise to a JS `Map`, and
+    // `JSON.stringify(map)` returns `"{}"` — the witness calc sees zero inputs.
+    let serializer = Serializer::new().serialize_maps_as_objects(true);
+    out.serialize(&serializer)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// RSA modulus bit width of the cert's `subjectPublicKey`. Used by the web
+/// app to pick `cert_chain_rs2048` vs `cert_chain_rs4096` from the real
+/// issuer key, rather than guessing from the issuer DN string.
+#[wasm_bindgen]
+pub fn cert_modulus_bits(cert_der: &[u8]) -> Result<u32, JsError> {
+    let cert = Certificate::from_der(cert_der)
+        .map_err(|e| JsError::new(&format!("cert DER parse: {e}")))?;
+    let spki_der = cert
+        .tbs_certificate
+        .subject_public_key_info
+        .to_der()
+        .map_err(|e| JsError::new(&format!("SPKI encode: {e}")))?;
+    let pubkey = RsaPublicKey::from_public_key_der(&spki_der)
+        .map_err(|e| JsError::new(&format!("not an RSA cert: {e}")))?;
+    Ok(pubkey.n().bits() as u32)
+}
+
+/// Trimmed-hex serial of an X.509 cert. Called after HiPKI `/sign` returns —
+/// that cert may differ from the `/pkcs11info` entry, and the circuit keys
+/// off the signing cert's serial.
+#[wasm_bindgen]
+pub fn cert_serial_hex(cert_der: &[u8]) -> Result<String, JsError> {
+    let cert = Certificate::from_der(cert_der)
+        .map_err(|e| JsError::new(&format!("cert DER parse: {e}")))?;
+    Ok(serial_bytes_to_hex_trimmed(
+        cert.tbs_certificate.serial_number.as_bytes(),
+    ))
 }
 
 /// Compute `pk_blind = SHA-256(user_pk_be || tbs || "zkID/pk-commit/v1")`.

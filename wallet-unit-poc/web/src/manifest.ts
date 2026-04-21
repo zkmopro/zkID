@@ -3,6 +3,15 @@
 // are overlaid at runtime from /keys/manifest.json (published by CI in Phase 3).
 // If manifest.json is absent, hash verification is skipped so the app still
 // runs against local fixtures served by the dev proxy.
+//
+// SMT snapshot assets follow the same pattern — /smt-snapshot/* is a same-origin
+// path (dev: Vite proxy to the moica-revocation-smt release; prod: a reverse
+// proxy the deployer configures). Pointing the base URL directly at a bare
+// GitHub Release is unsupported — GitHub's CORS behaviour is not something the
+// app relies on; same-origin serving is the contract. If /keys CORS breaks,
+// /smt-snapshot breaks with it (single shared failure mode).
+
+import type { SmtIssuer } from "./smt-client";
 
 export type CircuitKind =
   | "cert_chain_rs2048"
@@ -17,6 +26,14 @@ export interface CircuitManifest {
   witnessWasmUrl: string;
   // SHA-256 of the *decompressed* bytes. Populated by hydrateManifest().
   expected: { pk: string; witnessWasm: string };
+}
+
+export interface SmtAssetManifest {
+  issuer: SmtIssuer;
+  /** /smt-snapshot/<issuer>-tree-snapshot.bin.gz in dev. */
+  snapshotUrl: string;
+  /** SHA-256 of the *decompressed* snapshot bytes. Populated by hydrateManifest(). */
+  expectedSnapshot: string;
 }
 
 export const CIRCUITS: Record<CircuitKind, CircuitManifest> = {
@@ -42,6 +59,24 @@ export const CIRCUITS: Record<CircuitKind, CircuitManifest> = {
     expected: { pk: "", witnessWasm: "" },
   },
 };
+
+export const SMT_SNAPSHOTS: Record<SmtIssuer, SmtAssetManifest> = {
+  g2: {
+    issuer: "g2",
+    snapshotUrl: "/smt-snapshot/g2-tree-snapshot.bin.gz",
+    expectedSnapshot: "",
+  },
+  g3: {
+    issuer: "g3",
+    snapshotUrl: "/smt-snapshot/g3-tree-snapshot.bin.gz",
+    expectedSnapshot: "",
+  },
+};
+
+/** Go SMT engine bytes. Not gzipped on the release — served raw. */
+export const SMT_WASM = { url: "/smt-snapshot/smt.wasm", expected: "" };
+/** Go's JS loader shim — text, not gzipped. */
+export const SMT_WASM_EXEC = { url: "/smt-snapshot/wasm_exec.js", expected: "" };
 
 interface PublishedManifest {
   assets: Record<string, { sha256_decompressed: string }>;
@@ -95,5 +130,59 @@ export async function hydrateManifest(): Promise<void> {
     } else {
       console.warn(`manifest.json missing entry for ${wgenName}; witness-wasm hash verification disabled for ${key}`);
     }
+  }
+
+  await hydrateSmtManifest();
+}
+
+/** Overlay SMT asset hashes from /smt-snapshot/snapshot-manifest.json. Shares
+ *  the "fail-open" semantics of hydrateManifest(): a missing or malformed
+ *  manifest leaves `expected*` empty so ensureAsset() skips hash verification.
+ *  That matches how local fixtures and pre-CI releases are handled for PKs. */
+async function hydrateSmtManifest(): Promise<void> {
+  let body: PublishedManifest | null = null;
+  try {
+    const r = await fetch("/smt-snapshot/snapshot-manifest.json", {
+      method: "GET",
+    });
+    if (!r.ok) {
+      console.warn(
+        `snapshot-manifest.json fetch returned ${r.status} ${r.statusText}; SMT hash verification disabled`,
+      );
+      return;
+    }
+    body = (await r.json()) as PublishedManifest;
+  } catch (err) {
+    console.warn(
+      "snapshot-manifest.json fetch/parse failed; SMT hash verification disabled:",
+      err,
+    );
+    return;
+  }
+  if (!body || typeof body !== "object" || !body.assets) {
+    console.warn(
+      "snapshot-manifest.json malformed (no `assets` object); SMT hash verification disabled",
+    );
+    return;
+  }
+  for (const issuer of Object.keys(SMT_SNAPSHOTS) as SmtIssuer[]) {
+    const m = SMT_SNAPSHOTS[issuer];
+    const name = basename(m.snapshotUrl);
+    const entry = body.assets[name];
+    if (entry && typeof entry.sha256_decompressed === "string") {
+      m.expectedSnapshot = entry.sha256_decompressed;
+    } else {
+      console.warn(
+        `snapshot-manifest.json missing entry for ${name}; snapshot hash verification disabled for ${issuer}`,
+      );
+    }
+  }
+  const wasmEntry = body.assets[basename(SMT_WASM.url)];
+  if (wasmEntry && typeof wasmEntry.sha256_decompressed === "string") {
+    SMT_WASM.expected = wasmEntry.sha256_decompressed;
+  }
+  const execEntry = body.assets[basename(SMT_WASM_EXEC.url)];
+  if (execEntry && typeof execEntry.sha256_decompressed === "string") {
+    SMT_WASM_EXEC.expected = execEntry.sha256_decompressed;
   }
 }
