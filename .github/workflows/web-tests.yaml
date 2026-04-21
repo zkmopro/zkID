@@ -184,32 +184,10 @@ jobs:
             - name: Check for PIN leaks
               run: cd wallet-unit-poc/web && bash scripts/check-no-pin-leak.sh
 
-            - name: Cache Playwright browsers
-              uses: actions/cache@v4
-              with:
-                  path: ~/.cache/ms-playwright
-                  key: playwright-${{ hashFiles('wallet-unit-poc/web/pnpm-lock.yaml') }}
-                  restore-keys: |
-                      playwright-
-
-            - name: Install Playwright browsers
-              run: cd wallet-unit-poc/web && pnpm exec playwright install --with-deps chromium
-
-            # Bypass `pnpm test:e2e` which would re-run `pnpm build`; reuse the
-            # dist/ from the previous step. `grepInvert` in playwright.config.ts
-            # skips @real specs in default mode.
-            - name: Run Playwright mock E2E
-              run: cd wallet-unit-poc/web && pnpm exec playwright test
-
-            - name: Upload Playwright report on failure
-              if: failure()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: playwright-report
-                  path: |
-                      wallet-unit-poc/web/playwright-report/
-                      wallet-unit-poc/web/test-results/
-                  retention-days: 7
+            # Playwright E2E runs locally (and, later, in a nightly workflow).
+            # The full-flow specs need ~several hundred MB of decompressed
+            # proving keys cached in OPFS, which exceeds the quota granted to
+            # Playwright's ephemeral Chromium context in CI.
 
     publish-wasm:
         needs: wasm-crate-tests
