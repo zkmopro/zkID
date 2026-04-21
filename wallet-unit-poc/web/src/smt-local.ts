@@ -249,9 +249,15 @@ async function startSmtWasm(
   const total = parseContentLength(response.headers.get("Content-Length"));
   onProgress({ phase: "wasm", bytesDone: 0, bytesTotal: total });
 
+  // Non-streaming `instantiate`: the upstream release serves smt.wasm as
+  // `application/octet-stream` (GitHub Release default), which
+  // `instantiateStreaming` rejects with "Incorrect response MIME type.
+  // Expected 'application/wasm'". Buffering the full 3.5 MB up front costs
+  // nothing meaningful and sidesteps the MIME check entirely.
+  const wasmBytes = await response.arrayBuffer();
   const GoCtor = (globalThis as unknown as { Go: new () => GoRuntime }).Go;
   const go = new GoCtor();
-  const result = await WebAssembly.instantiateStreaming(response, go.importObject);
+  const result = await WebAssembly.instantiate(wasmBytes, go.importObject);
   onProgress({ phase: "wasm", bytesDone: total, bytesTotal: total });
 
   // Go's `main()` blocks on `select{}`. Kick it off without awaiting — the
