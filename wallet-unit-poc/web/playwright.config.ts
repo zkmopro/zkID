@@ -20,6 +20,18 @@ export default defineConfig({
     timeout: 120_000,
   },
   projects: [
-    { name: "chromium", use: { browserName: "chromium" } },
+    {
+      name: "chromium",
+      use: {
+        browserName: "chromium",
+        // Playwright's ephemeral browser profile gives this origin a small
+        // OPFS quota (well under the decompressed proving-key total). On a
+        // real persistent profile the quota is much larger. Scope this to
+        // CI so local runs still exercise real-browser quota behavior.
+        ...(process.env.CI
+          ? { launchOptions: { args: ["--unlimited-storage"] } }
+          : {}),
+      },
+    },
   ],
 });
