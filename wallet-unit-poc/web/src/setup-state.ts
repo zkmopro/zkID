@@ -80,15 +80,10 @@ export const $setupReady: ReadableAtom<boolean> = computed(
     pin.status === "locked",
 );
 
-/** Reset every setup atom. Called on FSM `reset` → landing. Explicitly
- *  destroys the stored Pin so its internal slot is nulled before the atom
- *  drops the reference — the GC timing shouldn't be what makes the secret
- *  unreachable. */
+/** Reset every setup atom. Called on FSM `reset` → landing. The `Pin`
+ *  wrapper's own `consume()` is the authoritative single-use sink; the
+ *  atom update drops the reference so nothing else can reach it. */
 export function resetSetup(): void {
-  const pinNow = $pin.get();
-  if (pinNow.status === "locked") {
-    pinNow.pin.destroy();
-  }
   $hipki.set({ status: "probing" });
   $pin.set({ status: "pending" });
   $warmup.set({ status: "idle" });
@@ -104,10 +99,7 @@ export function isCardReady(): boolean {
  *  no longer has selected. */
 export function dropStalePin(): void {
   const pinNow = $pin.get();
-  if (pinNow.status === "locked") {
-    pinNow.pin.destroy();
-    $pin.set({ status: "pending" });
-  } else if (pinNow.status === "verifying") {
+  if (pinNow.status === "locked" || pinNow.status === "verifying") {
     $pin.set({ status: "pending" });
   }
 }

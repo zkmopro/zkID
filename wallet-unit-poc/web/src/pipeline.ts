@@ -126,10 +126,7 @@ export async function runProvingPipeline(
   const userSignatureB64 = await stage("sign", async () => {
     const sig = await signTbs({
       tbs: challenge.challenge_bytes,
-      // `read()` — NOT `consume()` — because the session-locked Pin is
-      // reused across "Retry proving" / "Prove again". `setup-state.ts::
-      // resetSetup` calls `destroy()` on FSM reset → landing.
-      pin: ctx.pin.read(),
+      pin: ctx.pin.consume(),
       slotDescription: ctx.card.slotDescription,
     });
     if (sig.ret_code !== 0 || sig.last_error !== 0) {

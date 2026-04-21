@@ -72,7 +72,7 @@ test("full flow reaches result and holds proof on review gate", async ({ page })
   await expect(page.getByTestId("result-prove-again")).toBeVisible();
 });
 
-test("retry from review returns to ready without sending", async ({ page }) => {
+test("retry from review routes through setup for PIN re-verify (no submit)", async ({ page }) => {
   await installMockServices(page);
   await page.goto("/");
   await page.getByTestId("start-button").click();
@@ -90,7 +90,11 @@ test("retry from review returns to ready without sending", async ({ page }) => {
     timeout: 10 * 60_000,
   });
 
-  // Retry from review → back on the ready gate, no proof sent.
+  // Retry from review → back to setup with the PIN panel reset. Strict
+  // single-use: session Pin was consumed during proving, user must
+  // re-enter to run another proving attempt.
   await page.getByTestId("review-retry").click();
-  await expect(page.getByTestId("start-proving")).toBeVisible();
+  await expect(page.getByTestId("setup-pin")).toBeVisible();
+  await expect(page.getByTestId("pin-input")).toBeEnabled();
+  await expect(page.getByTestId("pin-lock-badge")).toBeHidden();
 });

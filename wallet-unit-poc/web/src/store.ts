@@ -80,11 +80,14 @@ export function transition(state: AppState, event: AppEvent): AppState {
           }
         : state;
     case "retry_proving":
-      // From review, discard the ProvingRun; from result, the card + PIN +
-      // warm runtime are still valid. Either way, go to ready — no setup
-      // work is redone.
+      // Route to setup (not ready) because the session Pin was consumed
+      // during the proving run and needs to be re-verified. The card +
+      // warm-runtime panels stay green; the PIN panel resets to pending
+      // so the user explicitly re-enters the PIN before the next run.
+      // Strict single-use protects against a compromised session
+      // extracting the PIN after the first sign.
       return state.phase === "review" || state.phase === "result"
-        ? { phase: "ready" }
+        ? { phase: "setup" }
         : state;
     case "reset_to_setup":
       // "Back to setup" from ready/review and "Cancel" from proving. Setup

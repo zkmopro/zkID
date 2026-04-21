@@ -199,9 +199,20 @@ function boot(): void {
     triggerWarmupIfIdle();
   });
 
+  // Phases where the session Pin may have been consumed (sign step ran).
+  // Transitioning back to setup from any of these requires a fresh Verify
+  // before the next proving run.
+  const PIN_CONSUMED_PHASES: ReadonlySet<Phase> = new Set<Phase>([
+    "proving",
+    "review",
+    "submitting",
+    "result",
+  ]);
+
   let prevPhase: Phase = $state.get().phase;
   $state.listen(async (state) => {
-    const wasProving = prevPhase === "proving";
+    const cameFrom = prevPhase;
+    const wasProving = cameFrom === "proving";
     prevPhase = state.phase;
 
     // Abort active controllers on any transition out of their phase.
@@ -222,6 +233,13 @@ function boot(): void {
         // Kill the warm Worker and drop any stale challenge so the next
         // Ready mount fetches a fresh one (single-use).
         if (wasProving) killWorkerForCancel();
+        // Strict single-use Pin: drop $pin if we're arriving from a phase
+        // where the session Pin may have been consumed. Forces re-verify
+        // before the next proving run. Card + warmup stay green so the
+        // user only re-enters the PIN, not everything else.
+        if (PIN_CONSUMED_PHASES.has(cameFrom)) {
+          $pin.set({ status: "pending" });
+        }
         clearChallenge();
         triggerWarmupIfIdle();
         return;

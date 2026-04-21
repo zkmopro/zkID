@@ -31,10 +31,12 @@ Start    Continue  Start    (auto)    Send     (auto)      Prove again
 - **Review** shows proof sizes + nullifier + proving time. Proofs live
   only in memory at this point — nothing has been sent to the verifier.
   **Send proof to verifier** submits; **Retry proving** discards and
-  fetches a fresh challenge.
+  routes back through setup for PIN re-verify (strict single-use — the
+  session Pin was consumed by the sign step during this run).
 - **Submitting** is a single-spinner screen for the `/link-verify` POST.
 - **Result** shows verified/not-verified with both timings. **Prove again**
-  returns to ready and reuses the warm runtime + card + PIN.
+  routes back to setup for PIN re-verify; card + warm runtime stay green
+  so only the PIN panel needs a fresh entry.
 
 ## Quickstart
 

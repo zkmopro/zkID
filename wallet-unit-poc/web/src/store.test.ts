@@ -75,20 +75,20 @@ describe("transition", () => {
     });
   });
 
-  it("review + retry_proving → ready discards the run", () => {
+  it("review + retry_proving → setup (strict single-use: re-verify PIN)", () => {
     const next = transition(
       { phase: "review", run: makeRun() },
       { type: "retry_proving" },
     );
-    expect(next).toEqual({ phase: "ready" });
+    expect(next).toEqual({ phase: "setup" });
   });
 
-  it("result + retry_proving → ready (Prove again keeps warm runtime)", () => {
+  it("result + retry_proving → setup (strict single-use: re-verify PIN)", () => {
     const next = transition(
       { phase: "result", verified: true, provingMs: 1, submitMs: 2 },
       { type: "retry_proving" },
     );
-    expect(next).toEqual({ phase: "ready" });
+    expect(next).toEqual({ phase: "setup" });
   });
 
   it("ready + reset_to_setup → setup", () => {

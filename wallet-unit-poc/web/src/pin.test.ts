@@ -44,30 +44,4 @@ describe("Pin", () => {
     expect(p + "x").toBe("[REDACTED]x");
     expect(p.valueOf()).toBe("[REDACTED]");
   });
-
-  it("read() returns the value and can be called many times (multi-run)", () => {
-    // Regression: the session-locked Pin in $pin is reused across
-    // proving runs. Using consume() here caused Retry/Prove-again to
-    // throw at the sign step on the second run.
-    const p = new Pin("123456");
-    expect(p.read()).toBe("123456");
-    expect(p.read()).toBe("123456");
-    expect(p.read()).toBe("123456");
-    expect(p.consumed).toBe(false);
-  });
-
-  it("destroy() nulls the slot so subsequent read/consume throws", () => {
-    const p = new Pin("123456");
-    p.destroy();
-    expect(p.consumed).toBe(true);
-    expect(() => p.read()).toThrow(/already destroyed/);
-    expect(() => p.consume()).toThrow(/already consumed/);
-  });
-
-  it("destroy() is idempotent", () => {
-    const p = new Pin("123456");
-    p.destroy();
-    p.destroy();
-    expect(p.consumed).toBe(true);
-  });
 });

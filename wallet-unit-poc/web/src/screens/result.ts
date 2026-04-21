@@ -60,9 +60,10 @@ export function mountResult(root: HTMLElement): () => void {
   const homeBtn = root.querySelector<HTMLButtonElement>('[data-testid="result-home"]')!;
   const againBtn = root.querySelector<HTMLButtonElement>('[data-testid="result-prove-again"]')!;
 
-  // From `result`, "Prove again" returns to ready so the card + PIN + warm
-  // runtime are reused. From `error`, the full setup chain may be suspect,
-  // so send the user back to landing to start clean.
+  // From `result`, "Prove again" returns to setup so the PIN can be
+  // re-verified (strict single-use: session Pin was consumed during the
+  // previous sign). Card + warm runtime stay green. From `error`, the
+  // full setup chain may be suspect — send the user back to landing.
   const onAgain = () => {
     if (isError) dispatch({ type: "reset" });
     else dispatch({ type: "retry_proving" });
