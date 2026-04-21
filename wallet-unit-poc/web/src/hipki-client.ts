@@ -49,25 +49,33 @@ export interface SignTbsParams {
   tbs: string;
   /** 6-8 digit card PIN. Caller is responsible for lifetime + redaction. */
   pin: string;
+  /** Pick a specific reader by `slotDescription` from a prior
+   *  `probePkcs11Info()` call. Omit to default to the first reader. */
+  slotDescription?: string;
 }
 
-/** Full cert-chain lookup. Used once per proving run; the polling detector
- *  uses `probePkcs11Info` (no `withcert=true`) which is cheap enough to hit
- *  on an interval. Both go through the popup bridge. */
-export async function fetchPkcs11Info(): Promise<Pkcs11InfoResponse> {
-  return requestPkcs11Info(true);
+/** Full cert-chain lookup, optionally scoped to a specific reader. */
+export async function fetchPkcs11Info(
+  slotDescription?: string,
+): Promise<Pkcs11InfoResponse> {
+  return requestPkcs11Info(true, slotDescription);
 }
 
-/** Cheap probe used by the polling detector. Matches the HiPKI "IC card
- *  function check" reference page's `POST /pkcs11info` call. */
+/** Cheap probe — enumerates every connected reader without touching certs.
+ *  Use this first to populate a reader picker, then call `fetchPkcs11Info`
+ *  with the chosen `slotDescription`. */
 export async function probePkcs11Info(): Promise<Pkcs11InfoResponse> {
   return requestPkcs11Info(false);
 }
 
 async function requestPkcs11Info(
   withCert: boolean,
+  slotDescription?: string,
 ): Promise<Pkcs11InfoResponse> {
-  const body = await popupPkcs11Info<Pkcs11InfoResponse>(withCert);
+  const body = await popupPkcs11Info<Pkcs11InfoResponse>(
+    withCert,
+    slotDescription,
+  );
   if (!Array.isArray(body?.slots)) {
     throw new Error("HiPKI /pkcs11info response missing slots array");
   }
@@ -85,5 +93,5 @@ async function requestPkcs11Info(
 export async function signTbs(
   params: SignTbsParams,
 ): Promise<CardSignResponse> {
-  return popupSign<CardSignResponse>(params.tbs, params.pin);
+  return popupSign<CardSignResponse>(params.tbs, params.pin, params.slotDescription);
 }

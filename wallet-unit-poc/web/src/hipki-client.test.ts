@@ -40,7 +40,7 @@ describe("hipki-client", () => {
   describe("fetchPkcs11Info", () => {
     it("delegates to popupPkcs11Info(true) and parses the response", async () => {
       const resp = await fetchPkcs11Info();
-      expect(popup.popupPkcs11Info).toHaveBeenCalledWith(true);
+      expect(popup.popupPkcs11Info).toHaveBeenCalledWith(true, undefined);
       expect(resp.slots).toHaveLength(1);
       expect(resp.slots[0].token?.certs).toHaveLength(2);
       const ca = resp.slots[0].token!.certs.find((c) => c.label === "CA Cert");
@@ -58,7 +58,7 @@ describe("hipki-client", () => {
   describe("probePkcs11Info", () => {
     it("delegates to popupPkcs11Info(false) for cheap polling", async () => {
       const resp = await probePkcs11Info();
-      expect(popup.popupPkcs11Info).toHaveBeenCalledWith(false);
+      expect(popup.popupPkcs11Info).toHaveBeenCalledWith(false, undefined);
       expect(Array.isArray(resp.slots)).toBe(true);
     });
   });
@@ -66,7 +66,7 @@ describe("hipki-client", () => {
   describe("signTbs", () => {
     it("delegates to popupSign with tbs + pin and returns the response", async () => {
       const resp = await signTbs({ tbs: "deadbeef", pin: "123456" });
-      expect(popup.popupSign).toHaveBeenCalledWith("deadbeef", "123456");
+      expect(popup.popupSign).toHaveBeenCalledWith("deadbeef", "123456", undefined);
       expect(resp.ret_code).toBe(0);
       expect(resp.last_error).toBe(0);
       expect(resp.cardSN).toBe("TEST000000000000");

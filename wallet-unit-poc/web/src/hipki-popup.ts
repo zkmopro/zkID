@@ -128,30 +128,38 @@ export function popupRequest(
  *  can pin the response type at the call site without a secondary cast.
  *
  *  The popupForm's func→endpoint table:
- *    `GetUserCert` → `/pkcs11info?withcert=true` (full cert chain)
- *    `CheckEnvir`  → `/pkcs11info` (cheap probe, no certs)
- *  We pick based on `withCert`. */
+ *    `GetUserCert` → `/pkcs11info?withcert=true` (full cert chain; pass
+ *                    `slotDescription` to scope to a specific reader)
+ *    `CheckEnvir`  → `/pkcs11info` (cheap probe; enumerate all readers) */
 export async function popupPkcs11Info<T = Record<string, unknown>>(
   withCert: boolean,
+  slotDescription?: string,
 ): Promise<T> {
-  const body = await popupRequest({
+  const payload: Record<string, unknown> = {
     func: withCert ? "GetUserCert" : "CheckEnvir",
-  });
+  };
+  if (slotDescription) payload.slotDescription = slotDescription;
+  const body = await popupRequest(payload);
   return JSON.parse(body) as T;
 }
 
 /** Convenience wrapper for /sign via the bridge. PIN is passed straight
- *  through; caller is responsible for redaction (use the `Pin` wrapper). */
+ *  through; caller is responsible for redaction (use the `Pin` wrapper).
+ *  `slotDescription` picks which reader to sign with (defaults to the
+ *  first reader if omitted). */
 export async function popupSign<T = Record<string, unknown>>(
   tbs: string,
   pin: string,
+  slotDescription?: string,
 ): Promise<T> {
-  const body = await popupRequest({
+  const payload: Record<string, unknown> = {
     func: "MakeSignature",
     tbs,
     pin,
     hashAlgorithm: "SHA256",
     signatureType: "PKCS1",
-  });
+  };
+  if (slotDescription) payload.slotDescription = slotDescription;
+  const body = await popupRequest(payload);
   return JSON.parse(body) as T;
 }

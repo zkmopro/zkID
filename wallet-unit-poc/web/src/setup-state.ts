@@ -2,34 +2,38 @@
 // these values survive Retry: after proving, we want to re-prove without
 // re-detecting the card or re-typing the PIN.
 //
-// `$hipki` is click-driven through the popupForm bridge. The popup is
-// single-shot — each detect or sign opens its own popup that self-closes
-// after one response. States:
-//   - `probing`: initial, no detect attempted yet
-//   - `detecting`: a detect popup is in flight
-//   - `not_installed` / `no_reader` / `no_reader_or_card`: detect surfaced
-//     a problem the user can act on (install HiPKI, plug in reader,
-//     insert card)
-//   - `card_inserted`: detect saw a card but enrichment is pending
-//   - `card_ready`: cert parsed into a CardContext, PIN entry unlocked
+// Two-step HiPKI flow (mirrors selfTest.htm):
+//   1. user clicks "Detect readers" → popup runs `CheckEnvir` → we get
+//      back a slot list with optional `token` per slot. UI flips to
+//      `readers_listed` and renders a picker.
+//   2. user picks a slot + clicks "Read card" → popup runs `GetUserCert`
+//      scoped to that `slotDescription` → we parse the cert into a
+//      CardContext. UI flips to `card_ready` which unlocks PIN entry.
 
 import { atom, type WritableAtom } from "nanostores";
 
 import type { CardContext } from "./pipeline";
 import type { Pin } from "./pin";
 
+/** Snapshot of one slot the picker shows the user. */
+export interface ReaderSlot {
+  slotDescription: string;
+  /** Card serial if a card is inserted, else undefined. */
+  cardSN?: string;
+}
+
 export type HipkiState =
   | { status: "probing" }
   | { status: "detecting" }
   | { status: "not_installed"; message: string }
-  | { status: "no_reader"; serverVersion?: string }
-  | { status: "no_reader_or_card"; serverVersion?: string; slots: string[] }
   | {
-      status: "card_inserted";
-      cardSN: string;
-      slotDescription?: string;
+      status: "readers_listed";
+      slots: ReaderSlot[];
       serverVersion?: string;
+      /** Slot the user picked (defaults to the first slot with a card). */
+      selectedSlot?: string;
     }
+  | { status: "reading"; slotDescription: string }
   | {
       status: "card_ready";
       card: CardContext;

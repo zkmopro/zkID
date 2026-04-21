@@ -1,16 +1,23 @@
 // Setup screen: three click-driven panels gate Continue.
 //
-// HiPKI's `popupForm` bridge is single-shot: each request opens its own
-// popup, gets one response, and the popup self-closes. So polling is not
-// possible here — the user clicks "Detect card" once. On success the
-// HiPKI panel shows the parsed CardContext and unlocks the PIN input. PIN
-// verify is also one click, one popup. The asset preflight runs
-// automatically since it does not need the popup.
+// Two-step HiPKI flow mirrors selfTest.htm:
+//   1. "Detect readers" → popup CheckEnvir → enumerate slots → render
+//      picker. User sees one row per reader with the card serial if
+//      inserted, or a "no card" hint.
+//   2. "Read card" (after picking a slot) → popup GetUserCert scoped to
+//      that slotDescription → parse cert into CardContext → unlock PIN.
+//
+// Each step is one popup, one response, popup self-closes. Popup needs
+// a user gesture so we never auto-trigger.
 
 import { ensureAsset } from "../asset-download";
 import { bytesToHex } from "../bytes";
 import { humanBytes } from "../format";
-import { signTbs } from "../hipki-client";
+import {
+  probePkcs11Info,
+  signTbs,
+  type Pkcs11InfoResponse,
+} from "../hipki-client";
 import { CIRCUITS } from "../manifest";
 import { Pin } from "../pin";
 import { buildCardContext } from "../pipeline";
@@ -20,6 +27,7 @@ import {
   isCardReady,
   type HipkiState,
   type PinState,
+  type ReaderSlot,
 } from "../setup-state";
 import { dispatch } from "../store";
 
@@ -36,6 +44,13 @@ type AssetsState =
   | { status: "downloading"; label: string; bytesDone: number; bytesTotal: number }
   | { status: "ok" }
   | { status: "error"; message: string };
+
+function summariseSlots(resp: Pkcs11InfoResponse): ReaderSlot[] {
+  return (resp.slots ?? []).map((s) => ({
+    slotDescription: s.slotDescription ?? "(unnamed reader)",
+    cardSN: s.token?.serialNumber,
+  }));
+}
 
 export function mountSetup(root: HTMLElement): () => void {
   root.innerHTML = `
@@ -56,21 +71,25 @@ export function mountSetup(root: HTMLElement): () => void {
           </div>
         </div>
         <div class="setup-panel" data-testid="setup-hipki">
-          <div class="panel-title">HiPKI card</div>
-          <div class="panel-body" data-testid="hipki-body">Click to detect your card.</div>
+          <div class="panel-title">Card reader</div>
+          <div class="panel-body" data-testid="hipki-body">Click to detect connected card readers.</div>
           <div class="panel-detail" data-testid="hipki-detail"></div>
+          <div class="panel-readers" data-testid="hipki-readers" hidden></div>
           <div class="panel-actions">
             <button class="secondary-button" data-testid="hipki-detect" type="button">
-              Detect card
+              Detect readers
+            </button>
+            <button class="secondary-button" data-testid="hipki-read" type="button" hidden>
+              Read card
             </button>
           </div>
         </div>
         <div class="setup-panel" data-testid="setup-pin">
           <div class="panel-title">PIN verification</div>
-          <div class="panel-warning">
+          <div class="panel-warning" data-testid="pin-warning">
             Wrong PIN three times will lock your Taiwan Citizen Card.
           </div>
-          <div class="panel-body" data-testid="pin-body">Detect your card first.</div>
+          <div class="panel-body" data-testid="pin-body">Detect and read your card first.</div>
           <div class="panel-actions">
             <input
               class="pin-input"
@@ -105,10 +124,14 @@ export function mountSetup(root: HTMLElement): () => void {
   const assetsRetry = root.querySelector<HTMLButtonElement>('[data-testid="assets-retry"]')!;
   const hipkiBody = root.querySelector<HTMLElement>('[data-testid="hipki-body"]')!;
   const hipkiDetail = root.querySelector<HTMLElement>('[data-testid="hipki-detail"]')!;
+  const readersEl = root.querySelector<HTMLElement>('[data-testid="hipki-readers"]')!;
   const detectBtn = root.querySelector<HTMLButtonElement>('[data-testid="hipki-detect"]')!;
+  const readBtn = root.querySelector<HTMLButtonElement>('[data-testid="hipki-read"]')!;
+  const pinWarning = root.querySelector<HTMLElement>('[data-testid="pin-warning"]')!;
   const pinBody = root.querySelector<HTMLElement>('[data-testid="pin-body"]')!;
   const pinInput = root.querySelector<HTMLInputElement>('[data-testid="pin-input"]')!;
   const pinVerify = root.querySelector<HTMLButtonElement>('[data-testid="pin-verify"]')!;
+  const pinPanel = root.querySelector<HTMLElement>('[data-testid="setup-pin"]')!;
   const backBtn = root.querySelector<HTMLButtonElement>('[data-testid="back-button"]')!;
   const continueBtn = root.querySelector<HTMLButtonElement>('[data-testid="continue-button"]')!;
 
@@ -141,56 +164,110 @@ export function mountSetup(root: HTMLElement): () => void {
     refreshContinue();
   }
 
+  function paintReaders(slots: ReaderSlot[], selected: string | undefined): void {
+    if (slots.length === 0) {
+      readersEl.hidden = true;
+      readersEl.innerHTML = "";
+      return;
+    }
+    readersEl.hidden = false;
+    readersEl.innerHTML = slots
+      .map((s, i) => {
+        const id = `hipki-slot-${i}`;
+        const checked = s.slotDescription === selected ? "checked" : "";
+        const disabled = s.cardSN ? "" : "disabled";
+        const cardLabel = s.cardSN
+          ? `card ${s.cardSN}`
+          : "no card inserted";
+        return `
+          <label class="reader-row${disabled ? " reader-row-disabled" : ""}">
+            <input type="radio" name="hipki-slot" id="${id}"
+              data-testid="${id}" value="${escapeAttr(s.slotDescription)}"
+              ${checked} ${disabled} />
+            <span class="reader-name">${escapeText(s.slotDescription)}</span>
+            <span class="reader-card">${escapeText(cardLabel)}</span>
+          </label>
+        `;
+      })
+      .join("");
+    // Wire up change events for whichever radio rows are enabled.
+    readersEl.querySelectorAll<HTMLInputElement>('input[type="radio"]').forEach((el) => {
+      el.addEventListener("change", () => {
+        const state = $hipki.get();
+        if (state.status !== "readers_listed") return;
+        $hipki.set({ ...state, selectedSlot: el.value });
+      });
+    });
+  }
+
   function paintHipki(state: HipkiState): void {
     switch (state.status) {
       case "probing":
-        hipkiBody.textContent = "Click to detect your card.";
+        hipkiBody.textContent = "Click to detect connected card readers.";
         hipkiDetail.textContent = "";
-        detectBtn.textContent = "Detect card";
+        readersEl.hidden = true;
+        readersEl.innerHTML = "";
+        detectBtn.textContent = "Detect readers";
         detectBtn.disabled = false;
+        readBtn.hidden = true;
+        readBtn.disabled = true;
         break;
       case "detecting":
-        hipkiBody.textContent = "Reading card via HiPKI popup…";
-        hipkiDetail.textContent = "A small popup window will appear briefly.";
+        hipkiBody.textContent = "Asking HiPKI for the reader list…";
+        hipkiDetail.textContent = "A small popup will appear briefly.";
         detectBtn.disabled = true;
+        readBtn.hidden = true;
         break;
       case "not_installed":
         hipkiBody.textContent = "HiPKI client not detected";
         hipkiDetail.textContent = state.message
           ? state.message
           : "Install the HiPKI LocalSignServer on this machine and keep it running.";
+        readersEl.hidden = true;
+        readersEl.innerHTML = "";
         detectBtn.textContent = "Try again";
         detectBtn.disabled = false;
+        readBtn.hidden = true;
+        readBtn.disabled = true;
         break;
-      case "no_reader":
-        hipkiBody.textContent = "No card reader plugged in";
-        hipkiDetail.textContent = state.serverVersion
-          ? `LocalSignServer v${state.serverVersion}`
-          : "";
-        detectBtn.textContent = "Try again";
-        detectBtn.disabled = false;
-        break;
-      case "no_reader_or_card":
-        hipkiBody.textContent = "Reader present, but no card inserted";
-        hipkiDetail.textContent =
-          state.slots.length > 0
-            ? `Reader: ${state.slots.join(", ")}`
+      case "readers_listed": {
+        const insertedCount = state.slots.filter((s) => s.cardSN).length;
+        if (state.slots.length === 0) {
+          hipkiBody.textContent = "No card readers found";
+          hipkiDetail.textContent = "Plug in a reader and try again.";
+        } else if (insertedCount === 0) {
+          hipkiBody.textContent = `${state.slots.length} reader(s) detected, no card inserted`;
+          hipkiDetail.textContent = "Insert your card and click Detect again.";
+        } else {
+          hipkiBody.textContent = `${insertedCount} card(s) ready — pick one and click Read card`;
+          hipkiDetail.textContent = state.serverVersion
+            ? `LocalSignServer v${state.serverVersion}`
             : "";
-        detectBtn.textContent = "Try again";
+        }
+        paintReaders(state.slots, state.selectedSlot);
+        detectBtn.textContent = "Re-detect";
         detectBtn.disabled = false;
+        readBtn.hidden = false;
+        readBtn.disabled = !state.selectedSlot;
         break;
-      case "card_inserted":
-        hipkiBody.textContent = `Card detected — ${state.cardSN}`;
-        hipkiDetail.textContent = "Reading certificate…";
+      }
+      case "reading":
+        hipkiBody.textContent = `Reading card from ${state.slotDescription}…`;
+        hipkiDetail.textContent = "A small popup will appear briefly.";
         detectBtn.disabled = true;
+        readBtn.hidden = false;
+        readBtn.disabled = true;
         break;
       case "card_ready":
         hipkiBody.textContent = `Card ${state.cardSN}${state.subjectDN ? ` — ${state.subjectDN}` : ""}`;
         hipkiDetail.textContent = state.serverVersion
           ? `LocalSignServer v${state.serverVersion}`
           : "";
+        readersEl.hidden = true;
+        readersEl.innerHTML = "";
         detectBtn.textContent = "Re-detect";
         detectBtn.disabled = false;
+        readBtn.hidden = true;
         break;
     }
     refreshPinControls();
@@ -198,21 +275,32 @@ export function mountSetup(root: HTMLElement): () => void {
   }
 
   function paintPin(state: PinState): void {
+    // Reset modifier classes; each branch sets the one it needs.
+    pinPanel.classList.remove("setup-panel-ok");
+    pinBody.classList.remove("pin-body-ok", "pin-body-error");
+    // The lock-warning is only relevant before success — hide it once
+    // verified so the user gets a clean "ready" surface, not a red hint
+    // that suggests their correct PIN was risky.
+    pinWarning.hidden = state.status === "locked";
+
     switch (state.status) {
       case "pending":
         pinBody.textContent = isCardReady()
           ? "Enter your PIN, then Verify."
-          : "Detect your card first.";
+          : "Detect and read your card first.";
         break;
       case "verifying":
         pinBody.textContent = "Verifying via HiPKI popup…";
         break;
       case "locked":
         pinBody.textContent = "PIN verified. Ready to prove.";
+        pinBody.classList.add("pin-body-ok");
+        pinPanel.classList.add("setup-panel-ok");
         pinInput.value = "";
         break;
       case "error":
         pinBody.textContent = `Error: ${state.message} (${state.attemptsRemaining} attempts left)`;
+        pinBody.classList.add("pin-body-error");
         break;
     }
     refreshPinControls();
@@ -272,12 +360,7 @@ export function mountSetup(root: HTMLElement): () => void {
     paintAssets();
   }
 
-  // --- HiPKI detect ---------------------------------------------------
-  //
-  // Each click opens a single popup that hits /pkcs11info?withcert=true
-  // (via `buildCardContext` -> `fetchPkcs11Info` -> `popupPkcs11Info`),
-  // returns one response, and self-closes. We discard any prior verified
-  // PIN since it may not match the new card.
+  // --- HiPKI two-step ------------------------------------------------
 
   function dropStalePin(): void {
     const pinNow = $pin.get();
@@ -286,26 +369,51 @@ export function mountSetup(root: HTMLElement): () => void {
     }
   }
 
-  async function detectCard(): Promise<void> {
+  async function detectReaders(): Promise<void> {
     dropStalePin();
     $hipki.set({ status: "detecting" });
     try {
-      const detected = await buildCardContext();
+      const resp = await probePkcs11Info();
+      const slots = summariseSlots(resp);
+      // Default selection: first slot with a card; otherwise first slot.
+      const defaultSelect =
+        slots.find((s) => s.cardSN)?.slotDescription ?? slots[0]?.slotDescription;
+      $hipki.set({
+        status: "readers_listed",
+        slots,
+        serverVersion: resp.serverVersion,
+        selectedSlot: defaultSelect,
+      });
+    } catch (err) {
+      $hipki.set({
+        status: "not_installed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  async function readSelectedCard(): Promise<void> {
+    const state = $hipki.get();
+    if (state.status !== "readers_listed" || !state.selectedSlot) return;
+    const slotDescription = state.selectedSlot;
+    dropStalePin();
+    $hipki.set({ status: "reading", slotDescription });
+    try {
+      const detected = await buildCardContext(slotDescription);
       $hipki.set({
         status: "card_ready",
         card: detected.card,
         cardSN: detected.cardSN ?? "(no serial)",
         subjectDN: detected.subjectDN,
+        serverVersion: state.serverVersion,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // The popup closes itself after one response; a thrown error here
-      // is almost always "popup blocked" or "popup timeout".
       $hipki.set({ status: "not_installed", message });
     }
   }
 
-  // --- PIN verification -----------------------------------------------
+  // --- PIN verification ----------------------------------------------
 
   async function verifyPin(): Promise<void> {
     const hipkiState = $hipki.get();
@@ -324,7 +432,11 @@ export function mountSetup(root: HTMLElement): () => void {
     pinInput.value = "";
 
     try {
-      const resp = await signTbs({ tbs: PIN_TEST_TBS_HEX, pin: candidatePin.consume() });
+      const resp = await signTbs({
+        tbs: PIN_TEST_TBS_HEX,
+        pin: candidatePin.consume(),
+        slotDescription: hipkiState.card.slotDescription,
+      });
       if (resp.ret_code !== 0 || resp.last_error !== 0) {
         $pin.set({
           status: "error",
@@ -351,7 +463,8 @@ export function mountSetup(root: HTMLElement): () => void {
   // --- Handlers + subscriptions ---------------------------------------
 
   const onAssetsRetry = () => void downloadAssets();
-  const onDetect = () => void detectCard();
+  const onDetect = () => void detectReaders();
+  const onRead = () => void readSelectedCard();
   const onPinVerify = () => void verifyPin();
   const onPinInput = () => refreshPinControls();
   const onContinue = () => {
@@ -362,6 +475,7 @@ export function mountSetup(root: HTMLElement): () => void {
 
   assetsRetry.addEventListener("click", onAssetsRetry);
   detectBtn.addEventListener("click", onDetect);
+  readBtn.addEventListener("click", onRead);
   pinVerify.addEventListener("click", onPinVerify);
   pinInput.addEventListener("input", onPinInput);
   continueBtn.addEventListener("click", onContinue);
@@ -379,6 +493,7 @@ export function mountSetup(root: HTMLElement): () => void {
   return () => {
     assetsRetry.removeEventListener("click", onAssetsRetry);
     detectBtn.removeEventListener("click", onDetect);
+    readBtn.removeEventListener("click", onRead);
     pinVerify.removeEventListener("click", onPinVerify);
     pinInput.removeEventListener("input", onPinInput);
     continueBtn.removeEventListener("click", onContinue);
@@ -386,4 +501,15 @@ export function mountSetup(root: HTMLElement): () => void {
     unsubHipki();
     unsubPin();
   };
+}
+
+function escapeText(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeAttr(s: string): string {
+  return escapeText(s).replace(/"/g, "&quot;");
 }

@@ -22,6 +22,9 @@ export interface CardContext {
   kIssuer: 17 | 34;
   issuer: SmtIssuer;
   certKind: CircuitKind;
+  /** Reader the cert was read from. Threaded through to /sign so the
+   *  proving signature uses the same physical card. */
+  slotDescription?: string;
 }
 
 /** What `buildCardContext` returns — the pipeline context plus the humanised
@@ -87,6 +90,7 @@ export async function runProvingPipeline(
     const sig = await signTbs({
       tbs: bytesToHex(tbs),
       pin: ctx.pin.consume(),
+      slotDescription: ctx.card.slotDescription,
     });
     if (sig.ret_code !== 0 || sig.last_error !== 0) {
       throw new Error(
@@ -150,10 +154,19 @@ export function deriveIssuer(issuerDn: string | undefined): SmtIssuer {
 }
 
 /** Fetch + parse the HiPKI pkcs11info response into a `CardContext` plus the
- *  humanised fields the setup panel shows. Single HiPKI round-trip. */
-export async function buildCardContext(): Promise<DetectedCard> {
-  const info = await fetchPkcs11Info();
-  const token = info.slots[0]?.token;
+ *  humanised fields the setup panel shows. Pass `slotDescription` to scope
+ *  to a specific reader; otherwise the popup picks the first reader and
+ *  the response may not match what the user picked in a multi-reader UI. */
+export async function buildCardContext(
+  slotDescription?: string,
+): Promise<DetectedCard> {
+  const info = await fetchPkcs11Info(slotDescription);
+  // If `slotDescription` was supplied, the popup scopes the response to
+  // that reader, so `slots[0]` is the one we asked for. Otherwise we just
+  // take the first slot with a token.
+  const slot =
+    info.slots.find((s) => s.token) ?? info.slots[0];
+  const token = slot?.token;
   if (!token) throw new Error("HiPKI: no token in /pkcs11info response");
   const userEntry = token.certs.find((c) => c.label !== "CA Cert");
   const caEntry = token.certs.find((c) => c.label === "CA Cert");
@@ -173,6 +186,7 @@ export async function buildCardContext(): Promise<DetectedCard> {
       kIssuer,
       issuer,
       certKind,
+      slotDescription: slotDescription ?? slot?.slotDescription,
     },
     subjectDN: userEntry.subjectDN,
     cardSN: token.serialNumber,
