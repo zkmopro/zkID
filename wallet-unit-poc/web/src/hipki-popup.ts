@@ -125,13 +125,17 @@ export function popupRequest(
 }
 
 /** Convenience wrapper for /pkcs11info via the bridge. Generic so callers
- *  can pin the response type at the call site without a secondary cast. */
+ *  can pin the response type at the call site without a secondary cast.
+ *
+ *  The popupForm's func→endpoint table:
+ *    `GetUserCert` → `/pkcs11info?withcert=true` (full cert chain)
+ *    `CheckEnvir`  → `/pkcs11info` (cheap probe, no certs)
+ *  We pick based on `withCert`. */
 export async function popupPkcs11Info<T = Record<string, unknown>>(
   withCert: boolean,
 ): Promise<T> {
   const body = await popupRequest({
-    func: "pkcs11info",
-    withcert: withCert,
+    func: withCert ? "GetUserCert" : "CheckEnvir",
   });
   return JSON.parse(body) as T;
 }
