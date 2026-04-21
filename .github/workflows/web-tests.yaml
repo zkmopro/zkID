@@ -1,0 +1,224 @@
+name: web-tests
+
+on:
+    push:
+        branches:
+            - main
+        paths:
+            - "wallet-unit-poc/spartan2-wasm/**"
+            - "wallet-unit-poc/web/**"
+            - "wallet-unit-poc/zkid-input-builder/**"
+            - "wallet-unit-poc/circom/circuits/**"
+            - ".github/workflows/web-tests.yaml"
+            - ".github/workflows/compile-circuits.yaml"
+    pull_request:
+        paths:
+            - "wallet-unit-poc/spartan2-wasm/**"
+            - "wallet-unit-poc/web/**"
+            - "wallet-unit-poc/zkid-input-builder/**"
+            - "wallet-unit-poc/circom/circuits/**"
+            - ".github/workflows/web-tests.yaml"
+            - ".github/workflows/compile-circuits.yaml"
+    workflow_dispatch:
+
+env:
+    NODE_VERSION: "20"
+    PNPM_VERSION: "10"
+    # Must match the `wasm-bindgen` version resolved in
+    # wallet-unit-poc/spartan2-wasm/Cargo.lock. Bump both together.
+    WASM_BINDGEN_CLI_VERSION: "0.2.118"
+
+jobs:
+    compile-circuits:
+        uses: ./.github/workflows/compile-circuits.yaml
+
+    wasm-crate-tests:
+        needs: compile-circuits
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v5
+
+            # native_drift loads C++ witness calculators at
+            # wallet-unit-poc/circom/build/cpp/ and R1CS at
+            # wallet-unit-poc/circom/build/<circuit>/<circuit>_js/.
+            - name: Download circuit C++ artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  name: circuit-cpp
+                  path: wallet-unit-poc/circom/build/cpp/
+
+            - name: Download R1CS artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  name: circuit-r1cs
+                  path: wallet-unit-poc/circom/build/
+
+            - name: Install system dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install --yes \
+                    build-essential \
+                    libgmp-dev \
+                    libsodium-dev \
+                    nasm \
+                    nlohmann-json3-dev
+
+            - name: Set up Rust (nightly + wasm32)
+              uses: dtolnay/rust-toolchain@nightly
+              with:
+                  targets: wasm32-unknown-unknown
+                  components: rust-src
+
+            - name: Cache Cargo registry and git
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                  key: web-tests-cargo-${{ hashFiles('wallet-unit-poc/spartan2-wasm/Cargo.lock') }}
+                  restore-keys: |
+                      web-tests-cargo-
+
+            - name: Install wasm-bindgen-cli
+              uses: taiki-e/install-action@v2
+              with:
+                  tool: wasm-bindgen-cli@${{ env.WASM_BINDGEN_CLI_VERSION }}
+
+            - name: Run spartan2-wasm native unit tests
+              run: |
+                  cd wallet-unit-poc/spartan2-wasm
+                  cargo test --release --lib
+
+            - name: Run spartan2-wasm native_drift cross-parity test
+              run: |
+                  cd wallet-unit-poc/spartan2-wasm
+                  cargo test --release --test native_drift
+
+            - name: Build spartan2-wasm for wasm32 target
+              run: |
+                  cd wallet-unit-poc/spartan2-wasm
+                  cargo +nightly build --target wasm32-unknown-unknown --release \
+                    -Z build-std=panic_abort,std
+
+            - name: Run wasm-bindgen
+              run: |
+                  cd wallet-unit-poc/spartan2-wasm
+                  wasm-bindgen --target web --out-dir pkg \
+                    target/wasm32-unknown-unknown/release/spartan2_wasm.wasm
+
+            - name: Upload spartan2-wasm pkg artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: spartan2-wasm-pkg
+                  path: wallet-unit-poc/spartan2-wasm/pkg/
+                  retention-days: 3
+
+    web-app:
+        needs: compile-circuits
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v5
+
+            # `pnpm build` calls scripts/copy-assets.sh which reads circuit
+            # .wasm + witness_calculator.js from wallet-unit-poc/circom/build/.
+            - name: Download circuit WASM artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  name: circuit-wasm
+                  path: wallet-unit-poc/circom/build/
+
+            - name: Install system dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install --yes \
+                    build-essential \
+                    libgmp-dev \
+                    libsodium-dev \
+                    nasm \
+                    nlohmann-json3-dev
+
+            - name: Set up Rust (nightly + wasm32)
+              uses: dtolnay/rust-toolchain@nightly
+              with:
+                  targets: wasm32-unknown-unknown
+                  components: rust-src
+
+            - name: Cache Cargo registry and git
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                  key: web-tests-cargo-${{ hashFiles('wallet-unit-poc/spartan2-wasm/Cargo.lock') }}
+                  restore-keys: |
+                      web-tests-cargo-
+
+            - name: Install wasm-bindgen-cli
+              uses: taiki-e/install-action@v2
+              with:
+                  tool: wasm-bindgen-cli@${{ env.WASM_BINDGEN_CLI_VERSION }}
+
+            - name: Set up pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: ${{ env.PNPM_VERSION }}
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ env.NODE_VERSION }}
+                  cache: "pnpm"
+                  cache-dependency-path: wallet-unit-poc/web/pnpm-lock.yaml
+
+            - name: Install web dependencies
+              run: cd wallet-unit-poc/web && pnpm install --frozen-lockfile
+
+            # `pnpm build` regenerates src/wasm/ via build:wasm + copy:assets
+            # before running tsc --noEmit. Running `pnpm lint` (tsc) first on a
+            # fresh checkout fails because src/wasm/ is gitignored.
+            - name: Build web app (wasm + vite + tsc)
+              run: cd wallet-unit-poc/web && pnpm build
+
+            - name: Check for PIN leaks
+              run: cd wallet-unit-poc/web && bash scripts/check-no-pin-leak.sh
+
+            # Playwright E2E runs locally (and, later, in a nightly workflow).
+            # The full-flow specs need ~several hundred MB of decompressed
+            # proving keys cached in OPFS, which exceeds the quota granted to
+            # Playwright's ephemeral Chromium context in CI.
+
+    publish-wasm:
+        needs: wasm-crate-tests
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+
+        permissions:
+            contents: write
+
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Download spartan2-wasm pkg artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: spartan2-wasm-pkg
+                  path: wallet-unit-poc/spartan2-wasm/pkg/
+
+            - name: Gzip release artifacts
+              run: |
+                  set -euo pipefail
+                  cd wallet-unit-poc/spartan2-wasm/pkg
+                  gzip -k spartan2_wasm.js
+                  gzip -k spartan2_wasm_bg.wasm
+
+            - name: Upload wasm artifacts to GitHub Release
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: latest
+                  files: |
+                      wallet-unit-poc/spartan2-wasm/pkg/spartan2_wasm.js.gz
+                      wallet-unit-poc/spartan2-wasm/pkg/spartan2_wasm_bg.wasm.gz
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
