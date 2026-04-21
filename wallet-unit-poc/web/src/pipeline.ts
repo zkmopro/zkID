@@ -3,7 +3,7 @@
 // and handing the inputs off to the already-warm Worker for the CPU/wasm
 // proving steps. Submission is owned by the Review screen via main.ts.
 
-import init, { cert_modulus_bits } from "./wasm/spartan2_wasm.js";
+import init, { cert_modulus_bits, cert_serial_hex } from "./wasm/spartan2_wasm.js";
 
 import { base64ToBytes, challengeBytesToTbs } from "./bytes";
 import { fetchPkcs11Info, signTbs } from "./hipki-client";
@@ -124,26 +124,43 @@ export async function runProvingPipeline(
   const tbs = challengeBytesToTbs(challenge.challenge_bytes);
 
   // The HiPKI popup is user-driven and can't be cancelled mid-flight; we
-  // let it complete naturally and bail on the next abort check.
-  const userSignatureB64 = await stage("sign", async () => {
-    const sig = await signTbs({
-      tbs: challenge.challenge_bytes,
-      pin: ctx.pin.consume(),
-      slotDescription: ctx.card.slotDescription,
+  // let it complete naturally and bail on the next abort check. Capture the
+  // cert that /sign returns alongside the signature — MOICA tokens can carry
+  // multiple user certs (signing + encryption), and /pkcs11info may return a
+  // different one than /sign used. The native CLI (main.rs:168) and the
+  // circuit both require the cert whose private key produced the signature,
+  // so we key everything downstream off sign_response.certb64 instead of the
+  // cert we cached during setup.
+  const { signatureB64: userSignatureB64, userCertDer: signedUserCertDer } =
+    await stage("sign", async () => {
+      const sig = await signTbs({
+        tbs: challenge.challenge_bytes,
+        pin: ctx.pin.consume(),
+        slotDescription: ctx.card.slotDescription,
+      });
+      if (sig.ret_code !== 0 || sig.last_error !== 0) {
+        throw new Error(
+          `HiPKI sign failed: ret_code=${sig.ret_code} last_error=${sig.last_error}`,
+        );
+      }
+      if (!sig.certb64) {
+        throw new Error("HiPKI sign response missing certb64 (needed to proof-match the signing key)");
+      }
+      return {
+        signatureB64: sig.signature,
+        userCertDer: base64ToBytes(sig.certb64),
+      };
     });
-    if (sig.ret_code !== 0 || sig.last_error !== 0) {
-      throw new Error(
-        `HiPKI sign failed: ret_code=${sig.ret_code} last_error=${sig.last_error}`,
-      );
-    }
-    return sig.signature;
-  });
   checkAborted(signal);
+
+  await ensureWasm();
+  const signedSerialHex = cert_serial_hex(signedUserCertDer);
+  const signedNullifier = `zkid-${signedSerialHex}`;
 
   const smtInputs = await stage("smt", () =>
     fetchSmtProof(worker, {
       issuer: ctx.card.issuer,
-      serialHex: ctx.card.serialHex,
+      serialHex: signedSerialHex,
       signal,
     }),
   );
@@ -151,7 +168,11 @@ export async function runProvingPipeline(
 
   const { certJson, deviceJson } = await stage("build", () =>
     buildInputs({
-      card: ctx.card,
+      card: {
+        ...ctx.card,
+        userCertDer: signedUserCertDer,
+        serialHex: signedSerialHex,
+      },
       userSignatureB64,
       tbs,
       smtInputs,
@@ -164,7 +185,7 @@ export async function runProvingPipeline(
     deviceJson,
     certKind: ctx.card.certKind,
     challengeId: challenge.challenge_id,
-    nullifier: ctx.nullifier,
+    nullifier: signedNullifier,
   };
   const msg: WorkerInMsg = { type: "prove", input };
   worker.postMessage(msg);

@@ -152,6 +152,30 @@ pub fn cert_modulus_bits(cert_der: &[u8]) -> Result<u32, JsError> {
     Ok(bits)
 }
 
+/// Parse the cert's `serialNumber` field and return it as a hex string with
+/// leading zero bytes stripped. Matches `serial_bytes_to_hex_trimmed` in
+/// `zkid-input-builder::cert` so the web path produces the same serial hex
+/// the native CLI uses. Required because the user's real cert (and its
+/// serial) is only known after HiPKI `/sign` returns — the /pkcs11info
+/// entry may be a different cert from the same card.
+#[wasm_bindgen]
+pub fn cert_serial_hex(cert_der: &[u8]) -> Result<String, JsError> {
+    let cert = Certificate::from_der(cert_der)
+        .map_err(|e| JsError::new(&format!("cert DER parse: {e}")))?;
+    let bytes = cert.tbs_certificate.serial_number.as_bytes();
+    let trimmed: Vec<u8> = bytes
+        .iter()
+        .skip_while(|&&b| b == 0)
+        .copied()
+        .collect();
+    let out = if trimmed.is_empty() { bytes } else { &trimmed };
+    let mut s = String::with_capacity(out.len() * 2);
+    for b in out {
+        s.push_str(&format!("{b:02x}"));
+    }
+    Ok(s)
+}
+
 /// Compute `pk_blind = SHA-256(user_pk_be || tbs || "zkID/pk-commit/v1")`.
 /// Exposed for debugging and UI consistency checks; the main wasm entry
 /// point `build_split_inputs` computes this internally.
