@@ -10,6 +10,8 @@ import { atom, computed, type ReadableAtom, type WritableAtom } from "nanostores
 
 import type { CardContext } from "./pipeline";
 import type { Pin } from "./pin";
+import type { SmtIssuer } from "./smt-client";
+import type { SmtLoadPhase } from "./smt-local";
 
 /** Snapshot of one slot the picker shows the user. */
 export interface ReaderSlot {
@@ -61,6 +63,21 @@ export type WarmupState =
   | { status: "ready" }
   | { status: "error"; message: string };
 
+/** Revocation-tree load status. Triggered by HiPKI reaching `card_ready`
+ *  (because the issuer is only known after the card is parsed) and gates
+ *  Continue alongside $warmup / $hipki / $pin. */
+export type SmtState =
+  | { status: "idle" }
+  | {
+      status: "running";
+      issuer: SmtIssuer;
+      phase: SmtLoadPhase;
+      bytesDone: number;
+      bytesTotal: number;
+    }
+  | { status: "ready"; issuer: SmtIssuer; rootHex: string; crlNumber: string }
+  | { status: "error"; message: string };
+
 export const $hipki: WritableAtom<HipkiState> = atom<HipkiState>({
   status: "probing",
 });
@@ -70,13 +87,15 @@ export const $pin: WritableAtom<PinState> = atom<PinState>({
 export const $warmup: WritableAtom<WarmupState> = atom<WarmupState>({
   status: "idle",
 });
+export const $smt: WritableAtom<SmtState> = atom<SmtState>({ status: "idle" });
 
-/** Derived: true when all three setup panels are green. Gates Continue. */
+/** Derived: true when every setup panel is green. Gates Continue. */
 export const $setupReady: ReadableAtom<boolean> = computed(
-  [$warmup, $hipki, $pin],
-  (warmup, hipki, pin) =>
+  [$warmup, $hipki, $smt, $pin],
+  (warmup, hipki, smt, pin) =>
     warmup.status === "ready" &&
     hipki.status === "card_ready" &&
+    smt.status === "ready" &&
     pin.status === "locked",
 );
 
@@ -87,6 +106,7 @@ export function resetSetup(): void {
   $hipki.set({ status: "probing" });
   $pin.set({ status: "pending" });
   $warmup.set({ status: "idle" });
+  $smt.set({ status: "idle" });
 }
 
 /** Single source of truth for "card is parsed and ready for PIN entry". */

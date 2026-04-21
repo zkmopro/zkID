@@ -40,7 +40,7 @@ export const STEP_ORDER: Step[] = [
 const STEP_TITLES: Record<Step, string> = {
   challenge: "Fetch challenge",
   sign: "Sign with card",
-  smt: "Fetch revocation proof",
+  smt: "Check revocation locally",
   build: "Build circuit inputs",
   prove_cert: "Prove cert-chain",
   prove_device: "Prove device-sig",

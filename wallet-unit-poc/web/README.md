@@ -18,16 +18,18 @@ Start    Continue  Start    (auto)    Send     (auto)      Prove again
          to prov  proving           proof                  / Home
 ```
 
-- **Setup** has three panels (proving runtime download + wasm/thread-pool
-  warmup, HiPKI card detect + read, PIN verify with 3-attempt lockout).
-  The **Continue to proving** button is disabled until all three are green.
+- **Setup** has four panels (proving runtime download + wasm/thread-pool
+  warmup, HiPKI card detect + read, per-issuer revocation-tree snapshot
+  download + local rebuild, PIN verify with 3-attempt lockout). The
+  **Continue to proving** button is disabled until all four are green.
 - **Ready** is a confirmation gate — user reviews the card + runtime state
   before the proving run begins (which will open a HiPKI popup to sign a
   fresh challenge).
-- **Proving** runs 6 steps: fetch challenge → sign with card → fetch
-  revocation proof → build inputs → prove cert-chain → prove device-sig.
+- **Proving** runs 6 steps: fetch challenge → sign with card → check
+  revocation locally → build inputs → prove cert-chain → prove device-sig.
   Per-step durations appear as each step completes. Cancel returns the
-  user to setup.
+  user to setup. The revocation step queries an SMT that was rebuilt
+  in-browser during setup, so the card's serial never leaves the device.
 - **Review** shows proof sizes + nullifier + proving time. Proofs live
   only in memory at this point — nothing has been sent to the verifier.
   **Send proof to verifier** submits; **Retry proving** discards and
@@ -69,7 +71,9 @@ caches them locally; subsequent runs skip the download.
 | `src/witness.ts`         | CJS→ESM shim for circom's `witness_calculator.js` (with strict-mode patch)     |
 | `src/verifier-client.ts` | `POST /challenge` + `POST /link-verify` against `go-zkid-verifier`             |
 | `src/hipki-client.ts`    | `GET /pkcs11info` + `POST /sign` against the user's HiPKI LocalSignServer      |
-| `src/smt-client.ts`      | `GET /proof/{issuer}/{serial}` against moica-revocation-smt → circuit inputs   |
+| `src/smt-client.ts`      | Worker-backed SMT proof query → `SmtCircuitInputs` (no network)               |
+| `src/smt-local.ts`       | Worker-side SMT engine: loads Go `smt.wasm`, streams snapshot, serves proofs  |
+| `src/smt-snapshot.ts`    | Binary snapshot parser (header + node chunking); engine-agnostic              |
 | `src/inputs.ts`          | Wraps wasm `build_split_inputs` → `{ certJson, deviceJson }`                   |
 | `src/pipeline.ts`        | Main-thread pipeline: challenge → sign → SMT → build → postMessage to Worker   |
 | `src/pin.ts`             | Single-use PIN wrapper; redacts on every observable surface                    |
@@ -122,28 +126,48 @@ On click, the Worker resolves these URLs (all gzipped on the server):
 - `/keys/device_sig_rs2048.wasm.gz`
 - `/keys/manifest.json` (optional; adds SHA-256 verification when present)
 
+Revocation-tree assets (downloaded after the user reads their card, because the
+per-issuer snapshot is only known at that point):
+
+- `/smt-snapshot/smt.wasm` (Go SMT engine, ~3.5 MB, raw)
+- `/smt-snapshot/wasm_exec.js` (Go's JS shim, ~17 KB, raw)
+- `/smt-snapshot/g2-tree-snapshot.bin.gz` (~73 MB gzipped; only fetched when
+  the card was issued by MOICA-G2)
+- `/smt-snapshot/g3-tree-snapshot.bin.gz` (~21 MB gzipped; MOICA-G3 only)
+- `/smt-snapshot/snapshot-manifest.json` (optional; adds SHA-256 verification)
+
 In dev, `/keys/*` is proxied to `https://github.com/zkmopro/zkID/releases/download/latest/<asset>`
-via `vite.config.ts`. In prod, configure your host to serve those assets from a
-same-origin path (or adjust `src/manifest.ts` to an absolute URL you control).
+and `/smt-snapshot/*` is proxied to
+`https://github.com/moven0831/moica-revocation-smt/releases/download/snapshot-latest/<asset>`
+via `vite.config.ts`. In prod, configure your host to serve those two paths
+same-origin (either via a reverse proxy, or by caching the release assets on a
+CORS-enabled origin you control). Pointing either env var directly at a bare
+`github.com` release URL is **not supported** — the app never relies on GitHub
+Release CORS behaviour; the two paths share a single failure mode.
 
 Verifying keys are **not** downloaded to the browser — verification runs on the
 Go server and it has its own copy.
 
 ## External services
 
-Three services the browser talks to at runtime. Each is configurable via a
-`VITE_*` env var (see `.env.example`):
+Two services the browser talks to at runtime, plus one asset source. Each is
+configurable via a `VITE_*` env var (see `.env.example`):
 
-| Service                 | Env var                       | Default                          | Purpose                                            |
-| ----------------------- | ----------------------------- | -------------------------------- | -------------------------------------------------- |
-| `go-zkid-verifier`      | `VITE_VERIFIER_BASE_URL`      | `http://localhost:8080`          | Challenge + `link-verify`                          |
-| HiPKI LocalSignServer   | `VITE_HIPKI_BASE_URL`         | `http://localhost:61161`         | `pkcs11info` + `sign` via popupForm postMessage    |
-| `moica-revocation-smt`  | `VITE_SMT_BASE_URL`           | `http://localhost:3000`          | SMT non-membership proofs                          |
+| Service / source          | Env var                            | Default                          | Purpose                                            |
+| ------------------------- | ---------------------------------- | -------------------------------- | -------------------------------------------------- |
+| `go-zkid-verifier`        | `VITE_VERIFIER_BASE_URL`           | `http://localhost:8080`          | Challenge + `link-verify`                          |
+| HiPKI LocalSignServer     | `VITE_HIPKI_BASE_URL`              | `http://localhost:61161`         | `pkcs11info` + `sign` via popupForm postMessage    |
+| `moica-revocation-smt`    | (dev proxy)                        | `/smt-snapshot` → GH release     | Binary SMT snapshot + `smt.wasm` (read-only asset) |
 
-Plus `VITE_SMT_ISSUER` (default `g2`, use `g3` for RSA-4096 issuer chains).
+The revocation-tree path replaces the previous `moica-revocation-smt` REST
+server: `/proof/{issuer}/{serial}` leaked the user's serial to a third-party
+on every proof, which undermined the privacy premise. The app now downloads
+the full snapshot once, rebuilds the tree in-browser via the Go-compiled
+`smt.wasm`, and queries it locally.
+
 Per-request timeouts are configurable via `VITE_VERIFIER_TIMEOUT_MS`
-(default 15000) and `VITE_SMT_TIMEOUT_MS` (default 10000) — a hung server
-aborts cleanly instead of leaving the UI spinning.
+(default 15000) — a hung verifier aborts cleanly instead of leaving the UI
+spinning.
 
 ### HiPKI CORS + mixed-content (why we use the popup bridge)
 
@@ -161,8 +185,10 @@ LocalSignServer, its own XHRs are unblocked. See
 for the full protocol and the COOP/COEP tradeoff this forces (single-
 threaded proving fallback when `crossOriginIsolated === false`).
 
-The SMT server still rides `VITE_SMT_BASE_URL` directly; configure CORS
-on that server or run it behind a same-origin proxy in production.
+Revocation-tree assets ride `/smt-snapshot/*` (same shape as `/keys/*`) —
+configure the prod host to reverse-proxy that path to the
+`moica-revocation-smt` release, or set `VITE_SMT_SNAPSHOT_BASE_URL` to an
+absolute URL on a CORS-enabled origin you control.
 
 ## Production deployment
 
@@ -173,8 +199,10 @@ Production needs three things the dev proxy provides for free:
    SharedArrayBuffer / multi-threaded proving.
 2. **A reverse proxy from `/hipki/*` to the user's `localhost:61161`** so
    browser fetches are same-origin and bypass HiPKI's missing CORS headers.
-3. **A reverse proxy from `/smt/*`** to the SMT server (or set
-   `VITE_SMT_BASE_URL` to an absolute URL on a CORS-enabled host).
+3. **A reverse proxy from `/smt-snapshot/*`** to
+   `https://github.com/moven0831/moica-revocation-smt/releases/download/snapshot-latest/`
+   (or set `VITE_SMT_SNAPSHOT_BASE_URL` to an absolute URL on a CORS-enabled
+   host). GitHub Release CORS behaviour is not a contract the app relies on.
 
 A standard CDN (GitHub Pages, plain Netlify) can do (1) but not (2) — the
 HiPKI server runs on the **user's** machine, not the CDN's. Two patterns

@@ -5,7 +5,7 @@
 
 import { humanBytes } from "./format";
 import type { CircuitKind as Kind } from "./manifest";
-import { $warmup } from "./setup-state";
+import { $smt, $warmup } from "./setup-state";
 import { dispatch } from "./store";
 import {
   STEP_ORDER,
@@ -100,6 +100,30 @@ export function applyProgress(p: Progress): void {
       $warmup.set({ status: "ready" });
       return;
     }
+    case "smt_load": {
+      $smt.set({
+        status: "running",
+        issuer: p.issuer,
+        phase: p.phase,
+        bytesDone: p.bytesDone,
+        bytesTotal: p.bytesTotal,
+      });
+      return;
+    }
+    case "smt_ready": {
+      $smt.set({
+        status: "ready",
+        issuer: p.issuer,
+        rootHex: p.rootHex,
+        crlNumber: p.crlNumber,
+      });
+      return;
+    }
+    case "smt_proof_done":
+    case "smt_proof_error":
+      // Routed via addEventListener on the main thread (smt-client.ts).
+      // No UI side effect needed here.
+      return;
     case "witness": {
       applyWitness(p);
       return;
@@ -133,10 +157,14 @@ export function applyProgress(p: Progress): void {
     }
     case "error": {
       const e = p as ErrorEvent;
-      // Warmup errors route to $warmup (Assets panel); proving errors land
-      // on whichever proving step is live.
+      // Warmup errors route to $warmup (Assets panel); SMT engine load errors
+      // route to $smt; proving errors land on whichever proving step is live.
       if (e.where === "warmup") {
         $warmup.set({ status: "error", message: e.message });
+        return;
+      }
+      if (e.where === "smt_load") {
+        $smt.set({ status: "error", message: e.message });
         return;
       }
       let target: Step | undefined;

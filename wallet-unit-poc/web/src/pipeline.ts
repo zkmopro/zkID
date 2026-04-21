@@ -139,7 +139,7 @@ export async function runProvingPipeline(
   checkAborted(signal);
 
   const smtInputs = await stage("smt", () =>
-    fetchSmtProof({
+    fetchSmtProof(worker, {
       issuer: ctx.card.issuer,
       serialHex: ctx.card.serialHex,
       signal,

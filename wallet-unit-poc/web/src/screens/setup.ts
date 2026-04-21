@@ -16,12 +16,14 @@ import {
   $hipki,
   $pin,
   $setupReady,
+  $smt,
   $warmup,
   dropStalePin,
   isCardReady,
   type HipkiState,
   type PinState,
   type ReaderSlot,
+  type SmtState,
   type WarmupState,
 } from "../setup-state";
 import { dispatch } from "../store";
@@ -79,6 +81,15 @@ export function mountSetup(root: HTMLElement): () => void {
             </button>
           </div>
         </div>
+        <div class="setup-panel" data-testid="setup-smt">
+          <div class="panel-title">Revocation tree</div>
+          <div class="panel-body" data-testid="smt-body">Read your card to begin.</div>
+          <div class="panel-actions">
+            <button class="secondary-button" data-testid="smt-retry" type="button" hidden>
+              Retry
+            </button>
+          </div>
+        </div>
         <div class="setup-panel" data-testid="setup-pin">
           <div class="panel-title">PIN verification</div>
           <div class="panel-warning" data-testid="pin-warning">
@@ -121,6 +132,9 @@ export function mountSetup(root: HTMLElement): () => void {
   const assetsBody = root.querySelector<HTMLElement>('[data-testid="assets-body"]')!;
   const assetsRetry = root.querySelector<HTMLButtonElement>('[data-testid="assets-retry"]')!;
   const assetsPanel = root.querySelector<HTMLElement>('[data-testid="setup-assets"]')!;
+  const smtPanel = root.querySelector<HTMLElement>('[data-testid="setup-smt"]')!;
+  const smtBody = root.querySelector<HTMLElement>('[data-testid="smt-body"]')!;
+  const smtRetry = root.querySelector<HTMLButtonElement>('[data-testid="smt-retry"]')!;
   const hipkiBody = root.querySelector<HTMLElement>('[data-testid="hipki-body"]')!;
   const hipkiDetail = root.querySelector<HTMLElement>('[data-testid="hipki-detail"]')!;
   const readersEl = root.querySelector<HTMLElement>('[data-testid="hipki-readers"]')!;
@@ -136,6 +150,58 @@ export function mountSetup(root: HTMLElement): () => void {
   const continueBtn = root.querySelector<HTMLButtonElement>('[data-testid="continue-button"]')!;
 
   // --- Painters -------------------------------------------------------
+
+  type RunningSmt = Extract<SmtState, { status: "running" }>;
+
+  function smtPhaseLabel(phase: RunningSmt["phase"]): string {
+    switch (phase) {
+      case "wasm":
+        return "loading SMT engine";
+      case "snapshot":
+        return "downloading revocation snapshot";
+      case "ingest":
+        return "rebuilding revocation tree";
+    }
+  }
+
+  function paintSmt(state: SmtState): void {
+    smtPanel.classList.remove("setup-panel-ok");
+    switch (state.status) {
+      case "idle":
+        smtBody.textContent = isCardReady()
+          ? "Loading revocation data for your card…"
+          : "Read your card to begin.";
+        smtRetry.hidden = true;
+        break;
+      case "running": {
+        const label = smtPhaseLabel(state.phase);
+        const bytes =
+          state.bytesTotal > 0
+            ? state.phase === "ingest"
+              ? ` — ${state.bytesDone.toLocaleString()} / ${state.bytesTotal.toLocaleString()} nodes`
+              : ` — ${humanBytes(state.bytesDone, "0 B")} / ${humanBytes(state.bytesTotal, "0 B")}`
+            : state.bytesDone > 0 && state.phase !== "ingest"
+              ? ` — ${humanBytes(state.bytesDone, "0 B")}`
+              : "";
+        smtBody.textContent = `${label}${bytes}`;
+        smtRetry.hidden = true;
+        break;
+      }
+      case "ready":
+        smtBody.textContent = `Revocation tree ready (CRL #${state.crlNumber}, issuer ${state.issuer.toUpperCase()}).`;
+        smtPanel.classList.add("setup-panel-ok");
+        smtRetry.hidden = false;
+        smtRetry.textContent = "Re-download";
+        smtRetry.disabled = false;
+        break;
+      case "error":
+        smtBody.textContent = `Error: ${state.message}`;
+        smtRetry.hidden = false;
+        smtRetry.textContent = "Retry";
+        smtRetry.disabled = false;
+        break;
+    }
+  }
 
   function paintWarmup(state: WarmupState): void {
     assetsPanel.classList.remove("setup-panel-ok");
@@ -355,6 +421,12 @@ export function mountSetup(root: HTMLElement): () => void {
     $warmup.set({ status: "idle" });
   }
 
+  function retrySmt(): void {
+    // main.ts listens for idle SMT during the setup phase (with a ready
+    // card) and re-kicks `load_smt` on the Worker.
+    $smt.set({ status: "idle" });
+  }
+
   // --- HiPKI two-step ------------------------------------------------
 
   async function detectReaders(): Promise<void> {
@@ -449,6 +521,7 @@ export function mountSetup(root: HTMLElement): () => void {
   // --- Handlers + subscriptions ---------------------------------------
 
   const onAssetsRetry = () => retryWarmup();
+  const onSmtRetry = () => retrySmt();
   const onDetect = () => void detectReaders();
   const onRead = () => void readSelectedCard();
   const onPinVerify = () => void verifyPin();
@@ -460,6 +533,7 @@ export function mountSetup(root: HTMLElement): () => void {
   const onBack = () => dispatch({ type: "reset" });
 
   assetsRetry.addEventListener("click", onAssetsRetry);
+  smtRetry.addEventListener("click", onSmtRetry);
   detectBtn.addEventListener("click", onDetect);
   readBtn.addEventListener("click", onRead);
   pinVerify.addEventListener("click", onPinVerify);
@@ -468,17 +542,25 @@ export function mountSetup(root: HTMLElement): () => void {
   backBtn.addEventListener("click", onBack);
 
   const unsubWarmup = $warmup.listen((state) => paintWarmup(state));
-  const unsubHipki = $hipki.listen((state) => paintHipki(state));
+  const unsubSmt = $smt.listen((state) => paintSmt(state));
+  const unsubHipki = $hipki.listen((state) => {
+    paintHipki(state);
+    // Refresh the SMT panel so its body text reflects the new card-ready
+    // state (idle message flips from "Read your card" to "Loading…").
+    paintSmt($smt.get());
+  });
   const unsubPin = $pin.listen((state) => paintPin(state));
   const unsubReady = $setupReady.listen((ready) => refreshContinue(ready));
 
   paintWarmup($warmup.get());
+  paintSmt($smt.get());
   paintHipki($hipki.get());
   paintPin($pin.get());
   refreshContinue($setupReady.get());
 
   return () => {
     assetsRetry.removeEventListener("click", onAssetsRetry);
+    smtRetry.removeEventListener("click", onSmtRetry);
     detectBtn.removeEventListener("click", onDetect);
     readBtn.removeEventListener("click", onRead);
     pinVerify.removeEventListener("click", onPinVerify);
@@ -486,6 +568,7 @@ export function mountSetup(root: HTMLElement): () => void {
     continueBtn.removeEventListener("click", onContinue);
     backBtn.removeEventListener("click", onBack);
     unsubWarmup();
+    unsubSmt();
     unsubHipki();
     unsubPin();
     unsubReady();
