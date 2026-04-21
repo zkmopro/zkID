@@ -2,35 +2,26 @@
 //
 // HiPKI's LocalSignServer at http://localhost:61161 doesn't send CORS
 // headers, so direct `fetch()` from any other origin is blocked even
-// though the server returns 200. The official workaround (HiPKI Citizen
-// Card series, blog 7) is `popupForm`: the LocalSignServer hosts a tiny
-// HTML page at /popupForm. Because that page IS hosted at
-// http://localhost:61161, its own XHRs to /pkcs11info, /sign, etc. are
-// same-origin and unblocked. Our app communicates with the popup via
+// though the server returns 200. The workaround is `popupForm`: the
+// LocalSignServer hosts a tiny HTML page at /popupForm. Because that
+// page IS hosted at http://localhost:61161, its own XHRs to the local
+// API are same-origin and unblocked. Our app talks to the popup via
 // window.postMessage, which works across origins by design.
 //
-// Protocol the popupForm expects (reverse-engineered from the blog post
-// at https://medium.com/chouhsiang/...-popupform-...):
+// Protocol the popupForm actually implements (verified against the
+// HiPKI sample at https://medium.com/chouhsiang/...-popupform-...):
 //   1. window.open("http://localhost:61161/popupForm")
-//   2. popup posts the literal string "getTbs" to window.opener once it's
-//      ready to accept commands.
-//   3. our app posts JSON.stringify(payload) — payload is the request as
-//      the underlying HiPKI endpoint would expect it (e.g. {tbs, pin,
-//      hashAlgorithm, signatureType} for /sign). The popup decides which
-//      endpoint to hit based on payload shape.
-//   4. popup runs the operation and posts back the raw responseText
-//      (a JSON string) via window.opener.postMessage(...).
+//   2. popup posts `JSON.stringify({func:"getTbs"})` to window.opener
+//      once it's ready to accept commands.
+//   3. our app posts `JSON.stringify(payload)` — `payload.func` selects
+//      the action ("pkcs11info", "MakeSignature", ...).
+//   4. popup runs the operation, posts back the raw responseText, and
+//      then calls `window.close()` on itself.
 //
-// Limitations:
-//  * `popupForm` uses `window.opener`, so the bridge only works from a
-//    popup window — not an iframe.
-//  * Browsers gate `window.open` to user-gesture handlers. Each session
-//    needs at least one click on a button that opens the popup.
-//  * `Cross-Origin-Opener-Policy: same-origin` severs `window.opener`
-//    for cross-origin popups; we must use `same-origin-allow-popups`.
-//
-// Single-flight: at most one HiPKI request is in flight through the
-// bridge. The popupForm doesn't carry a request id, so we serialise.
+// **Single-shot per popup.** The popup self-closes after one response.
+// Each request needs its own `window.open()`, which requires a user
+// gesture. Polling through this bridge is not possible — every probe
+// would need a click. Setup UI is structured around that.
 
 import { stripTrailingSlash } from "./url-utils";
 
@@ -39,13 +30,8 @@ const HIPKI_BASE =
 
 const POPUP_PATH = "/popupForm";
 const POPUP_WINDOW_FEATURES = "width=480,height=320,resizable=yes,scrollbars=yes";
-
-let popup: Window | null = null;
-let popupOrigin: string | null = null;
-let pendingReady: { resolve: () => void; reject: (e: Error) => void } | null = null;
-let pendingResponse: { resolve: (text: string) => void; reject: (e: Error) => void; timeoutId: ReturnType<typeof setTimeout> } | null = null;
-let messageListener: ((ev: MessageEvent) => void) | null = null;
-let inflight: Promise<string> | null = null;
+const READY_TIMEOUT_MS = 10_000;
+const RESPONSE_TIMEOUT_MS = 30_000;
 
 function originOf(url: string): string {
   try {
@@ -55,118 +41,87 @@ function originOf(url: string): string {
   }
 }
 
-export function isPopupReady(): boolean {
-  return popup !== null && !popup.closed && popupOrigin !== null;
+/** Look-alike check for the popup's ready signal (`{func:"getTbs"}`). */
+function isReadySignal(data: unknown): boolean {
+  if (typeof data !== "string") return false;
+  try {
+    const parsed = JSON.parse(data) as { func?: unknown };
+    return parsed?.func === "getTbs";
+  } catch {
+    return false;
+  }
 }
 
 /**
- * Open the LocalSignServer popup and wait for its `getTbs` ready signal.
- * Must be called from a user-gesture handler (button click) so the browser
- * doesn't pop-block. Idempotent: returns immediately if a live popup
- * already exists.
+ * Open one popup, send one request, await one response, then let the
+ * popup self-close. Must be called from a user-gesture handler
+ * (button click) so the browser doesn't pop-block.
  */
-export function openHipkiPopup(baseUrl: string = HIPKI_BASE): Promise<void> {
-  if (isPopupReady()) return Promise.resolve();
+export function popupRequest(
+  payload: Record<string, unknown>,
+  baseUrl: string = HIPKI_BASE,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const target = `${stripTrailingSlash(baseUrl)}${POPUP_PATH}`;
+    const expectedOrigin = originOf(target);
+    const popup = window.open(target, "hipkiPopup", POPUP_WINDOW_FEATURES);
+    if (!popup) {
+      reject(new Error("HiPKI popup blocked - allow popups for this site"));
+      return;
+    }
 
-  const target = `${stripTrailingSlash(baseUrl)}${POPUP_PATH}`;
-  popupOrigin = originOf(target);
-  popup = window.open(target, "hipkiPopup", POPUP_WINDOW_FEATURES);
-  if (!popup) {
-    popupOrigin = null;
-    return Promise.reject(
-      new Error("HiPKI popup blocked - allow popups for this site"),
-    );
-  }
+    let ready = false;
+    let settled = false;
+    const cleanup = (): void => {
+      window.removeEventListener("message", onMessage);
+      clearTimeout(readyTimer);
+      clearTimeout(responseTimer);
+    };
 
-  if (!messageListener) {
-    messageListener = (ev: MessageEvent) => {
-      // Origin-filter first. Browser extensions postMessage objects into
-      // every window; the HiPKI popupForm logs `JSON.parse("[object Object]")`
-      // errors when those reach it, which is harmless noise on the popup
-      // side but a sign that we MUST stay strict on our side.
-      if (ev.origin !== popupOrigin) return;
+    const finish = (
+      kind: "ok" | "err",
+      payload: string | Error,
+    ): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (kind === "ok") resolve(payload as string);
+      else reject(payload as Error);
+    };
+
+    const onMessage = (ev: MessageEvent): void => {
+      // Browser extensions postMessage objects into every window; reject
+      // anything that isn't from the popup's origin or isn't a string.
+      if (ev.origin !== expectedOrigin) return;
       const data = ev.data;
-      if (data === "getTbs") {
-        pendingReady?.resolve();
-        pendingReady = null;
+      if (typeof data !== "string") return;
+      if (!ready) {
+        if (isReadySignal(data)) {
+          ready = true;
+          clearTimeout(readyTimer);
+          // Send the request payload now that the popup is listening.
+          popup.postMessage(JSON.stringify(payload), expectedOrigin);
+        }
         return;
       }
-      if (typeof data === "string" && pendingResponse) {
-        clearTimeout(pendingResponse.timeoutId);
-        pendingResponse.resolve(data);
-        pendingResponse = null;
-      }
+      // Any subsequent string from the popup is the responseText.
+      finish("ok", data);
     };
-    window.addEventListener("message", messageListener);
-  }
 
-  return new Promise<void>((resolve, reject) => {
-    pendingReady = { resolve, reject };
-    setTimeout(() => {
-      if (pendingReady) {
-        // On timeout we must also tear down the popup state. Otherwise
-        // `popup` / `popupOrigin` stay set, `isPopupReady()` returns true,
-        // and the next `openHipkiPopup` short-circuits without arming a
-        // fresh readiness handshake — the bridge would be half-alive.
-        pendingReady.reject(new Error("HiPKI popup did not respond"));
-        pendingReady = null;
-        closeHipkiPopup();
+    window.addEventListener("message", onMessage);
+
+    const readyTimer = setTimeout(() => {
+      if (!ready) {
+        if (!popup.closed) popup.close();
+        finish("err", new Error("HiPKI popup did not signal ready"));
       }
-    }, 10_000);
+    }, READY_TIMEOUT_MS);
+
+    const responseTimer = setTimeout(() => {
+      if (!popup.closed) popup.close();
+      finish("err", new Error("HiPKI popup timeout"));
+    }, RESPONSE_TIMEOUT_MS);
   });
-}
-
-export function closeHipkiPopup(): void {
-  if (popup && !popup.closed) popup.close();
-  popup = null;
-  popupOrigin = null;
-  pendingReady = null;
-  if (pendingResponse) {
-    clearTimeout(pendingResponse.timeoutId);
-    pendingResponse.reject(new Error("HiPKI popup closed"));
-    pendingResponse = null;
-  }
-  inflight = null;
-  if (messageListener) {
-    window.removeEventListener("message", messageListener);
-    messageListener = null;
-  }
-}
-
-/**
- * Post a payload to the popup and resolve with the raw response body.
- * Serialised: a second call queues until the first resolves. The popup's
- * id-less protocol can't correlate concurrent requests, so we wait.
- */
-export function postToHipkiPopup(
-  payload: Record<string, unknown>,
-  timeoutMs = 30_000,
-): Promise<string> {
-  const run = async (): Promise<string> => {
-    if (!popup || popup.closed || !popupOrigin) {
-      throw new Error("HiPKI popup not open");
-    }
-    return new Promise<string>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        pendingResponse = null;
-        reject(new Error("HiPKI popup timeout"));
-      }, timeoutMs);
-      pendingResponse = { resolve, reject, timeoutId };
-      popup!.postMessage(JSON.stringify(payload), popupOrigin!);
-    });
-  };
-
-  // Run after any in-flight request settles (success OR failure — we don't
-  // want one bad call to deadlock the chain). The caller sees `next`'s real
-  // outcome; `inflight` is a separate pointer that never rejects, so the
-  // chain keeps advancing.
-  const prev = inflight ?? Promise.resolve("");
-  const next = prev.then(run, run);
-  inflight = next.then(
-    () => "",
-    () => "",
-  );
-  return next;
 }
 
 /** Convenience wrapper for /pkcs11info via the bridge. Generic so callers
@@ -174,7 +129,7 @@ export function postToHipkiPopup(
 export async function popupPkcs11Info<T = Record<string, unknown>>(
   withCert: boolean,
 ): Promise<T> {
-  const body = await postToHipkiPopup({
+  const body = await popupRequest({
     func: "pkcs11info",
     withcert: withCert,
   });
@@ -187,7 +142,7 @@ export async function popupSign<T = Record<string, unknown>>(
   tbs: string,
   pin: string,
 ): Promise<T> {
-  const body = await postToHipkiPopup({
+  const body = await popupRequest({
     func: "MakeSignature",
     tbs,
     pin,
