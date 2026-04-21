@@ -29,7 +29,6 @@ function boot(): void {
     console.error("worker error", ev);
   };
 
-  let currentRun = 0;
   $state.listen(async (state) => {
     if (state.phase === "landing") {
       // Dropping setup state on return-to-landing ensures the next pass
@@ -40,7 +39,6 @@ function boot(): void {
     }
     if (state.phase !== "proving") return;
 
-    const runId = ++currentRun;
     resetUi();
     result.set({ kind: "running" });
 
@@ -64,22 +62,19 @@ function boot(): void {
     }
 
     try {
+      // No cancellation today: if the user hits Retry mid-run, the in-flight
+      // proof completes and posts its `done`/`error` to the FSM, racing the
+      // new run. Phase 5 introduces an AbortController threaded into
+      // `runProvingPipeline` so Retry can cancel cleanly.
       await runProvingPipeline(worker, {
         card: hipkiState.card,
         pin: pinState.pin,
-        // Nullifier is opaque to the prover; Phase 5 will replace this with
-        // a user-scoped identifier. For now a stable placeholder keeps the
-        // verifier's duplicate-detection noise-free within one session.
         nullifier: `zkid-${hipkiState.card.serialHex}`,
       });
     } catch {
       // `runProvingPipeline` already dispatched `pipeline_error`; swallow
       // here so the listener doesn't surface a duplicate.
     }
-    // Stale-run guard: if the user hit Retry while we were mid-run, the
-    // next `$state.listen` invocation will increment `currentRun` and
-    // start fresh. The completed run's proof is discarded.
-    if (runId !== currentRun) return;
   });
 }
 

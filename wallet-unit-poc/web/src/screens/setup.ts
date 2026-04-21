@@ -166,39 +166,57 @@ export function mountSetup(root: HTMLElement): () => void {
     refreshContinue();
   }
 
+  // Cache of the slot list last rendered so we can rebuild the DOM only
+  // when the slot set itself changes, not on every selection change.
+  // Rebuilding on selection would destroy focus and drop in-flight clicks
+  // on adjacent rows.
+  let renderedSlotsKey: string | null = null;
+
+  function slotsKey(slots: ReaderSlot[]): string {
+    return slots.map((s) => `${s.slotDescription}|${s.cardSN ?? ""}`).join("\n");
+  }
+
   function paintReaders(slots: ReaderSlot[], selected: string | undefined): void {
     if (slots.length === 0) {
+      renderedSlotsKey = null;
       readersEl.hidden = true;
-      readersEl.innerHTML = "";
+      readersEl.textContent = "";
       return;
     }
     readersEl.hidden = false;
-    readersEl.innerHTML = slots
-      .map((s, i) => {
-        const id = `hipki-slot-${i}`;
-        const checked = s.slotDescription === selected ? "checked" : "";
-        const disabled = s.cardSN ? "" : "disabled";
-        const cardLabel = s.cardSN
-          ? `card ${s.cardSN}`
-          : "no card inserted";
-        return `
-          <label class="reader-row${disabled ? " reader-row-disabled" : ""}">
-            <input type="radio" name="hipki-slot" id="${id}"
-              data-testid="${id}" value="${escapeAttr(s.slotDescription)}"
-              ${checked} ${disabled} />
-            <span class="reader-name">${escapeText(s.slotDescription)}</span>
-            <span class="reader-card">${escapeText(cardLabel)}</span>
-          </label>
-        `;
-      })
-      .join("");
-    // Wire up change events for whichever radio rows are enabled.
-    readersEl.querySelectorAll<HTMLInputElement>('input[type="radio"]').forEach((el) => {
-      el.addEventListener("change", () => {
-        const state = $hipki.get();
-        if (state.status !== "readers_listed") return;
-        $hipki.set({ ...state, selectedSlot: el.value });
+    const key = slotsKey(slots);
+    if (key !== renderedSlotsKey) {
+      renderedSlotsKey = key;
+      readersEl.innerHTML = slots
+        .map((s, i) => {
+          const id = `hipki-slot-${i}`;
+          const disabled = s.cardSN ? "" : "disabled";
+          const cardLabel = s.cardSN
+            ? `card ${s.cardSN}`
+            : "no card inserted";
+          return `
+            <label class="reader-row${disabled ? " reader-row-disabled" : ""}">
+              <input type="radio" name="hipki-slot" id="${id}"
+                data-testid="${id}" value="${escapeAttr(s.slotDescription)}"
+                ${disabled} />
+              <span class="reader-name">${escapeText(s.slotDescription)}</span>
+              <span class="reader-card">${escapeText(cardLabel)}</span>
+            </label>
+          `;
+        })
+        .join("");
+      readersEl.querySelectorAll<HTMLInputElement>('input[type="radio"]').forEach((el) => {
+        el.addEventListener("change", () => {
+          const state = $hipki.get();
+          if (state.status !== "readers_listed") return;
+          $hipki.set({ ...state, selectedSlot: el.value });
+        });
       });
+    }
+    // Sync `checked` without touching the rest of the DOM so focus and any
+    // mid-flight click on a different row are preserved.
+    readersEl.querySelectorAll<HTMLInputElement>('input[type="radio"]').forEach((el) => {
+      el.checked = el.value === selected;
     });
   }
 
