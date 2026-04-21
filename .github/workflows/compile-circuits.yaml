@@ -71,4 +71,7 @@ jobs:
                       wallet-unit-poc/circom/build/cert_chain_rs2048/cert_chain_rs2048_js/cert_chain_rs2048.wasm
                       wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/cert_chain_rs4096.wasm
                       wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.wasm
+                      wallet-unit-poc/circom/build/cert_chain_rs2048/cert_chain_rs2048_js/witness_calculator.js
+                      wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/witness_calculator.js
+                      wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/witness_calculator.js
                   retention-days: 3
