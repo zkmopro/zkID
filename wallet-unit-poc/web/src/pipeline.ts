@@ -186,18 +186,17 @@ async function deriveIssuerFromCert(
 ): Promise<{ issuer: SmtIssuer; kIssuer: 17 | 34; certKind: CircuitKind }> {
   await ensureWasm();
   const bits = cert_modulus_bits(issuerCertDer);
-  if (bits > 2048) {
-    return {
-      issuer: "g3",
-      kIssuer: 34,
-      certKind: "cert_chain_rs4096",
-    };
-  }
-  return {
-    issuer: "g2",
-    kIssuer: 17,
-    certKind: "cert_chain_rs2048",
-  };
+  const routed = bits > 2048
+    ? { issuer: "g3" as const, kIssuer: 34 as const, certKind: "cert_chain_rs4096" as const }
+    : { issuer: "g2" as const, kIssuer: 17 as const, certKind: "cert_chain_rs2048" as const };
+  // Temporary diagnostic — help surface the real issuer modulus width when
+  // cards misbehave in the wild. Safe to log: bit count is derivable from
+  // any public cert, and the circuit choice is already user-visible on the
+  // setup panel. Remove once the real-card flow is confirmed green.
+  console.info(
+    `[zkID] issuer modulus = ${bits} bits → ${routed.certKind} (kIssuer=${routed.kIssuer})`,
+  );
+  return routed;
 }
 
 /** Fetch + parse the HiPKI pkcs11info response into a `CardContext`.
