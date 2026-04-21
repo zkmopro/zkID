@@ -9,6 +9,7 @@
 //! `Too many values for input signal __placeholder__` failure.
 
 use serde::Serialize;
+use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::prelude::*;
 use x509_cert::{der::Decode, Certificate};
 use zkid_input_builder::{generate_split_inputs, types::SmtCircuitInputs, MAX_CERT_CHAIN_LENGTH};
@@ -112,7 +113,15 @@ pub fn build_split_inputs(
     )
     .map_err(|e| JsError::new(&e))?;
 
-    serde_wasm_bindgen::to_value(&out).map_err(|e| JsError::new(&e.to_string()))
+    // `serde_json::Value::Object` serialises as a JS `Map` by default, which
+    // `JSON.stringify` flattens to `"{}"`. The witness calculator then parses
+    // an empty object and bails with "Not all inputs have been set. Only 0
+    // out of N" — the same class of failure the `__placeholder__` drift test
+    // is meant to catch. Force plain JS objects so downstream `JSON.stringify`
+    // produces the circuit-input JSON the witness calc expects.
+    let serializer = Serializer::new().serialize_maps_as_objects(true);
+    out.serialize(&serializer)
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Compute `pk_blind = SHA-256(user_pk_be || tbs || "zkID/pk-commit/v1")`.
