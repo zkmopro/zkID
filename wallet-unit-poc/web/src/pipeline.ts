@@ -40,6 +40,19 @@ export interface ProvingContext {
   card: CardContext;
   pin: Pin;
   nullifier: string;
+  /** Aborts in-flight network calls when the user navigates away from the
+   *  proving phase. The CPU/wasm work in the Worker is cancelled separately
+   *  by the caller (Worker terminate or `cancel` message). */
+  signal?: AbortSignal;
+}
+
+/** Sentinel thrown when `runProvingPipeline` notices its `AbortSignal`
+ *  has fired. Callers swallow it without emitting a duplicate FSM error. */
+export class PipelineAborted extends Error {
+  constructor() {
+    super("pipeline aborted");
+    this.name = "PipelineAborted";
+  }
 }
 
 function setStep(step: Step, label?: string): void {
@@ -57,9 +70,19 @@ function fail(where: string, err: unknown): never {
   throw err;
 }
 
+function isAbortError(err: unknown): boolean {
+  if (err instanceof PipelineAborted) return true;
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
+function checkAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new PipelineAborted();
+}
+
 /** Step runner: set spinner → run body → mark done → surface errors through
  *  `fail`. Returning the body's value lets callers chain without the
- *  `let x: T; try { x = ... }; x!.foo` dance. */
+ *  `let x: T; try { x = ... }; x!.foo` dance. AbortError / PipelineAborted
+ *  bypass `fail` so cancellation doesn't paint a fake error in the UI. */
 async function stage<T>(
   step: Step,
   run: () => Promise<T>,
@@ -71,6 +94,7 @@ async function stage<T>(
     stepDone(step, labelFrom?.(value));
     return value;
   } catch (err) {
+    if (isAbortError(err)) throw new PipelineAborted();
     fail(step, err);
   }
 }
@@ -79,13 +103,18 @@ export async function runProvingPipeline(
   worker: Worker,
   ctx: ProvingContext,
 ): Promise<void> {
+  const { signal } = ctx;
+
   const challenge = await stage(
     "challenge",
-    () => createChallenge(),
+    () => createChallenge({ signal }),
     (ch) => `id=${ch.id}`,
   );
+  checkAborted(signal);
   const tbs = hexToBytes(challenge.bytes);
 
+  // The HiPKI popup is user-driven and can't be cancelled mid-flight.
+  // We let the popup complete naturally and bail on the next abort check.
   const userSignatureB64 = await stage("sign", async () => {
     const sig = await signTbs({
       tbs: bytesToHex(tbs),
@@ -99,13 +128,16 @@ export async function runProvingPipeline(
     }
     return sig.signature;
   });
+  checkAborted(signal);
 
   const smtInputs = await stage("smt", () =>
     fetchSmtProof({
       issuer: ctx.card.issuer,
       serialHex: ctx.card.serialHex,
+      signal,
     }),
   );
+  checkAborted(signal);
 
   const { certJson, deviceJson } = await stage("build", () =>
     buildInputs({
@@ -115,9 +147,12 @@ export async function runProvingPipeline(
       smtInputs,
     }),
   );
+  checkAborted(signal);
 
   // Hand off to Worker. Its Progress events drive the remaining steps
   // (download/load/witness/prove/submit) via `progress.ts::applyProgress`.
+  // Worker cancellation is handled by the caller — terminating the worker
+  // or sending `{type: "cancel"}` is what stops the CPU/wasm work.
   const input: RunInput = {
     certJson,
     deviceJson,
@@ -126,23 +161,39 @@ export async function runProvingPipeline(
     nullifier: ctx.nullifier,
   };
   const msg: WorkerInMsg = { type: "run", input };
-  await waitForWorkerTerminal(worker, () => worker.postMessage(msg));
+  await waitForWorkerTerminal(worker, signal, () => worker.postMessage(msg));
 }
 
-/** Resolves on the next `done` or `error` Progress event the Worker posts. */
+/** Resolves on the next `done` or `error` Progress event the Worker posts.
+ *  If the AbortSignal fires first, throws `PipelineAborted` so the caller
+ *  swallows it without painting a duplicate FSM error. */
 function waitForWorkerTerminal(
   worker: Worker,
+  signal: AbortSignal | undefined,
   kickoff: () => void,
 ): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const onMessage = (ev: MessageEvent) => {
       const p = ev.data as { step: string };
       if (p.step === "done" || p.step === "error") {
-        worker.removeEventListener("message", onMessage);
+        cleanup();
         resolve();
       }
     };
+    const onAbort = () => {
+      cleanup();
+      reject(new PipelineAborted());
+    };
+    function cleanup(): void {
+      worker.removeEventListener("message", onMessage);
+      signal?.removeEventListener("abort", onAbort);
+    }
+    if (signal?.aborted) {
+      reject(new PipelineAborted());
+      return;
+    }
     worker.addEventListener("message", onMessage);
+    signal?.addEventListener("abort", onAbort);
     kickoff();
   });
 }

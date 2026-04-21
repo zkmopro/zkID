@@ -1,6 +1,13 @@
-// Playwright mocks for every external service the Phase 4 pipeline hits:
-// verifier (challenge + link-verify), HiPKI (pkcs11info + sign), and the
-// SMT revocation server.
+// Playwright mocks for every external service the Phase 4 pipeline hits.
+//
+// HiPKI uses LocalSignServer's popupForm postMessage bridge (see
+// `src/hipki-popup.ts`) so its XHRs are issued from the popup window itself,
+// out of reach of `page.route()`. The popup module exposes a test-mode
+// override via `globalThis.__HIPKI_TEST_HANDLER__`; we inject ours via
+// `addInitScript` before any app code runs.
+//
+// The verifier and SMT mocks stay on `page.route()` because those calls
+// are issued from the app origin.
 //
 // The cert fixtures re-use `ecdsa-spartan2/tests/testdata/*.json` so schema
 // drift between the Rust and TS sides surfaces in e2e too.
@@ -18,9 +25,28 @@ const SIGN_FIXTURE_RAW = readFileSync(
   resolve(TESTDATA, "response_sign_test.json"),
   "utf8",
 );
-const SIGN_FIXTURE = JSON.parse(SIGN_FIXTURE_RAW) as Record<string, unknown>;
 
-export async function installMockServices(page: Page): Promise<void> {
+export interface InstallMockOptions {
+  /** Set to a non-2xx status to simulate verifier downtime. */
+  linkVerifyStatus?: number;
+  /** Override the response body the verifier returns. */
+  linkVerifyBody?: unknown;
+  /** Force `signTbs` to fail with a non-zero ret_code (wrong PIN). */
+  signRejectsPin?: boolean;
+  /** Replace the SMT response shape (e.g. for "no proof" paths). */
+  smtBody?: unknown;
+}
+
+export async function installMockServices(
+  page: Page,
+  opts: InstallMockOptions = {},
+): Promise<void> {
+  await installHipkiPopupHandler(page, {
+    pkcs11Fixture: PKCS11_FIXTURE,
+    signFixture: SIGN_FIXTURE_RAW,
+    signRejectsPin: opts.signRejectsPin ?? false,
+  });
+
   // Verifier -----------------------------------------------------------
   await page.route("**/challenge", async (route, req) => {
     if (req.method() !== "POST") return route.fallback();
@@ -37,6 +63,14 @@ export async function installMockServices(page: Page): Promise<void> {
 
   await page.route("**/link-verify", async (route, req) => {
     if (req.method() !== "POST") return route.fallback();
+    if (opts.linkVerifyStatus && opts.linkVerifyStatus >= 400) {
+      await route.fulfill({
+        status: opts.linkVerifyStatus,
+        contentType: "text/plain",
+        body: "verifier down",
+      });
+      return;
+    }
     const body = req.postDataJSON();
     const shapeOk =
       typeof body?.cert_chain_proof === "string" &&
@@ -47,34 +81,12 @@ export async function installMockServices(page: Page): Promise<void> {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        verified: shapeOk,
-        nullifier: body?.nullifier ?? "mock",
-      }),
-    });
-  });
-
-  // HiPKI --------------------------------------------------------------
-  // Matches both the polling probe (POST /pkcs11info) and the one-shot
-  // withcert=true pull (POST /pkcs11info?withcert=true).
-  await page.route("**/pkcs11info*", async (route, req) => {
-    if (req.method() !== "POST") return route.fallback();
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: PKCS11_FIXTURE,
-    });
-  });
-
-  await page.route("**/sign", async (route, req) => {
-    if (req.method() !== "POST") return route.fallback();
-    // Always return the bundled test fixture. Real HiPKI would re-sign
-    // with a different TBS each call, but for e2e the same signature is
-    // enough to exercise the wire path.
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(SIGN_FIXTURE),
+      body: JSON.stringify(
+        opts.linkVerifyBody ?? {
+          verified: shapeOk,
+          nullifier: body?.nullifier ?? "mock",
+        },
+      ),
     });
   });
 
@@ -84,12 +96,56 @@ export async function installMockServices(page: Page): Promise<void> {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        root: "0x2a",
-        entry: ["0x270f"],
-        matchingEntry: ["0x7", "0xb"],
-        siblings: [],
-      }),
+      body: JSON.stringify(
+        opts.smtBody ?? {
+          root: "0x2a",
+          entry: ["0x270f"],
+          matchingEntry: ["0x7", "0xb"],
+          siblings: [],
+        },
+      ),
     });
   });
+}
+
+interface PopupHandlerOpts {
+  pkcs11Fixture: string;
+  signFixture: string;
+  signRejectsPin: boolean;
+}
+
+/** Install a popup test-handler before app boot. The handler runs inside the
+ *  page context so it has to be self-contained — no closures over Node-side
+ *  state. We pass the fixture text as JSON-serialisable args. */
+async function installHipkiPopupHandler(
+  page: Page,
+  opts: PopupHandlerOpts,
+): Promise<void> {
+  await page.addInitScript((injected) => {
+    const { pkcs11Fixture, signFixture, signRejectsPin } = injected;
+    interface HandlerGlobal {
+      __HIPKI_TEST_HANDLER__?: (
+        payload: Record<string, unknown>,
+      ) => Promise<string>;
+    }
+    const g = globalThis as HandlerGlobal;
+    g.__HIPKI_TEST_HANDLER__ = async (payload) => {
+      const func = payload.func;
+      if (func === "CheckEnvir" || func === "GetUserCert") {
+        return pkcs11Fixture;
+      }
+      if (func === "MakeSignature") {
+        if (signRejectsPin) {
+          const fixture = JSON.parse(signFixture) as Record<string, unknown>;
+          return JSON.stringify({
+            ...fixture,
+            ret_code: 1,
+            last_error: 0x6982,
+          });
+        }
+        return signFixture;
+      }
+      throw new Error(`mock popup handler: unknown func ${String(func)}`);
+    };
+  }, opts);
 }

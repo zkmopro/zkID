@@ -47,6 +47,13 @@ type AssetsState =
   | { status: "ok" }
   | { status: "error"; message: string };
 
+/** Attempts remaining for the next verify call. `error` carries the residual
+ *  count from the last failure; everything else means we haven't burned an
+ *  attempt yet, so the budget resets to the full `MAX_PIN_ATTEMPTS`. */
+function attemptsRemainingFrom(state: PinState): number {
+  return state.status === "error" ? state.attemptsRemaining : MAX_PIN_ATTEMPTS;
+}
+
 function summariseSlots(resp: Pkcs11InfoResponse): ReaderSlot[] {
   return (resp.slots ?? []).map((s) => ({
     slotDescription: s.slotDescription ?? "(unnamed reader)",
@@ -319,7 +326,12 @@ export function mountSetup(root: HTMLElement): () => void {
         pinInput.value = "";
         break;
       case "error":
-        pinBody.textContent = `Error: ${state.message} (${state.attemptsRemaining} attempts left)`;
+        if (state.attemptsRemaining <= 0) {
+          pinBody.textContent =
+            "Card is locked. Three wrong PINs were entered — unlock at a HiPKI kiosk.";
+        } else {
+          pinBody.textContent = `Error: ${state.message} (${state.attemptsRemaining} attempts left)`;
+        }
         pinBody.classList.add("pin-body-error");
         break;
     }
@@ -332,9 +344,11 @@ export function mountSetup(root: HTMLElement): () => void {
     const pinNow = $pin.get();
     const locked = pinNow.status === "locked";
     const verifying = pinNow.status === "verifying";
-    pinInput.disabled = !ready || locked || verifying;
+    const remaining = attemptsRemainingFrom(pinNow);
+    const lockedOut = remaining <= 0 && !locked;
+    pinInput.disabled = !ready || locked || verifying || lockedOut;
     const shortPin = pinInput.value.length < 6;
-    pinVerify.disabled = !ready || locked || verifying || shortPin;
+    pinVerify.disabled = !ready || locked || verifying || lockedOut || shortPin;
   }
 
   function refreshContinue(): void {
@@ -435,8 +449,7 @@ export function mountSetup(root: HTMLElement): () => void {
     if (raw.length < 6 || raw.length > 8) return;
 
     const prior = $pin.get();
-    const attemptsRemaining =
-      prior.status === "error" ? prior.attemptsRemaining : MAX_PIN_ATTEMPTS;
+    const attemptsRemaining = attemptsRemainingFrom(prior);
     if (attemptsRemaining <= 0) return;
 
     const cardSN = hipkiState.cardSN;

@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "test:e2e": "pnpm build && playwright test",
     "test:e2e:real": "E2E_MODE=real pnpm build && E2E_MODE=real playwright test --grep @real",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit && bash scripts/check-no-pin-leak.sh"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

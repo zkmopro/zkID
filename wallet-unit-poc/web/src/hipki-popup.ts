@@ -28,6 +28,22 @@ import { stripTrailingSlash } from "./url-utils";
 const HIPKI_BASE =
   import.meta.env.VITE_HIPKI_BASE_URL ?? "http://localhost:61161";
 
+/** Test-mode override: when `globalThis.__HIPKI_TEST_HANDLER__` is set, every
+ *  `popupRequest` is routed through it instead of opening a real popup.
+ *  Playwright cannot intercept a popup's same-origin XHRs to LocalSignServer,
+ *  so e2e mocks bypass the bridge entirely by installing this handler. */
+type HipkiTestHandler = (
+  payload: Record<string, unknown>,
+) => Promise<string>;
+
+interface HipkiTestGlobal {
+  __HIPKI_TEST_HANDLER__?: HipkiTestHandler;
+}
+
+function getTestHandler(): HipkiTestHandler | undefined {
+  return (globalThis as HipkiTestGlobal).__HIPKI_TEST_HANDLER__;
+}
+
 const POPUP_PATH = "/popupForm";
 const POPUP_WINDOW_FEATURES = "width=480,height=320,resizable=yes,scrollbars=yes";
 const READY_TIMEOUT_MS = 10_000;
@@ -61,6 +77,8 @@ function popupRequest(
   payload: Record<string, unknown>,
   baseUrl: string = HIPKI_BASE,
 ): Promise<string> {
+  const testHandler = getTestHandler();
+  if (testHandler) return testHandler(payload);
   return new Promise<string>((resolve, reject) => {
     const target = `${stripTrailingSlash(baseUrl)}${POPUP_PATH}`;
     let expectedOrigin: string;
