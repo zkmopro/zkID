@@ -35,7 +35,7 @@ export function mountProving(root: HTMLElement): () => void {
   const disposeSteps = mountSteps(listEl, resultEl);
 
   const onCancel = () => {
-    // Transitioning to setup drops the warm Worker (main.ts handles
+    // Transitioning to setup drops the warm Worker (sign-main.ts handles
     // terminate on the phase change); Assets panel shows as "not warmed".
     dispatch({ type: "reset_to_setup" });
   };
