@@ -1,10 +1,12 @@
-// Client for the HiPKI LocalSignServer running on the user's machine.
+// Typed surface for HiPKI LocalSignServer responses.
 //
-// Mirrors `ecdsa-spartan2/src/hipki_client.rs` — types preserve the server's
-// camelCase JSON keys (`subjectDN`, `issuerDN`, `cardSN`) so responses
-// deserialize without renames. The browser hits HiPKI directly; we assume
-// the user has installed a CORS-enabled LocalSignServer. Over HTTPS the
-// browser's mixed-content rules apply — see README.
+// All requests route through the popupForm bridge (see `hipki-popup.ts`)
+// because LocalSignServer ships no CORS headers — direct fetch is blocked
+// by the browser. The popup is same-origin with localhost:61161 and we
+// talk to it via window.postMessage.
+//
+// Field names mirror `ecdsa-spartan2/src/hipki_client.rs` so responses
+// deserialize without renames (`subjectDN`, `issuerDN`, `cardSN`).
 
 import { popupPkcs11Info, popupSign } from "./hipki-popup";
 

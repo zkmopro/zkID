@@ -75,3 +75,13 @@ export function resetSetup(): void {
 export function isCardReady(): boolean {
   return $hipki.get().status === "card_ready";
 }
+
+/** Invalidate a verified PIN. Called whenever the card context changes
+ *  (re-detect, re-read) so a `locked` PIN can't refer to a card the user
+ *  no longer has selected. */
+export function dropStalePin(): void {
+  const pinNow = $pin.get();
+  if (pinNow.status === "locked" || pinNow.status === "verifying") {
+    $pin.set({ status: "pending" });
+  }
+}

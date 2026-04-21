@@ -34,11 +34,11 @@ const READY_TIMEOUT_MS = 10_000;
 const RESPONSE_TIMEOUT_MS = 30_000;
 
 function originOf(url: string): string {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return url;
-  }
+  // Throw on invalid input so callers fail fast. Returning the raw
+  // string would let the bridge open with a garbage origin and silently
+  // swallow every reply (origin-filter never matches), surfacing as a
+  // 10s "did not respond" timeout instead of a clear config error.
+  return new URL(url).origin;
 }
 
 /** Look-alike check for the popup's ready signal (`{func:"getTbs"}`). */
@@ -57,13 +57,19 @@ function isReadySignal(data: unknown): boolean {
  * popup self-close. Must be called from a user-gesture handler
  * (button click) so the browser doesn't pop-block.
  */
-export function popupRequest(
+function popupRequest(
   payload: Record<string, unknown>,
   baseUrl: string = HIPKI_BASE,
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const target = `${stripTrailingSlash(baseUrl)}${POPUP_PATH}`;
-    const expectedOrigin = originOf(target);
+    let expectedOrigin: string;
+    try {
+      expectedOrigin = originOf(target);
+    } catch {
+      reject(new Error(`HiPKI: invalid baseUrl ${baseUrl}`));
+      return;
+    }
     const popup = window.open(target, "hipkiPopup", POPUP_WINDOW_FEATURES);
     if (!popup) {
       reject(new Error("HiPKI popup blocked - allow popups for this site"));
@@ -80,13 +86,13 @@ export function popupRequest(
 
     const finish = (
       kind: "ok" | "err",
-      payload: string | Error,
+      value: string | Error,
     ): void => {
       if (settled) return;
       settled = true;
       cleanup();
-      if (kind === "ok") resolve(payload as string);
-      else reject(payload as Error);
+      if (kind === "ok") resolve(value as string);
+      else reject(value as Error);
     };
 
     const onMessage = (ev: MessageEvent): void => {

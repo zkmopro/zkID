@@ -12,6 +12,7 @@
 
 import { ensureAsset } from "../asset-download";
 import { bytesToHex } from "../bytes";
+import { escapeAttr, escapeText } from "../dom-utils";
 import { humanBytes } from "../format";
 import {
   probePkcs11Info,
@@ -24,6 +25,7 @@ import { buildCardContext } from "../pipeline";
 import {
   $hipki,
   $pin,
+  dropStalePin,
   isCardReady,
   type HipkiState,
   type PinState,
@@ -362,13 +364,6 @@ export function mountSetup(root: HTMLElement): () => void {
 
   // --- HiPKI two-step ------------------------------------------------
 
-  function dropStalePin(): void {
-    const pinNow = $pin.get();
-    if (pinNow.status === "locked" || pinNow.status === "verifying") {
-      $pin.set({ status: "pending" });
-    }
-  }
-
   async function detectReaders(): Promise<void> {
     dropStalePin();
     $hipki.set({ status: "detecting" });
@@ -503,13 +498,3 @@ export function mountSetup(root: HTMLElement): () => void {
   };
 }
 
-function escapeText(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function escapeAttr(s: string): string {
-  return escapeText(s).replace(/"/g, "&quot;");
-}

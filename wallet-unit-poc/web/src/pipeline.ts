@@ -148,24 +148,29 @@ function waitForWorkerTerminal(
 }
 
 /** Issuer DN → `g2` / `g3`. MOICA-G2 issues RSA-2048 certs, MOICA-G3 RSA-4096. */
-export function deriveIssuer(issuerDn: string | undefined): SmtIssuer {
+function deriveIssuer(issuerDn: string | undefined): SmtIssuer {
   if (!issuerDn) return "g2";
   return /g3|4096|root\s*ca\s*g3/i.test(issuerDn) ? "g3" : "g2";
 }
 
 /** Fetch + parse the HiPKI pkcs11info response into a `CardContext` plus the
- *  humanised fields the setup panel shows. Pass `slotDescription` to scope
- *  to a specific reader; otherwise the popup picks the first reader and
- *  the response may not match what the user picked in a multi-reader UI. */
+ *  humanised fields the setup panel shows. When `slotDescription` is
+ *  supplied we require the response to contain that exact slot — anything
+ *  else (silent scoping failure on an older LocalSignServer, race with a
+ *  card pull) throws so the user doesn't end up signing with a different
+ *  physical reader than the one they picked. */
 export async function buildCardContext(
   slotDescription?: string,
 ): Promise<DetectedCard> {
   const info = await fetchPkcs11Info(slotDescription);
-  // If `slotDescription` was supplied, the popup scopes the response to
-  // that reader, so `slots[0]` is the one we asked for. Otherwise we just
-  // take the first slot with a token.
-  const slot =
-    info.slots.find((s) => s.token) ?? info.slots[0];
+  const slot = slotDescription
+    ? info.slots.find((s) => s.slotDescription === slotDescription)
+    : info.slots.find((s) => s.token) ?? info.slots[0];
+  if (slotDescription && !slot) {
+    throw new Error(
+      `HiPKI: requested reader '${slotDescription}' not in response`,
+    );
+  }
   const token = slot?.token;
   if (!token) throw new Error("HiPKI: no token in /pkcs11info response");
   const userEntry = token.certs.find((c) => c.label !== "CA Cert");
