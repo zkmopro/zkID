@@ -10,7 +10,7 @@
 // fake SMT engine via `globalThis.__SMT_TEST_ENGINE__` so the app skips
 // the real Go WASM bootstrap entirely. That hook runs inside the proving
 // Worker, which is why the init script uses `page.addInitScript` AND we
-// forward the same escape hatch via the module loader setup below.
+// forward the same test hook via the module loader setup below.
 //
 // Cert fixtures re-use `ecdsa-spartan2/tests/testdata/*.json` so Rust/TS
 // schema drift surfaces in e2e too.
@@ -153,7 +153,7 @@ export async function installMockServices(
     });
   });
 
-  // Dead-end any stray request to the old SMT server path so regressions
+  // Fail any stray request to the old SMT server path so regressions
   // that forget to delete the remote-fetch code surface as loud test
   // failures instead of silently passing.
   await page.route("**/smt-snapshot/**", async (route) => {

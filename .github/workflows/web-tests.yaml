@@ -94,8 +94,8 @@ jobs:
 
             - name: Run spartan2-wasm input_builder_drift guard
               # Pins the wasm and native input builders to byte-identical JSON
-              # — the load-bearing guarantee against the PR #40 regression
-              # class. Runs as an integration test, so --lib skips it.
+              # and guards against witness-input shape regressions.
+              # Runs as an integration test, so --lib skips it.
               run: |
                   cd wallet-unit-poc/spartan2-wasm
                   cargo test --release --test input_builder_drift

@@ -13,8 +13,8 @@ Both paths call `generate_split_inputs` via a path dependency, so the web app
 and the native CLI produce byte-identical input JSON from identical card + SMT
 data. The byte-identity is pinned by
 [`spartan2-wasm/tests/input_builder_drift.rs`](../spartan2-wasm/tests/input_builder_drift.rs),
-the load-bearing guard that prevents a silent drift from reintroducing PR #40's
-`Too many values for input signal __placeholder__` witness failure.
+the critical guard that prevents a silent drift from reintroducing witness-input
+shape failures (for example, `Too many values for input signal __placeholder__`).
 
 Scope is deliberately narrow — cert parsing, bigint chunking, SHA-256 padding,
 and the `generate_split_inputs` function. No Spartan2 / proving-system types

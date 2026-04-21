@@ -16,8 +16,7 @@ const SMT_SNAPSHOT_RELEASE_BASE =
 
 // COOP is scoped per URL so that the sign route keeps `window.opener` alive
 // for the HiPKI popup while the proving route runs in a cross-origin-isolated
-// context (required by `wasm-bindgen-rayon` for SharedArrayBuffer). See
-// `docs/web-prover-architecture.md` for the two-route design rationale.
+// context (required by `wasm-bindgen-rayon` for SharedArrayBuffer).
 function coopPerPathMiddleware(): Connect.NextHandleFunction {
   return (req, res, next) => {
     const url = req.url ?? "";

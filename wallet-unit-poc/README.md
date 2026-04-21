@@ -24,8 +24,9 @@ Shared crates:
   byte-identical circuit input JSON for both the native and browser provers.
 - [`openac-sdk/`](./openac-sdk) — TypeScript SDK for credential handling.
 
-See [`docs/web-prover-architecture.md`](./docs/web-prover-architecture.md) for
-the in-browser design and [`docs/`](./docs) for active plans.
+Web prover architecture in short: the app uses two routes with different COOP
+headers (`/` for popup-compatible signing, `/prove` for cross-origin-isolated
+threaded proving), with `ProveInput` handed across via sessionStorage.
 
 ## Quick start (web prover)
 
@@ -113,7 +114,6 @@ wallet-unit-poc/
 ├── web/                  # Vite app (/ and /prove routes)
 ├── mobile/               # mopro-ffi bindings + Flutter app
 ├── openac-sdk/           # TypeScript SDK
-└── docs/                 # Architecture + active plans
 ```
 
 ## Privacy & data handling

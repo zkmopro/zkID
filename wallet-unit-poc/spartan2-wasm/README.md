@@ -77,8 +77,8 @@ All exports come from the generated `pkg/spartan2_wasm.js`.
   [`zkid-input-builder`](../zkid-input-builder) crate so the browser produces
   byte-identical JSON to `ecdsa-spartan2`'s `generate_split_inputs`. Parity
   is pinned by `tests/input_builder_drift.rs` — the guard against
-  reintroducing PR #40's "Too many values for input signal __placeholder__"
-  witness failure.
+  reintroducing witness-input shape drift (for example, `Too many values for
+  input signal __placeholder__` failures).
 - `compute_pk_blind(userPkBe, tbs)` → decimal string. Exposed for UI
   consistency checks; `build_split_inputs` already computes this internally.
 
@@ -93,12 +93,12 @@ proofs produced here against the upstream verifier to detect transcript drift.
 function changes (new transcript absorb, reordered calls, different labels),
 the drift test fails and this crate must be re-synced.
 
-Three pieces of `src/lib.rs` are load-bearing and must not be weakened:
+Three pieces of `src/lib.rs` are critical and must not be weakened:
 `prove_core` itself (do not inline into the wasm_bindgen entry point — the
 native test needs a shared path), the bounded arithmetic in `parse_witness`
 (prevents `usize` overflow crashes on 32-bit wasm), and `lock_pk_mut`'s poison
 recovery (a panicked prior `prove` must not poison the PK mutex into aborting
-the tab).
+the runtime).
 
 ## Browser requirements
 

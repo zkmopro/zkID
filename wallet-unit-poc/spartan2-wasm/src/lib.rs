@@ -68,12 +68,7 @@ impl CircuitKind {
     }
 }
 
-// ── parse_witness: circom .wtns binary → Vec<Scalar> (from feat/web-prover) ──
-//
-// Uses `saturating_sub` / `checked_add` for every offset arithmetic. On wasm32
-// `usize` is 32-bit, so unchecked `pos + len` overflows on hostile inputs and a
-// subsequent slice panics inside the wasm instance (tab crash). Bounded
-// arithmetic keeps failures as clean JsErrors.
+// Parse circom `.wtns` into scalars with checked offset arithmetic.
 fn parse_witness(witness_bytes: &[u8]) -> Result<Vec<Scalar>, SynthesisError> {
     let len = witness_bytes.len();
     let mut pos = 0usize;
@@ -102,9 +97,7 @@ fn parse_witness(witness_bytes: &[u8]) -> Result<Vec<Scalar>, SynthesisError> {
                     return Err(SynthesisError::Unsatisfiable);
                 }
                 n8 = u32::from_le_bytes(witness_bytes[pos..pos + 4].try_into().unwrap()) as usize;
-                // Advance past the rest of section 1 (never overflows: section_length
-                // is self-reported; a malicious huge value gets caught by the per-iter
-                // bounds check on the next loop turn because saturating_sub clamps).
+                // Advance to the next section safely.
                 pos = pos.saturating_add(section_length);
             }
             2 => {
@@ -186,7 +179,7 @@ fn pk_slot(kind: CircuitKind) -> &'static PkCell {
 }
 
 /// Lock a PK slot, recovering the guard even if a prior prove() panicked and
-/// poisoned the Mutex. `.unwrap()` would abort the wasm instance (tab crash)
+/// poisoned the Mutex. `.unwrap()` would abort the wasm instance (runtime abort)
 /// on poison; surface a clean JsError instead.
 fn lock_pk_mut(
     kind: CircuitKind,
@@ -334,9 +327,7 @@ mod tests {
         assert_eq!(CircuitKind::DeviceSigRs2048.num_public(), 51);
     }
 
-    /// Regression for silent-failure review F2: a crafted .wtns with a
-    /// section_length near usize::MAX must return Err, not panic-abort the
-    /// wasm instance. `pos.checked_add(section_length)` catches the overflow.
+    /// Regression: oversized section lengths must return Err, not panic.
     #[test] fn parse_witness_oversized_section_length_no_overflow() {
         // Valid magic (4) + version (4) + n_sections=1 (4) = 12
         // + section_id=2 (4) + section_length=usize::MAX (8) = 24

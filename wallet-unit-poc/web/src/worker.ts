@@ -1,12 +1,4 @@
-// Dedicated Worker with two phases, driven by separate messages.
-//
-//   warmup — download proving keys + witness wasm, init the spartan2_wasm
-//            module + rayon pool, load PKs into per-kind Mutex slots.
-//            Witness-wasm bytes are cached on the Worker so the prove
-//            phase skips another OPFS round-trip.
-//   prove  — witness + prove for both circuits using the loaded PKs.
-//            Returns proof bytes back to the main thread, which owns
-//            submission so the user can gate it with an explicit click.
+// Dedicated Worker for warmup and proving phases.
 
 import init, {
   CircuitKind,
@@ -30,7 +22,7 @@ import {
 import { loadSmtEngine, type SmtEngine, type SmtLoadPhase } from "./smt-local";
 import { calculateWitness } from "./witness";
 
-// Worker message contract -------------------------------------------------
+// Worker message contract.
 
 export interface ProveInput {
   certJson: string;
@@ -48,7 +40,7 @@ export type WorkerInMsg =
   | { type: "cancel" };
 
 export type Progress =
-  // Warmup events feed the setup screen's Assets panel.
+  // Setup-screen warmup events.
   | {
       step: "warmup";
       status: "in_progress" | "done";
@@ -59,7 +51,7 @@ export type Progress =
       kind?: Kind;
     }
   | { step: "warmup_done" }
-  // SMT engine lifecycle events feed the setup-screen Revocation panel.
+  // Setup-screen revocation events.
   | {
       step: "smt_load";
       phase: SmtLoadPhase;
@@ -73,12 +65,10 @@ export type Progress =
       rootHex: string;
       crlNumber: string;
     }
-  // SMT proof request/response. `requestId` pairs back to a pending Promise
-  // on the main thread; the Promise resolver is installed via addEventListener
-  // and ignored by the progress.ts router.
+  // SMT proof request/response.
   | { step: "smt_proof_done"; requestId: string; inputs: SmtCircuitInputs }
   | { step: "smt_proof_error"; requestId: string; message: string }
-  // Proving events drive the proving-screen step list.
+  // Proving-screen step events.
   | { step: "witness"; status: "in_progress" | "done"; kind?: Kind }
   | {
       step: "prove";
@@ -94,9 +84,7 @@ export type Progress =
       challengeId: string;
       nullifier: string;
       provingMs: number;
-      /** Per-circuit breakdown, populated on successful runs. Extra signal
-       *  for the /prove measurement harness; the Review screen still shows
-       *  the aggregate `provingMs`. */
+      /** Per-circuit timing breakdown for measurement logs. */
       certWitnessMs: number;
       certProveMs: number;
       deviceWitnessMs: number;
@@ -123,15 +111,14 @@ let proving = false;
 let warmed = false;
 let smtLoading = false;
 
-// witness-wasm kept in-memory after warmup (skips OPFS during prove).
+// Keep witness-wasm in memory after warmup.
 const witnessCache: Partial<Record<Kind, Uint8Array>> = {};
-// Engines are keyed per-issuer; the first card-read wins and subsequent
-// requests for other issuers are served fresh. In practice only one issuer
+// Engines are keyed per-issuer; once an issuer is loaded it is reused, and
+// requests for other issuers are loaded on demand. In practice only one issuer
 // is loaded per session (users don't swap MOICA-G2 for G3 mid-flow).
 const smtEngines: Partial<Record<SmtIssuer, SmtEngine>> = {};
 
-// tsconfig lib is ES2023 + DOM (no WebWorker lib); cast to a narrow shape
-// covering the APIs required by this worker.
+// tsconfig excludes WebWorker libs; use a minimal typed worker surface.
 interface WorkerGlobal {
   onmessage: ((this: WorkerGlobal, ev: MessageEvent<WorkerInMsg>) => unknown) | null;
   postMessage(msg: Progress): void;
@@ -161,8 +148,7 @@ workerSelf.onmessage = (ev: MessageEvent<WorkerInMsg>) => {
   if (data.type === "load_smt") {
     if (smtLoading) return;
     if (smtEngines[data.issuer]) {
-      // Already loaded — re-emit the ready event so late subscribers
-      // (e.g., a re-mounted setup panel) see it.
+      // Re-emit ready for late subscribers (for example, remounted setup UI).
       const engine = smtEngines[data.issuer]!;
       post({
         step: "smt_ready",
@@ -201,10 +187,7 @@ function post(p: Progress): void {
 }
 
 function clampThreads(): number {
-  // `wasm-bindgen-rayon` needs SharedArrayBuffer, which requires
-  // `crossOriginIsolated`. The popup bridge requires COOP
-  // `same-origin-allow-popups`, which disables isolation. Fall back to
-  // single-threaded proving so the pipeline still works, just slower.
+  // If not cross-origin isolated, fall back to one thread.
   if (workerSelf.crossOriginIsolated !== true) return 1;
   const override = parseThreadOverride();
   if (override != null) return override;
@@ -264,9 +247,7 @@ async function runWarmup(): Promise<void> {
     await hydrateManifest();
     if (cancelled) return;
 
-    // Download all three circuits' PK + witness-wasm. The cert-chain kind
-    // (rs2048 vs rs4096) is only known after the card is read; keeping
-    // both pre-loaded means Start proving has no extra wait.
+    // Preload all PK + witness assets so proving starts without extra waits.
     const kinds: Kind[] = [
       "cert_chain_rs2048",
       "cert_chain_rs4096",
@@ -304,7 +285,7 @@ async function runWarmup(): Promise<void> {
       if (cancelled) return;
     }
 
-    // Load PKs into the wasm crate and cache witness-wasm in Worker memory.
+    // Load PKs and cache witness-wasm bytes.
     for (const kind of kinds) {
       post({ step: "warmup", status: "in_progress", phase: "load", kind });
       const pk = await assetStore.get(`${kind}_pk`);

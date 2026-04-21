@@ -1,14 +1,4 @@
-// Request/response wrapper around the proving Worker's SMT engine.
-//
-// The engine itself (`smt-local.ts`) runs inside the Worker to isolate the
-// Go runtime and large snapshot buffer from the main-thread event loop.
-// This module is the main-thread entry point: `fetchSmtProof` postMessages
-// a `smt_proof` request and awaits the matching `smt_proof_done` reply.
-//
-// Types + `convertSmtProofToCircuitInputs` live here because the Worker
-// imports them too — the conversion runs inside the Worker so the wire
-// format between Worker and main thread is the already-decimalised
-// `SmtCircuitInputs`, not the raw hex proof.
+// Main-thread wrapper around the Worker's SMT engine RPC.
 
 /** SMT tree depth. Must match the circuit parameter (`smtDepth = 128`) and
  *  the binary snapshot header's `depth` field. */
@@ -63,12 +53,7 @@ interface SmtProofError {
   message: string;
 }
 
-/** Page-global test escape hatch. When present, `fetchSmtProof` skips the
- *  Worker entirely and returns fake inputs derived from the fixture proof.
- *  Playwright injects this through `page.addInitScript` — Worker globals are
- *  isolated so the equivalent Worker-side hook would never fire.
- *  `sign-main.ts` checks the same hook to short-circuit `load_smt` and flip
- *  `$smt` to ready synchronously. */
+/** Test hook used by e2e to bypass Worker SMT calls. */
 interface SmtTestHookGlobal {
   __SMT_TEST_PROOF__?: SmtProofResponse;
 }
@@ -79,10 +64,7 @@ export function getSmtTestProof(): SmtProofResponse | undefined {
 
 let requestCounter = 0;
 
-/** Post `{type:"smt_proof"}` to the Worker and resolve with the matching
- *  `smt_proof_done` reply. The Worker must already have an SMT engine
- *  loaded for the card's issuer (sign-main.ts sends `{type:"load_smt"}` once
- *  HiPKI reaches `card_ready`). */
+/** Request SMT inputs from the Worker for the current issuer + serial. */
 export function fetchSmtProof(
   worker: Worker,
   params: FetchSmtProofParams,
@@ -140,9 +122,7 @@ export function fetchSmtProof(
   });
 }
 
-/** Exported for the Worker (which calls it after `smtCreateProof`) and for
- *  unit tests that want to check the hex→decimal padding logic without
- *  instantiating the wasm engine. */
+/** Convert raw SMT proof payload to circuit-ready decimal inputs. */
 export function convertSmtProofToCircuitInputs(
   resp: SmtProofResponse,
   depth: number = SMT_DEPTH,
@@ -175,11 +155,7 @@ export function convertSmtProofToCircuitInputs(
   };
 }
 
-/** Convert a hex string to a decimal string. Accepts both `0x`-prefixed and
- *  bare forms — the wasm engine emits bare hex (Go `big.Int.Text(16)`) while
- *  REST-era fixtures used `0x`-prefixed strings. Pure-decimal inputs are
- *  NOT supported on this path: every field on `SmtProofResponse` is a hex
- *  serialisation of a big integer. */
+/** Convert hex (with or without `0x`) to decimal string. */
 function hexToDecimal(val: string): string {
   const stripped =
     val.startsWith("0x") || val.startsWith("0X") ? val.slice(2) : val;

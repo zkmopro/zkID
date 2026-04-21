@@ -182,10 +182,9 @@ The app sidesteps this with HiPKI's official `popupForm` postMessage
 bridge: each HiPKI operation opens a small popup at
 `http://localhost:61161/popupForm` and exchanges JSON over
 `window.postMessage`. Because the popup is same-origin with
-LocalSignServer, its own XHRs are unblocked. See
-[`docs/web-prover-architecture.md`](../docs/web-prover-architecture.md)
-for the full protocol and the COOP/COEP tradeoff this forces (single-
-threaded proving fallback when `crossOriginIsolated === false`).
+LocalSignServer, its own XHRs are unblocked. The app serves `/` with
+popup-compatible COOP and `/prove` with cross-origin isolation; when
+`crossOriginIsolated === false`, proving falls back to single-threaded mode.
 
 Revocation-tree assets ride `/smt-snapshot/*` (same shape as `/keys/*`) —
 configure the prod host to reverse-proxy that path to the

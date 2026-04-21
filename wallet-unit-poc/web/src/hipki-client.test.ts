@@ -56,7 +56,7 @@ describe("hipki-client", () => {
   });
 
   describe("probePkcs11Info", () => {
-    it("delegates to popupPkcs11Info(false) for cheap polling", async () => {
+    it("delegates to popupPkcs11Info(false) for lightweight polling", async () => {
       const resp = await probePkcs11Info();
       expect(popup.popupPkcs11Info).toHaveBeenCalledWith(false, undefined);
       expect(Array.isArray(resp.slots)).toBe(true);

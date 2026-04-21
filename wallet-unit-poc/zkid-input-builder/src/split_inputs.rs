@@ -4,7 +4,7 @@
 //! Both `ecdsa-spartan2` (native prover) and `spartan2-wasm` (in-browser prover)
 //! call through to this function. A byte-for-byte drift test in
 //! `spartan2-wasm/tests/input_builder_drift.rs` pins the two callers to the
-//! same output — the load-bearing guarantee that the PR #40 class of bug
+//! same output — the critical guarantee that witness-input shape regressions
 //! cannot resurface via a diverging input builder.
 
 use crate::cert::parse_cert_offsets;

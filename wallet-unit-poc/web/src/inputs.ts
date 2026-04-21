@@ -3,8 +3,8 @@
 // Delegates to the shared `zkid-input-builder` Rust crate so the browser
 // produces byte-identical JSON to `ecdsa-spartan2`'s `generate_split_inputs`.
 // Parity is pinned by `spartan2-wasm/tests/input_builder_drift.rs` — the
-// guard against reintroducing the PR #40 `__placeholder__` witness failure
-// through a diverging input builder.
+// check that prevents `__placeholder__` witness failures from returning
+// through input-builder drift.
 
 import init, { build_split_inputs } from "./wasm/spartan2_wasm.js";
 import type { CardContext } from "./pipeline";

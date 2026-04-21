@@ -5,8 +5,8 @@
 //! parses them and produces the same JSON the circom witness calculator
 //! consumes natively. Byte-for-byte parity with `ecdsa-spartan2`'s native
 //! caller is pinned by `tests/input_builder_drift.rs` — any drift fails CI
-//! before it can reach the browser and reproduce PR #40's
-//! `Too many values for input signal __placeholder__` failure.
+//! before it can reach the browser and trigger witness-input shape errors
+//! such as `Too many values for input signal __placeholder__`.
 
 use rsa::{pkcs8::DecodePublicKey, traits::PublicKeyParts, RsaPublicKey};
 use serde::Serialize;

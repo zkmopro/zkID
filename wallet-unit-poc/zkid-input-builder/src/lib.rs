@@ -3,8 +3,9 @@
 //! Produces cert-chain + device-sig JSON inputs from raw certificate DER,
 //! signatures, and SMT non-membership proof. Consumed by `ecdsa-spartan2`
 //! (native prover) and `spartan2-wasm` (in-browser prover) so both paths
-//! produce byte-identical JSON — which is the guard against reintroducing
-//! the PR #40 "Too many values for input signal __placeholder__" bug class.
+//! produce byte-identical JSON — which is the safeguard against reintroducing
+//! witness-input shape errors such as
+//! "Too many values for input signal __placeholder__".
 
 pub mod cert;
 pub mod encoding;

@@ -1,7 +1,7 @@
 # Runs mobile crate library tests only (cargo test --no-default-features --lib).
 # NOTE: the mobile crate currently references deleted features (sha256rsa4096, Rs256FidoCircuit)
 # and will fail to compile. continue-on-error: true prevents blocking CI until the crate is
-# migrated to the split-circuit API in a follow-up plan (see wallet-unit-poc/docs/).
+# migrated to the split-circuit API.
 name: mobile-tests-and-build
 
 on:

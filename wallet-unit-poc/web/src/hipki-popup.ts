@@ -1,27 +1,6 @@
-// HiPKI bridge using LocalSignServer's `popupForm` postMessage protocol.
-//
-// HiPKI's LocalSignServer at http://localhost:61161 doesn't send CORS
-// headers, so direct `fetch()` from any other origin is blocked even
-// though the server returns 200. The workaround is `popupForm`: the
-// LocalSignServer hosts a tiny HTML page at /popupForm. Because that
-// page IS hosted at http://localhost:61161, its own XHRs to the local
-// API are same-origin and unblocked. Our app talks to the popup via
-// window.postMessage, which works across origins by design.
-//
-// Protocol the popupForm actually implements (verified against the
-// HiPKI sample at https://medium.com/chouhsiang/...-popupform-...):
-//   1. window.open("http://localhost:61161/popupForm")
-//   2. popup posts `JSON.stringify({func:"getTbs"})` to window.opener
-//      once it's ready to accept commands.
-//   3. the app posts `JSON.stringify(payload)` — `payload.func` selects
-//      the action ("pkcs11info", "MakeSignature", ...).
-//   4. popup runs the operation, posts back the raw responseText, and
-//      then calls `window.close()` on itself.
-//
-// **Single-shot per popup.** The popup self-closes after one response.
-// Each request needs its own `window.open()`, which requires a user
-// gesture. Polling through this bridge is not possible — every probe
-// would need a click. Setup UI is structured around that.
+// HiPKI popup bridge (`/popupForm`) used because LocalSignServer has no CORS.
+// The flow is one request per popup: open -> wait for ready message -> send
+// payload -> receive response text -> popup closes.
 
 import { stripTrailingSlash } from "./url-utils";
 
@@ -50,14 +29,11 @@ const READY_TIMEOUT_MS = 10_000;
 const RESPONSE_TIMEOUT_MS = 30_000;
 
 function originOf(url: string): string {
-  // Throw on invalid input so callers fail fast. Returning the raw
-  // string would let the bridge open with a garbage origin and silently
-  // swallow every reply (origin-filter never matches), surfacing as a
-  // 10s "did not respond" timeout instead of a clear config error.
+  // Fail fast on invalid URLs so misconfiguration is explicit.
   return new URL(url).origin;
 }
 
-/** Look-alike check for the popup's ready signal (`{func:"getTbs"}`). */
+/** Shape check for the popup's ready signal (`{func:"getTbs"}`). */
 function isReadySignal(data: unknown): boolean {
   if (typeof data !== "string") return false;
   try {
@@ -148,13 +124,7 @@ function popupRequest(
   });
 }
 
-/** Convenience wrapper for /pkcs11info via the bridge. Generic so callers
- *  can pin the response type at the call site without a secondary cast.
- *
- *  The popupForm's func→endpoint table:
- *    `GetUserCert` → `/pkcs11info?withcert=true` (full cert chain; pass
- *                    `slotDescription` to scope to a specific reader)
- *    `CheckEnvir`  → `/pkcs11info` (cheap probe; enumerate all readers) */
+/** Generic /pkcs11info bridge wrapper. */
 export async function popupPkcs11Info<T = Record<string, unknown>>(
   withCert: boolean,
   slotDescription?: string,
@@ -167,10 +137,7 @@ export async function popupPkcs11Info<T = Record<string, unknown>>(
   return JSON.parse(body) as T;
 }
 
-/** Convenience wrapper for /sign via the bridge. PIN is passed straight
- *  through; caller is responsible for redaction (use the `Pin` wrapper).
- *  `slotDescription` picks which reader to sign with (defaults to the
- *  first reader if omitted). */
+/** Generic /sign bridge wrapper. */
 export async function popupSign<T = Record<string, unknown>>(
   tbs: string,
   pin: string,

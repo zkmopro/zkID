@@ -1,20 +1,8 @@
-// Browser witness calculator for the three zkID circuits.
-//
-// Circom's witness_calculator.js ships as CJS with an implicit global assignment
-// (`a = flatArray(input)`) that explodes under ESM strict mode. Fetch it as
-// text, patch to a local binding, wrap as ESM via a blob URL, and import.
-// The shared CJS file is identical across circomkit outputs for the same circom
-// version, so `copy-assets.sh` copies it once into `public/assets/`.
-//
-// This module does NOT manage the .wasm download — callers feed in `Uint8Array`
-// bytes (obtained via `asset-download::ensureAsset`) so the shim integrates
-// with the OPFS/IDB cache rather than re-fetching via `fetch()`.
+// Browser witness calculator loader for zkID circuits.
 
 import type { CircuitKind } from "./manifest";
 
-/** Inputs accepted by the witness calculator. Strings are parsed once at the
- *  boundary so callers that already have the JSON (e.g. from wasm
- *  `build_split_inputs`) don't pay a round-trip cost. */
+/** Inputs accepted by the witness calculator. */
 export type CircuitInput = Record<string, unknown> | string;
 
 interface WitnessCalculatorInstance {
@@ -48,9 +36,7 @@ async function loadBuilder(
   }
   const rawSource = await response.text();
 
-  // The latent circom bug: undeclared `a = flatArray(input)` inside
-  // `qualify_input`. Classic CJS creates a global silently; ESM strict mode
-  // throws `a is not defined`. Patch to `let a = ...`.
+  // Patch undeclared `a = flatArray(input)` for ESM strict mode.
   const source = rawSource.replace(
     /(\n\s*)a\s*=\s*flatArray\(input\);/,
     "$1let a = flatArray(input);",
@@ -77,9 +63,7 @@ async function loadBuilder(
 
 const calcByKind = new Map<CircuitKind, WitnessCalculatorInstance>();
 
-/** Compute `.wtns` binary for a circuit input, using pre-fetched witness-gen
- *  WASM bytes. The calculator instance per circuit is cached inside the worker
- *  so repeated proofs don't re-instantiate. */
+/** Compute `.wtns` using pre-fetched witness-generator WASM bytes. */
 export async function calculateWitness(
   kind: CircuitKind,
   input: CircuitInput,
@@ -101,7 +85,7 @@ export async function calculateWitness(
   return calc.calculateWTNSBin(parsed, true);
 }
 
-/** Exposed for tests / debugging — clears the per-circuit calculator cache. */
+/** Test helper: clear calculator cache. */
 export function _resetWitnessCache(): void {
   cachedBuilder = null;
   calcByKind.clear();
