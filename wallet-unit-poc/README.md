@@ -1,135 +1,124 @@
-## Setup
+# zkID wallet-unit-poc
 
-### Step 1: Compile Circom Circuits
+Privacy-preserving X.509 certificate verification using zero-knowledge proofs.
+Given a MOICA user certificate (RSA-SHA256 / RS256) and a device signature over
+a fresh challenge, the prover emits two Spartan2 proofs that together attest to
+(a) a valid cert chain to a known issuer, (b) non-revocation of the user cert
+against an SMT root, and (c) possession of the user private key — without
+revealing personal data from the cert.
 
-Compile the circom circuits with secq256r1 as native field:
+Three proving surfaces share the same circuits, input builder, and proving
+engine:
 
-```sh
-yarn
-yarn compile:jwt
-yarn compile:ecdsa
-```
+| Surface | Path | Use for |
+|---|---|---|
+| **Web prover** | [`web/`](./web) + [`spartan2-wasm/`](./spartan2-wasm) | In-browser proving with server-side verification. Start here for end-user flows. |
+| **Native CLI** | [`ecdsa-spartan2/`](./ecdsa-spartan2) | Benchmarks, fixture generation, end-to-end dev loop on a workstation. |
+| **Mobile** | [`mobile/`](./mobile) | iOS / Android / Flutter bindings via mopro-ffi. |
 
-This creates a build folder containing R1CS and WASM files for circuits.
+Shared crates:
 
-### Step 2: Setup Keys for Circuits
+- [`circom/`](./circom) — ZK circuits (`cert_chain_rs2048`,
+  `cert_chain_rs4096`, `device_sig_rs2048`) on the secq256r1 field.
+- [`zkid-input-builder/`](./zkid-input-builder) — shared Rust crate that builds
+  byte-identical circuit input JSON for both the native and browser provers.
+- [`openac-sdk/`](./openac-sdk) — TypeScript SDK for credential handling.
 
-Setup keys for ECDSA circuit:
+See [`docs/web-prover-architecture.md`](./docs/web-prover-architecture.md) for
+the in-browser design and [`docs/`](./docs) for active plans.
 
-```sh
-RUST_LOG=info cargo run --release -- setup_ecdsa
-```
-
-Setup keys for JWT circuit:
-
-```sh
-RUST_LOG=info cargo run --release -- setup_jwt
-```
-
-### Step 3: Run Circuits
-
-Run ECDSA circuit:
-
-```sh
-RUST_LOG=info cargo run --release -- prove_ecdsa
-```
-
-Run JWT circuit:
+## Quick start (web prover)
 
 ```sh
-RUST_LOG=info cargo run --release -- prove_jwt
+# 1. Compile the three circuits (produces R1CS + C++ + WASM artifacts).
+cd wallet-unit-poc/circom
+yarn install
+yarn compile:all
+
+# 2. Build the wasm prover bundle and start the dev server.
+cd ../web
+cp .env.example .env.local   # adjust verifier / HiPKI / SMT URLs as needed
+pnpm install
+pnpm dev                     # runs build:wasm + copy:assets + vite
 ```
 
-## Benchmarks
+Open the printed URL (typically `http://localhost:5173`). The landing page
+drives setup; `/prove` runs the cross-origin-isolated proving document.
 
-This section contains comprehensive benchmark results for zkID wallet proof of concept, covering both desktop and mobile implementations.
+## Quick start (native CLI)
 
-### Desktop Benchmarks (ecdsa-spartan2)
-
-Performance measurements for different JWT payload sizes running on desktop hardware.
-
-**Test Device:** MacBook Pro, M4, 14-core GPU, 24GB RAM
-
-#### Prepare Circuit Timing
-
-All timing measurements are in milliseconds (ms).
-
-| Payload Size | Setup (ms) | Prove (ms) | Reblind (ms) | Verify (ms) |
-| ------------ | ---------- | ---------- | ------------ | ----------- |
-| 1KB          | 2,559      | 1,683      | 382          | 35          |
-| 1920 Bytes   | 4,157      | 2,727      | 715          | 74          |
-| 2KB          | 4,384      | 2,934      | 753          | 83          |
-| 3KB          | 6,466      | 4,242      | 1,357        | 119         |
-| 4KB          | 8,529      | 5,282      | 1,374        | 131         |
-| 5KB          | 10,979     | 6,166      | 1,460        | 140         |
-| 6KB          | 12,993     | 8,407      | 2,821        | 280         |
-| 7KB          | 15,151     | 8,856      | 2,732        | 230         |
-| 8KB          | 16,559     | 9,614      | 2,683        | 246         |
-
-#### Show Circuit Timing
-
-The Show circuit has constant performance regardless of JWT payload size.
-
-| Metric  | Time (ms) |
-| ------- | --------- |
-| Setup   | ~36       |
-| Prove   | ~77       |
-| Reblind | ~25       |
-| Verify  | ~9        |
-
-
-#### Prepare Circuit Sizes
-
-| Payload Size | Proving Key (MB) | Verifying Key (MB) | Proof Size (KB) | Witness Size (MB) |
-| ------------ | ---------------- | ------------------ | --------------- | ----------------- |
-| 1KB          | 252.76           | 252.76             | 75.80           | 32.03             |
-| 1920 Bytes   | 420.05           | 420.05             | 109.29          | 64.06             |
-| 2KB          | 433.76           | 433.76             | 109.29          | 64.06             |
-| 3KB          | 636.35           | 636.35             | 175.77          | 128.13            |
-| 4KB          | 836.79           | 836.79             | 175.77          | 128.13            |
-| 5KB          | 964.70           | 964.70             | 175.77          | 128.13            |
-| 6KB          | 1,222.26         | 1,222.26           | 308.26          | 256.25            |
-| 7KB          | 1,382.31         | 1,382.31           | 308.26          | 256.25            |
-| 8KB          | 1,542.35         | 1,542.35           | 308.26          | 256.25            |
-
-#### Show Circuit Sizes
-
-The Show circuit has constant sizes regardless of JWT payload size.
-
-| Metric        | Size      |
-| ------------- | --------- |
-| Proving Key   | 3.45 MB   |
-| Verifying Key | 3.45 MB   |
-| Proof Size    | 40.41 KB  |
-| Witness Size  | 512.52 KB |
-
-#### Running Desktop Benchmarks
+Prereqs: Rust stable, `yarn` for circom, system libs listed in
+[`CLAUDE.md`](../CLAUDE.md#system-dependencies-for-cilocal).
 
 ```sh
-cd ecdsa-spartan2
-cargo run --release -- benchmark
+cd wallet-unit-poc/circom && yarn install && yarn compile:all
+cd ../ecdsa-spartan2
+
+# Generate cert-chain + device-sig inputs from bundled fixtures.
+RUST_LOG=info cargo run --release -- generate-split-input
+
+# Setup → prove → verify (cert-chain, RSA-2048 issuer / MOICA-G2).
+cargo run --release --features cert_chain_rs2048 -- cert-chain setup
+cargo run --release --features cert_chain_rs2048 -- cert-chain prove \
+  --input ../circom/inputs/cert_chain_rs2048/input.json
+cargo run --release --features cert_chain_rs2048 -- cert-chain verify
+
+# Setup → prove → verify (device-sig, always RSA-2048).
+cargo run --release --features device_sig_rs2048 -- device-sig setup
+cargo run --release --features device_sig_rs2048 -- device-sig prove \
+  --input ../circom/inputs/device_sig_rs2048/input.json
+cargo run --release --features device_sig_rs2048 -- device-sig verify
+
+# Cross-proof link-verify (pk_commit equality).
+RUST_LOG=info cargo run --release -- link-verify
 ```
 
-### Mobile Benchmarks
+Benchmarks live in [`ecdsa-spartan2/README.md`](./ecdsa-spartan2/README.md).
 
-For the reproduction of mobile benchmarks, please check the [OpenAC mobile app directory](/wallet-unit-poc/mobile/)
+## Tests
 
-#### Prepare Circuit (Mobile)
+Each surface has its own test suite; see the per-package README for details.
 
-- Payload Size: 1920 Bytes
-- Peak Memory Usage for Proving: 2.27 GiB
+```sh
+# Circuits (mocha)
+cd wallet-unit-poc/circom && NODE_OPTIONS=--max-old-space-size=16384 yarn test
 
-|    Device    | Setup (ms) | Prove (ms) | Reblind (ms) | Verify (ms) |
-|:------------:|:----------:|:----------:|:------------:|:-----------:|
-|  iPhone 17   |    3254    |    2102    |     884      |     137     |
-| Pixel 10 Pro |    9282    |    5161    |     1732     |     318     |
+# Shared input builder
+cd wallet-unit-poc/zkid-input-builder && cargo test --release
 
-### Show Circuit Timing
+# Native prover + E2E split flow
+cd wallet-unit-poc/ecdsa-spartan2 && cargo test --release
 
-The Show circuit has constant performance regardless of JWT payload size.
-- Peak Memory Usage for Proving: 1.96 GiB
+# Wasm crate unit + drift guards
+cd wallet-unit-poc/spartan2-wasm && cargo test --release
 
-|    Device    | Setup (ms) | Prove (ms) | Reblind (ms) | Verify (ms) |
-|:------------:|:----------:|:----------:|:------------:|:-----------:|
-|  iPhone 17   |     43     |     85     |      30      |     13      |
-| Pixel 10 Pro |     99     |    308     |     130      |     65      |
+# Web app (vitest + tsc + pin-leak guard)
+cd wallet-unit-poc/web && pnpm install && pnpm test && pnpm lint
+```
+
+CI wires these up across five workflows (`circom-tests`, `rust-tests`,
+`web-tests`, `mobile-tests`, plus the reusable `compile-circuits`). The full
+split E2E (RS2048 + RS4096 cert-chain + device-sig + link-verify) runs on every
+PR that touches the relevant paths. See [`CLAUDE.md`](../CLAUDE.md#ci-workflows)
+for the full matrix.
+
+## Repo layout
+
+```
+wallet-unit-poc/
+├── circom/               # Circuits + inputs + witness calculator
+├── zkid-input-builder/   # Shared Rust crate: cert → circuit JSON
+├── ecdsa-spartan2/       # Native CLI prover (Spartan2 + Hyrax)
+├── spartan2-wasm/        # wasm-bindgen prover for the browser
+├── web/                  # Vite app (/ and /prove routes)
+├── mobile/               # mopro-ffi bindings + Flutter app
+├── openac-sdk/           # TypeScript SDK
+└── docs/                 # Architecture + active plans
+```
+
+## Privacy & data handling
+
+Never commit real certificate or personal data from MOICA/HiPKI cards — only
+use the bundled test fixtures in `ecdsa-spartan2/tests/testdata/`. The web app
+enforces this at build time via `web/scripts/check-no-pin-leak.sh`, which scans
+for PIN substrings in any committed source.

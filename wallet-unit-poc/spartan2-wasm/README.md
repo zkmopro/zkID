@@ -21,7 +21,13 @@ cargo test --release --lib
 cargo +nightly build --target wasm32-unknown-unknown --release \
   -Z build-std=panic_abort,std
 
-# Emit JS bindings + snippets/ (requires `cargo install wasm-bindgen-cli`)
+# Emit JS bindings + snippets/. The wasm-bindgen CLI version must match the
+# `wasm-bindgen` crate resolved in Cargo.lock — mismatched versions produce a
+# cryptic `BindingsNotSupported` error at runtime. Check with
+# `rg '^name = "wasm-bindgen"' Cargo.lock -A1` before installing.
+#
+#   cargo install wasm-bindgen-cli --version <matching-version>
+#
 wasm-bindgen --target web --out-dir pkg \
   target/wasm32-unknown-unknown/release/spartan2_wasm.wasm
 
