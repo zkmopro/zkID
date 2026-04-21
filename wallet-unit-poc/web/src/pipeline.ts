@@ -157,13 +157,20 @@ export async function runProvingPipeline(
   const signedSerialHex = cert_serial_hex(signedUserCertDer);
   const signedNullifier = `zkid-${signedSerialHex}`;
 
-  const smtInputs = await stage("smt", () =>
-    fetchSmtProof(worker, {
-      issuer: ctx.card.issuer,
-      serialHex: signedSerialHex,
-      signal,
-    }),
-  );
+  const smtInputs = await stage(
+    "smt",
+    async () => {
+      const t0 = performance.now();
+      const inputs = await fetchSmtProof(worker, {
+        issuer: ctx.card.issuer,
+        serialHex: signedSerialHex,
+        signal,
+      });
+      const ms = Math.max(1, Math.round(performance.now() - t0));
+      return { inputs, ms };
+    },
+    ({ ms }) => `MerkleProof in ${ms}ms`,
+  ).then((x) => x.inputs);
   checkAborted(signal);
 
   const { certJson, deviceJson } = await stage("build", () =>
