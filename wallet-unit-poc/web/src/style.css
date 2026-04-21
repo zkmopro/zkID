@@ -122,6 +122,92 @@ h1 {
   font-size: 14px;
 }
 
+.panel-warning {
+  color: var(--error);
+  font-size: 13px;
+  font-weight: 500;
+  margin: 4px 0 8px;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.pin-input {
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  width: 120px;
+  letter-spacing: 0.2em;
+  font-family: var(--mono);
+}
+
+.pin-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.panel-readers {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reader-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.reader-row-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.reader-name {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.reader-card {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.setup-panel-ok {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 6%, var(--panel-bg));
+}
+
+.pin-body-ok {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.pin-body-ok::before {
+  content: "\2714  ";
+}
+
+.pin-body-error {
+  color: var(--error);
+}
+
 ol[data-testid="step-list"] {
   list-style: none;
   padding: 0;

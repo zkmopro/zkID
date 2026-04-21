@@ -38,27 +38,34 @@ skip the download.
 | `src/verifier-client.ts` | `POST /challenge` + `POST /link-verify` against `go-zkid-verifier`             |
 | `src/hipki-client.ts`    | `GET /pkcs11info` + `POST /sign` against the user's HiPKI LocalSignServer      |
 | `src/smt-client.ts`      | `GET /proof/{issuer}/{serial}` against moica-revocation-smt → circuit inputs   |
-| `src/worker.ts`          | Dedicated Worker orchestrating the seven-step pipeline                         |
+| `src/inputs.ts`          | Wraps wasm `build_split_inputs` → `{ certJson, deviceJson }`                   |
+| `src/pipeline.ts`        | Main-thread orchestrator: challenge → sign → SMT → build → Worker.postMessage  |
+| `src/pin.ts`             | Single-use PIN wrapper; redacts on every observable surface                    |
+| `src/worker.ts`          | CPU/wasm-bound steps: preflight/download/load/witness/prove/submit             |
 | `src/store.ts`           | Discriminated-union `AppState` + `transition` reducer (landing/setup/proving)  |
 | `src/router.ts`          | Subscribes to `$state.phase` and swaps the mounted screen                      |
 | `src/screens/*.ts`       | Landing / setup / proving screen mounts                                        |
+| `src/setup-state.ts`     | `$hipki` + `$pin` atoms holding polling probe + verified PIN                   |
 | `src/ui.ts`              | nanostores atoms + DOM paint for the step list                                 |
-| `src/main.ts`            | Entry point: mount router, spawn Worker, translate Progress events             |
+| `src/main.ts`            | Entry point: mount router, spawn Worker, bridge `phase = proving` to pipeline  |
 
 Pipeline (mirrors `src/ui.ts::Step`):
 
 ```
-preflight → challenge → download → load → witness → prove → submit → done
-                                                                     \\
-                                                                      error (at whichever step failed)
+preflight → challenge → sign → smt → build → download → load → witness → prove → submit → done
+                                                                                           \\
+                                                                                            error (at whichever step failed)
 ```
 
-`preflight` initialises the WASM module and the rayon thread pool.
-`challenge` fetches a server challenge that binds the device-sig TBS.
-`download` pulls proving keys + witness WASMs for the circuits the input
-requires. `load` deserializes each PK into the WASM prover state via
-`load_pk(kind, bytes)`. `witness` generates the `.wtns` via circom's
-JS calculator. `prove` runs Spartan2. `submit` POSTs both proofs (base64-encoded)
+Main thread owns the network + HiPKI + input-build steps; the Worker owns
+the CPU/wasm-bound ones. `preflight` initialises the WASM module + rayon
+thread pool. `challenge` fetches server challenge bytes. `sign` asks HiPKI
+to sign those bytes with the user's card. `smt` fetches the non-membership
+proof. `build` calls wasm `build_split_inputs` to produce cert-chain +
+device-sig JSON (byte-identical to the Rust CLI — drift-tested in CI).
+`download` pulls proving keys + witness WASMs. `load` deserializes each
+PK into the WASM prover state. `witness` generates the `.wtns` via
+circom's JS calculator. `prove` runs Spartan2. `submit` POSTs both proofs
 to `POST /link-verify` and surfaces the server's `verified` boolean.
 
 ## Asset sources
@@ -83,26 +90,64 @@ Go server and it has its own copy.
 Three services the browser talks to at runtime. Each is configurable via a
 `VITE_*` env var (see `.env.example`):
 
-| Service                 | Env var                  | Default                  | Purpose                                      |
-| ----------------------- | ------------------------ | ------------------------ | -------------------------------------------- |
-| `go-zkid-verifier`      | `VITE_VERIFIER_BASE_URL` | `http://localhost:8080`  | Challenge + `link-verify`                    |
-| HiPKI LocalSignServer   | `VITE_HIPKI_BASE_URL`    | `http://localhost:61161` | `pkcs11info` + `sign` (runs on user machine) |
-| `moica-revocation-smt`  | `VITE_SMT_BASE_URL`      | `http://localhost:3000`  | SMT non-membership proofs                    |
+| Service                 | Env var                  | Default     | Purpose                                      |
+| ----------------------- | ------------------------ | ----------- | -------------------------------------------- |
+| `go-zkid-verifier`      | `VITE_VERIFIER_BASE_URL` | `http://localhost:8080` | Challenge + `link-verify`        |
+| HiPKI LocalSignServer   | `VITE_HIPKI_BASE_URL`    | `/hipki`    | `pkcs11info` + `sign` (proxied to localhost:61161) |
+| `moica-revocation-smt`  | `VITE_SMT_BASE_URL`      | `/smt`      | SMT non-membership proofs (proxied to localhost:3000) |
 
 Plus `VITE_SMT_ISSUER` (default `g2`, use `g3` for RSA-4096 issuer chains).
 
-### HiPKI CORS + mixed-content caveats
+### HiPKI CORS + mixed-content (why we proxy)
 
-HiPKI is a native helper the user runs locally. The app assumes the installed
-LocalSignServer build responds with `Access-Control-Allow-Origin: *` (or the
-app origin); if it does not, the browser will block the `/pkcs11info` and
-`/sign` fetches. Symptom: a CORS preflight error in the devtools console.
+HiPKI's LocalSignServer does **not** send `Access-Control-Allow-Origin`
+headers. A direct `fetch("http://localhost:61161/pkcs11info")` from the
+browser will return 200 *and* be blocked — the browser delivers an opaque
+"net::ERR_FAILED 200 (OK)" error to JS and never lets the app see the body.
 
-If you host the web app over HTTPS, the browser will also refuse
-`http://localhost:61161` requests under its mixed-content policy. Serve the
-app over plain HTTP on the user's machine (or proxy HiPKI behind the same
-origin) if you hit this — an HTTPS → HTTP LocalSignServer call is not
-recoverable from JS.
+The `/hipki/*` proxy in `vite.config.ts` works around this by forwarding
+through the Vite dev origin so the browser sees a same-origin request.
+Same trick for `/smt/*`. Override the upstream targets via
+`VITE_HIPKI_PROXY_TARGET` / `VITE_SMT_PROXY_TARGET` if your services run
+on non-default ports.
+
+If you host the web app over HTTPS, the browser will also refuse direct
+`http://localhost:61161` requests under its mixed-content policy. The
+proxy avoids this too — same-origin requests to `/hipki/*` ride the page's
+own scheme. **For production deploys, the host serving the static bundle
+must run an equivalent reverse proxy** so browser → host → user's
+LocalSignServer all stays same-origin (see `## Production deployment`
+below).
+
+## Production deployment
+
+Production needs three things the dev proxy provides for free:
+
+1. **Cross-origin isolation headers** (`Cross-Origin-Opener-Policy:
+   same-origin` + `Cross-Origin-Embedder-Policy: require-corp`) for
+   SharedArrayBuffer / multi-threaded proving.
+2. **A reverse proxy from `/hipki/*` to the user's `localhost:61161`** so
+   browser fetches are same-origin and bypass HiPKI's missing CORS headers.
+3. **A reverse proxy from `/smt/*`** to the SMT server (or set
+   `VITE_SMT_BASE_URL` to an absolute URL on a CORS-enabled host).
+
+A standard CDN (GitHub Pages, plain Netlify) can do (1) but not (2) — the
+HiPKI server runs on the **user's** machine, not the CDN's. Two patterns
+that work:
+
+- **Hosted app + user-side mini-proxy.** Ship a small native helper
+  (Caddy / nginx / a tiny Go binary) alongside the HiPKI installer that
+  exposes `/hipki/*` on the same origin as the deployed app. The helper
+  proxies into `localhost:61161` and adds the COOP/COEP headers.
+- **Local-first app.** Ship the static bundle as part of the same
+  installer that bundles HiPKI. The user runs everything on their own
+  machine (`http://localhost:<port>`), and a tiny local server provides
+  both the static files and the `/hipki/*` reverse proxy.
+
+A pure cloud-hosted "any user can visit" deployment is **not viable**
+without one of these helpers. The browser cannot reach the user's
+localhost LocalSignServer from a remote origin under any combination of
+CORS / mixed-content rules.
 
 ## Browser requirements
 
@@ -162,18 +207,6 @@ The e2e suite under `e2e/`:
 
 Install browsers before first run: `pnpm exec playwright install --with-deps chromium`.
 
-## Fixture inputs
-
-`public/fixtures/cert_chain_rs2048_input.json`,
-`public/fixtures/device_sig_rs2048_input.json`, and
-`public/fixtures/nullifier.txt` are gitignored placeholders. Populate them
-locally with your own test inputs (including a device-sig TBS that embeds the
-challenge the Go server will issue). **Never commit real MOICA personal data.**
-
-The live-device-signing flow (fetch challenge → sign TBS in a card reader →
-embed in circuit input) is out of scope for this app; in production this comes
-from the wallet's credential picker.
-
 ## Known limitations (v1)
 
 - No resumable downloads. A failed fetch discards partial bytes; retry
@@ -181,6 +214,7 @@ from the wallet's credential picker.
 - No `.partial` rename on writer commit — a crash mid-write can leave a
   truncated cache entry. The SHA-256 check on the next read catches this
   *only if* `manifest.json` was hydrated.
-- Live device-key signing in-browser is not implemented; see above.
 - `link_verify` runs server-side only; the WASM crate's `link_verify` export
   exists for the drift test but is not called from the production pipeline.
+- No fetch timeouts yet — if HiPKI or SMT hangs, the setup screen hangs with
+  it. Phase 5 adds `AbortSignal.timeout` + retry limiters.

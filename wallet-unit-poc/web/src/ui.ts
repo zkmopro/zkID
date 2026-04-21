@@ -11,6 +11,9 @@ import { atom, type WritableAtom } from "nanostores";
 export type Step =
   | "preflight"
   | "challenge"
+  | "sign"
+  | "smt"
+  | "build"
   | "download"
   | "load"
   | "witness"
@@ -30,6 +33,9 @@ export type StepAtom = WritableAtom<StepState>;
 export const STEP_ORDER: Step[] = [
   "preflight",
   "challenge",
+  "sign",
+  "smt",
+  "build",
   "download",
   "load",
   "witness",
@@ -39,7 +45,10 @@ export const STEP_ORDER: Step[] = [
 
 const STEP_TITLES: Record<Step, string> = {
   preflight: "Preflight",
-  challenge: "Challenge",
+  challenge: "Fetch challenge",
+  sign: "Sign with card",
+  smt: "Fetch revocation proof",
+  build: "Build circuit inputs",
   download: "Download assets",
   load: "Load proving keys",
   witness: "Calculate witnesses",
@@ -50,6 +59,9 @@ const STEP_TITLES: Record<Step, string> = {
 export const steps: Record<Step, StepAtom> = {
   preflight: atom<StepState>({ status: "pending" }),
   challenge: atom<StepState>({ status: "pending" }),
+  sign: atom<StepState>({ status: "pending" }),
+  smt: atom<StepState>({ status: "pending" }),
+  build: atom<StepState>({ status: "pending" }),
   download: atom<StepState>({ status: "pending" }),
   load: atom<StepState>({ status: "pending" }),
   witness: atom<StepState>({ status: "pending" }),
@@ -90,26 +102,42 @@ function paintStepRow(li: HTMLElement, state: StepState): void {
 
 function paintResult(el: HTMLElement, state: ResultState): void {
   el.dataset.kind = state.kind;
-  if (state.kind === "idle") {
-    el.textContent = "";
-    el.innerHTML = "";
-    return;
-  }
+  el.textContent = "";
+  if (state.kind === "idle") return;
+
   if (state.kind === "running") {
-    el.innerHTML = `<span class="result-line">Proving…</span>`;
+    const span = document.createElement("span");
+    span.className = "result-line";
+    span.textContent = "Proving…";
+    el.appendChild(span);
     return;
   }
+
   if (state.kind === "done") {
     const badge = state.verified ? "verified" : "not verified";
-    el.innerHTML =
-      `<div class="result-line" data-testid="step-done">Done in ${state.durationMs.toFixed(0)} ms</div>` +
-      `<div class="result-line" data-testid="server-result">Server result: ${badge} (verified=${state.verified})</div>`;
+    const line1 = document.createElement("div");
+    line1.className = "result-line";
+    line1.dataset.testid = "step-done";
+    line1.textContent = `Done in ${state.durationMs.toFixed(0)} ms`;
+    const line2 = document.createElement("div");
+    line2.className = "result-line";
+    line2.dataset.testid = "server-result";
+    line2.textContent = `Server result: ${badge} (verified=${state.verified})`;
+    el.append(line1, line2);
     return;
   }
-  // error
-  el.innerHTML =
-    `<div class="result-line" data-testid="step-error">Error</div>` +
-    `<div class="result-line">${state.message}</div>`;
+
+  // Error path. `state.message` carries upstream text (HiPKI / verifier
+  // error bodies); use textContent so an injected `<script>` can't reach
+  // the DOM as markup.
+  const head = document.createElement("div");
+  head.className = "result-line";
+  head.dataset.testid = "step-error";
+  head.textContent = "Error";
+  const body = document.createElement("div");
+  body.className = "result-line";
+  body.textContent = state.message;
+  el.append(head, body);
 }
 
 /** Render the step list + result banner. Returns a dispose() that detaches

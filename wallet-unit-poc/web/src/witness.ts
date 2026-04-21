@@ -12,11 +12,20 @@
 
 import type { CircuitKind } from "./manifest";
 
-type CircuitInput = Record<string, unknown>;
+/** Inputs accepted by the witness calculator. Strings are parsed once at the
+ *  boundary so callers that already have the JSON (e.g. from wasm
+ *  `build_split_inputs`) don't pay a round-trip cost. */
+export type CircuitInput = Record<string, unknown> | string;
 
 interface WitnessCalculatorInstance {
-  calculateWitness(input: CircuitInput, sanityCheck?: boolean): Promise<bigint[]>;
-  calculateWTNSBin(input: CircuitInput, sanityCheck?: boolean): Promise<Uint8Array>;
+  calculateWitness(
+    input: Record<string, unknown>,
+    sanityCheck?: boolean,
+  ): Promise<bigint[]>;
+  calculateWTNSBin(
+    input: Record<string, unknown>,
+    sanityCheck?: boolean,
+  ): Promise<Uint8Array>;
 }
 
 type WitnessCalculatorBuilder = (
@@ -85,7 +94,11 @@ export async function calculateWitness(
     calc = await builder(ab, { sanityCheck: true });
     calcByKind.set(kind, calc);
   }
-  return calc.calculateWTNSBin(input, true);
+  const parsed =
+    typeof input === "string"
+      ? (JSON.parse(input) as Record<string, unknown>)
+      : input;
+  return calc.calculateWTNSBin(parsed, true);
 }
 
 /** Exposed for tests / debugging — clears the per-circuit calculator cache. */

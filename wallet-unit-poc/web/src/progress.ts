@@ -1,21 +1,10 @@
 // Translates Worker Progress events into `ui.ts` step-atom + result-atom
 // updates and dispatches FSM terminal events on `done` / `error`.
 
+import { humanBytes } from "./format";
 import { dispatch } from "./store";
 import { result, STEP_ORDER, steps, type Step, type StepStatus } from "./ui";
 import type { Progress } from "./worker";
-
-function humanBytes(n: number | undefined): string {
-  if (!n || !Number.isFinite(n) || n <= 0) return "";
-  const units = ["B", "KB", "MB", "GB"];
-  let v = n;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[i]}`;
-}
 
 function downloadLabel(p: Extract<Progress, { step: "download" }>): string {
   if (!p.asset) return "";
@@ -39,7 +28,6 @@ function markPrior(step: Step, status: StepStatus): void {
 export function applyProgress(p: Progress): void {
   switch (p.step) {
     case "preflight":
-    case "challenge":
     case "download":
     case "load":
     case "witness":
@@ -49,8 +37,6 @@ export function applyProgress(p: Progress): void {
       const atomRef = steps[stepKey];
       let label = "";
       if (p.step === "download") label = downloadLabel(p);
-      else if (p.step === "challenge" && "challengeId" in p && p.challengeId)
-        label = `challenge: ${p.challengeId}`;
       else if (
         (p.step === "load" || p.step === "witness" || p.step === "prove") &&
         "kind" in p &&

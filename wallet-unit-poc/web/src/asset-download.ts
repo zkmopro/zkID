@@ -6,18 +6,11 @@
 // `Range: bytes=<bytesWritten>-` on retry, and resume into the writer.
 
 import { assetStore } from "./asset-store";
+import { bytesToHex } from "./bytes";
 
 export interface DownloadProgress {
   bytesDone: number;
   bytesTotal: number;
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  let out = "";
-  for (let i = 0; i < bytes.length; i++) {
-    out += bytes[i].toString(16).padStart(2, "0");
-  }
-  return out;
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {

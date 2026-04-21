@@ -1,15 +1,14 @@
-// Client for the HiPKI LocalSignServer running on the user's machine.
+// Typed surface for HiPKI LocalSignServer responses.
 //
-// Mirrors `ecdsa-spartan2/src/hipki_client.rs` — types preserve the server's
-// camelCase JSON keys (`subjectDN`, `issuerDN`, `cardSN`) so responses
-// deserialize without renames. The browser hits HiPKI directly; we assume
-// the user has installed a CORS-enabled LocalSignServer. Over HTTPS the
-// browser's mixed-content rules apply — see README.
+// All requests route through the popupForm bridge (see `hipki-popup.ts`)
+// because LocalSignServer ships no CORS headers — direct fetch is blocked
+// by the browser. The popup is same-origin with localhost:61161 and we
+// talk to it via window.postMessage.
+//
+// Field names mirror `ecdsa-spartan2/src/hipki_client.rs` so responses
+// deserialize without renames (`subjectDN`, `issuerDN`, `cardSN`).
 
-import { stripTrailingSlash } from "./url-utils";
-
-const HIPKI_BASE =
-  import.meta.env.VITE_HIPKI_BASE_URL ?? "http://localhost:61161";
+import { popupPkcs11Info, popupSign } from "./hipki-popup";
 
 export interface Pkcs11CertEntry {
   certb64: string;
@@ -26,10 +25,15 @@ export interface Pkcs11TokenInfo {
 }
 
 export interface Pkcs11Slot {
+  slotDescription?: string;
   token?: Pkcs11TokenInfo;
 }
 
 export interface Pkcs11InfoResponse {
+  /** LocalSignServer version, e.g. `"1.0.11"`. Present on both GET + POST. */
+  serverVersion?: string;
+  libraryDescription?: string;
+  libraryVersion?: string;
   slots: Pkcs11Slot[];
 }
 
@@ -47,18 +51,33 @@ export interface SignTbsParams {
   tbs: string;
   /** 6-8 digit card PIN. Caller is responsible for lifetime + redaction. */
   pin: string;
-  baseUrl?: string;
+  /** Pick a specific reader by `slotDescription` from a prior
+   *  `probePkcs11Info()` call. Omit to default to the first reader. */
+  slotDescription?: string;
 }
 
+/** Full cert-chain lookup, optionally scoped to a specific reader. */
 export async function fetchPkcs11Info(
-  baseUrl: string = HIPKI_BASE,
+  slotDescription?: string,
 ): Promise<Pkcs11InfoResponse> {
-  const url = `${stripTrailingSlash(baseUrl)}/pkcs11info?withcert=true`;
-  const r = await fetch(url, { method: "GET" });
-  if (!r.ok) {
-    throw new Error(`GET /pkcs11info returned ${r.status} ${r.statusText}`);
-  }
-  const body = (await r.json()) as Pkcs11InfoResponse;
+  return requestPkcs11Info(true, slotDescription);
+}
+
+/** Cheap probe — enumerates every connected reader without touching certs.
+ *  Use this first to populate a reader picker, then call `fetchPkcs11Info`
+ *  with the chosen `slotDescription`. */
+export async function probePkcs11Info(): Promise<Pkcs11InfoResponse> {
+  return requestPkcs11Info(false);
+}
+
+async function requestPkcs11Info(
+  withCert: boolean,
+  slotDescription?: string,
+): Promise<Pkcs11InfoResponse> {
+  const body = await popupPkcs11Info<Pkcs11InfoResponse>(
+    withCert,
+    slotDescription,
+  );
   if (!Array.isArray(body?.slots)) {
     throw new Error("HiPKI /pkcs11info response missing slots array");
   }
@@ -76,28 +95,5 @@ export async function fetchPkcs11Info(
 export async function signTbs(
   params: SignTbsParams,
 ): Promise<CardSignResponse> {
-  const base = stripTrailingSlash(params.baseUrl ?? HIPKI_BASE);
-  const tbsPackage = JSON.stringify({
-    tbs: params.tbs,
-    pin: params.pin,
-    hashAlgorithm: "SHA256",
-    signatureType: "PKCS1",
-  });
-
-  // application/x-www-form-urlencoded with a single `tbsPackage` field
-  // mirrors Rust's `send_form(&[("tbsPackage", ...)])` exactly.
-  const body = new URLSearchParams();
-  body.append("tbsPackage", tbsPackage);
-
-  const r = await fetch(`${base}/sign`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-  if (!r.ok) {
-    // Deliberately opaque — server could echo request fields and leak the
-    // PIN into the error message / logs.
-    throw new Error(`POST /sign returned ${r.status} ${r.statusText}`);
-  }
-  return (await r.json()) as CardSignResponse;
+  return popupSign<CardSignResponse>(params.tbs, params.pin, params.slotDescription);
 }
