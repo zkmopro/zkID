@@ -8,6 +8,7 @@ on:
             - "wallet-unit-poc/spartan2-wasm/**"
             - "wallet-unit-poc/web/**"
             - "wallet-unit-poc/zkid-input-builder/**"
+            - "wallet-unit-poc/ecdsa-spartan2/**"
             - "wallet-unit-poc/circom/circuits/**"
             - ".github/workflows/web-tests.yaml"
             - ".github/workflows/compile-circuits.yaml"
@@ -16,6 +17,7 @@ on:
             - "wallet-unit-poc/spartan2-wasm/**"
             - "wallet-unit-poc/web/**"
             - "wallet-unit-poc/zkid-input-builder/**"
+            - "wallet-unit-poc/ecdsa-spartan2/**"
             - "wallet-unit-poc/circom/circuits/**"
             - ".github/workflows/web-tests.yaml"
             - ".github/workflows/compile-circuits.yaml"
@@ -90,10 +92,23 @@ jobs:
                   cd wallet-unit-poc/spartan2-wasm
                   cargo test --release --lib
 
+            - name: Run spartan2-wasm input_builder_drift guard
+              # Pins the wasm and native input builders to byte-identical JSON
+              # — the load-bearing guarantee against the PR #40 regression
+              # class. Runs as an integration test, so --lib skips it.
+              run: |
+                  cd wallet-unit-poc/spartan2-wasm
+                  cargo test --release --test input_builder_drift
+
             - name: Run spartan2-wasm native_drift cross-parity test
               run: |
                   cd wallet-unit-poc/spartan2-wasm
                   cargo test --release --test native_drift
+
+            - name: Run zkid-input-builder unit tests
+              run: |
+                  cd wallet-unit-poc/zkid-input-builder
+                  cargo test --release
 
             - name: Build spartan2-wasm for wasm32 target
               run: |
@@ -180,6 +195,9 @@ jobs:
             # fresh checkout fails because src/wasm/ is gitignored.
             - name: Build web app (wasm + vite + tsc)
               run: cd wallet-unit-poc/web && pnpm build
+
+            - name: Run web unit tests
+              run: cd wallet-unit-poc/web && pnpm test
 
             - name: Check for PIN leaks
               run: cd wallet-unit-poc/web && bash scripts/check-no-pin-leak.sh
