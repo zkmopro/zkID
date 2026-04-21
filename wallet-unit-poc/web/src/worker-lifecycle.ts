@@ -33,10 +33,22 @@ export function createWorkerLifecycle(
       opts.onProgress?.(ev.data, w);
     };
     w.onerror = (ev) => {
-      const message = ev.message || "worker crashed";
+      // Preserve filename:line:col + underlying stack so Sentry / Playwright
+      // traces have something more actionable than "worker crashed".
+      const loc = ev.filename ? ` at ${ev.filename}:${ev.lineno}:${ev.colno}` : "";
+      const message = `${ev.message || "worker crashed"}${loc}`;
       result.set({ kind: "error", message });
       dispatch({ type: "pipeline_error", where: "worker", message });
-      console.error("worker error", ev);
+      console.error("worker error", ev, ev.error);
+    };
+    // Structured-clone failures on postMessage fire onmessageerror, not
+    // onerror. Without this handler, the main thread would silently drop
+    // the message and leave the UI waiting forever.
+    w.onmessageerror = (ev) => {
+      const message = "worker posted a message that could not be deserialized";
+      result.set({ kind: "error", message });
+      dispatch({ type: "pipeline_error", where: "worker", message });
+      console.error("worker messageerror", ev);
     };
     return w;
   }
@@ -52,6 +64,7 @@ export function createWorkerLifecycle(
     if (!worker) return;
     worker.onmessage = null;
     worker.onerror = null;
+    worker.onmessageerror = null;
     worker.terminate();
     worker = null;
   }

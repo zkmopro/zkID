@@ -191,7 +191,7 @@ const idbStore: AssetStore = {
       },
       abort(reason) {
         // Drop buffered chunks so nothing gets committed on a torn-down pipe.
-        // The cache key remains empty (we deleted above); no partial bytes leak.
+        // The cache key was deleted in start(); no partial bytes persist.
         chunks = [];
         console.warn(`asset-store writer aborted for ${key}:`, reason);
       },

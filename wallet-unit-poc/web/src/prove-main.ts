@@ -4,8 +4,8 @@
 // then drives proving → review → submitting → result.
 //
 // If no stored input exists (e.g., user navigates directly to /prove, or
-// refreshes mid-proving), we redirect back to `/` rather than rendering
-// an empty page.
+// refreshes mid-proving), redirect back to `/` rather than render an
+// empty page.
 
 import "./style.css";
 import { markPriorStepsDone } from "./progress";

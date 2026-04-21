@@ -1,7 +1,7 @@
 // sessionStorage channel used to hand `ProveInput` from the sign document
 // (/) to the proving document (/prove). Both documents are same-origin so
-// the entry survives the navigation; we schema-version the payload so a
-// stale value from an older build never feeds a fresh proving page.
+// the entry survives the navigation. The payload carries a schema version
+// so a stale value from an older build never feeds a fresh proving page.
 
 import type { ProveInput } from "./worker";
 

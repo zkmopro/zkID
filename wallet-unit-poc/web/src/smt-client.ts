@@ -42,7 +42,10 @@ export interface SmtCircuitInputs {
 }
 
 export interface FetchSmtProofParams {
-  issuer?: SmtIssuer;
+  /** Issuer key for the card currently being proven. The worker selects the
+   *  matching engine from its per-issuer map; mixing issuers would verify
+   *  non-revocation against the wrong tree. */
+  issuer: SmtIssuer;
   /** Certificate serial number in hex (with or without `0x` prefix). */
   serialHex: string;
   depth?: number;
@@ -132,6 +135,7 @@ export function fetchSmtProof(
       type: "smt_proof",
       requestId,
       serialHex: params.serialHex,
+      issuer: params.issuer,
     });
   });
 }

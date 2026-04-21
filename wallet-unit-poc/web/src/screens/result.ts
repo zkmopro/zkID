@@ -32,7 +32,7 @@ export function mountResult(root: HTMLElement): () => void {
     tone = "error";
     testidBadge = "result-error";
   } else {
-    // Router guards phase; safe placeholder if we arrive here anyway.
+    // Router guards should prevent this branch; kept as a defensive fallback.
     headline = "";
     detail = "";
     testidBadge = "result-unknown";

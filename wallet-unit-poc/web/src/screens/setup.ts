@@ -164,6 +164,20 @@ export function mountSetup(root: HTMLElement): () => void {
     }
   }
 
+  function smtProgressSuffix(state: RunningSmt): string {
+    const isIngest = state.phase === "ingest";
+    if (state.bytesTotal > 0) {
+      if (isIngest) {
+        return ` — ${state.bytesDone.toLocaleString()} / ${state.bytesTotal.toLocaleString()} nodes`;
+      }
+      return ` — ${humanBytes(state.bytesDone, "0 B")} / ${humanBytes(state.bytesTotal, "0 B")}`;
+    }
+    if (state.bytesDone > 0 && !isIngest) {
+      return ` — ${humanBytes(state.bytesDone, "0 B")}`;
+    }
+    return "";
+  }
+
   function paintSmt(state: SmtState): void {
     smtPanel.classList.remove("setup-panel-ok");
     switch (state.status) {
@@ -174,16 +188,7 @@ export function mountSetup(root: HTMLElement): () => void {
         smtRetry.hidden = true;
         break;
       case "running": {
-        const label = smtPhaseLabel(state.phase);
-        const bytes =
-          state.bytesTotal > 0
-            ? state.phase === "ingest"
-              ? ` — ${state.bytesDone.toLocaleString()} / ${state.bytesTotal.toLocaleString()} nodes`
-              : ` — ${humanBytes(state.bytesDone, "0 B")} / ${humanBytes(state.bytesTotal, "0 B")}`
-            : state.bytesDone > 0 && state.phase !== "ingest"
-              ? ` — ${humanBytes(state.bytesDone, "0 B")}`
-              : "";
-        smtBody.textContent = `${label}${bytes}`;
+        smtBody.textContent = `${smtPhaseLabel(state.phase)}${smtProgressSuffix(state)}`;
         smtRetry.hidden = true;
         break;
       }

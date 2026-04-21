@@ -187,7 +187,7 @@ fn pk_slot(kind: CircuitKind) -> &'static PkCell {
 
 /// Lock a PK slot, recovering the guard even if a prior prove() panicked and
 /// poisoned the Mutex. `.unwrap()` would abort the wasm instance (tab crash)
-/// on poison; we surface a clean JsError instead.
+/// on poison; surface a clean JsError instead.
 fn lock_pk_mut(
     kind: CircuitKind,
 ) -> std::sync::MutexGuard<'static, Option<<R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey>> {

@@ -128,7 +128,18 @@ export function mountReady(root: HTMLElement): () => void {
 
   function onStart(): void {
     if (startBtn.disabled) return;
-    if ($challenge.get().status === "error") {
+    const current = $challenge.get();
+    if (current.status === "error") {
+      void fetchChallenge();
+      return;
+    }
+    // A pre-fetched challenge can expire while the user idles on this screen.
+    // Consuming a stale challenge would burn the single-use PIN only to hit a
+    // server-side rejection minutes into proving; re-fetch first.
+    if (
+      current.status === "ready" &&
+      isChallengeExpired(current.challenge.expires_at)
+    ) {
       void fetchChallenge();
       return;
     }
@@ -160,7 +171,8 @@ export function mountReady(root: HTMLElement): () => void {
     dispatch({ type: "reset_to_setup" });
   }
 
-  // Kick the pre-fetch unless we already have a ready challenge held over.
+  // Trigger a pre-fetch only if no ready challenge is already cached from a
+  // prior visit to this screen.
   const nowChallenge = $challenge.get();
   if (nowChallenge.status === "pending" || nowChallenge.status === "error") {
     void fetchChallenge();
@@ -175,4 +187,13 @@ export function mountReady(root: HTMLElement): () => void {
     unsubWarmup();
     unsubChallenge();
   };
+}
+
+/** Treat unparseable timestamps as expired so we re-fetch rather than trust
+ *  a malformed response. 5-second skew buffer to cover clock drift between
+ *  the browser and the Go verifier. */
+function isChallengeExpired(expiresAt: string): boolean {
+  const t = Date.parse(expiresAt);
+  if (Number.isNaN(t)) return true;
+  return t - Date.now() <= 5_000;
 }

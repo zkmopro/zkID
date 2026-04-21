@@ -33,7 +33,7 @@ export async function ensureAsset(
     if (actual === expectedSha256) return cached;
     // Stale cache entry. Try to delete, but don't hard-fail if the delete itself
     // errors — writer() below will delete again, and surfacing a cleanup error
-    // here would hide the underlying "we need to re-download" outcome.
+    // here would mask the actual re-download outcome.
     try {
       await assetStore.delete(cacheKey);
     } catch (err) {
@@ -74,8 +74,8 @@ export async function ensureAsset(
   });
 
   // Collect decompressed bytes into memory while simultaneously piping them
-  // to the asset-store writer. SubtleCrypto.digest is one-shot, so we hash
-  // the collected buffer at the end rather than streaming into a running hash.
+  // to the asset-store writer. SubtleCrypto.digest is one-shot; the hash
+  // runs over the collected buffer at the end rather than streaming.
   const collected: Uint8Array[] = [];
   const collectTransform = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {

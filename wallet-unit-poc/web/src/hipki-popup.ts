@@ -13,7 +13,7 @@
 //   1. window.open("http://localhost:61161/popupForm")
 //   2. popup posts `JSON.stringify({func:"getTbs"})` to window.opener
 //      once it's ready to accept commands.
-//   3. our app posts `JSON.stringify(payload)` — `payload.func` selects
+//   3. the app posts `JSON.stringify(payload)` — `payload.func` selects
 //      the action ("pkcs11info", "MakeSignature", ...).
 //   4. popup runs the operation, posts back the raw responseText, and
 //      then calls `window.close()` on itself.

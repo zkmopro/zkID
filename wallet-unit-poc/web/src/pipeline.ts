@@ -124,9 +124,9 @@ export async function runSignPhasePipeline(
   // inputs.
   const tbs = challengeBytesToTbs(challenge.challenge_bytes);
 
-  // The HiPKI popup is user-driven and can't be cancelled mid-flight; we let
-  // it complete naturally and bail on the next abort check. `/sign` returns
-  // the cert whose private key produced the signature — MOICA tokens carry
+  // The HiPKI popup is user-driven and can't be cancelled mid-flight; let it
+  // complete naturally and bail on the next abort check. `/sign` returns the
+  // cert whose private key produced the signature — MOICA tokens carry
   // multiple user certs, and `/pkcs11info` may hand back a different one.
   // Key the proving inputs off this cert, not the one cached during setup.
   const { signatureB64: userSignatureB64, userCertDer: signedUserCertDer } =

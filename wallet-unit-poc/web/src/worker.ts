@@ -43,7 +43,7 @@ export interface ProveInput {
 export type WorkerInMsg =
   | { type: "warmup" }
   | { type: "load_smt"; issuer: SmtIssuer }
-  | { type: "smt_proof"; requestId: string; serialHex: string }
+  | { type: "smt_proof"; requestId: string; serialHex: string; issuer: SmtIssuer }
   | { type: "prove"; input: ProveInput }
   | { type: "cancel" };
 
@@ -131,7 +131,7 @@ const witnessCache: Partial<Record<Kind, Uint8Array>> = {};
 const smtEngines: Partial<Record<SmtIssuer, SmtEngine>> = {};
 
 // tsconfig lib is ES2023 + DOM (no WebWorker lib); cast to a narrow shape
-// covering the APIs we actually use.
+// covering the APIs required by this worker.
 interface WorkerGlobal {
   onmessage: ((this: WorkerGlobal, ev: MessageEvent<WorkerInMsg>) => unknown) | null;
   postMessage(msg: Progress): void;
@@ -179,7 +179,7 @@ workerSelf.onmessage = (ev: MessageEvent<WorkerInMsg>) => {
     return;
   }
   if (data.type === "smt_proof") {
-    runSmtProof(data.requestId, data.serialHex);
+    runSmtProof(data.requestId, data.serialHex, data.issuer);
     return;
   }
   if (data.type === "prove") {
@@ -347,15 +347,11 @@ async function runLoadSmt(issuer: SmtIssuer): Promise<void> {
   }
 }
 
-function runSmtProof(requestId: string, serialHex: string): void {
+function runSmtProof(requestId: string, serialHex: string, issuer: SmtIssuer): void {
   try {
-    // First loaded engine wins; serialHex does not carry issuer information,
-    // so the main thread is responsible for calling load_smt with the correct
-    // issuer for the card currently in use.
-    const engine =
-      smtEngines.g2 ?? smtEngines.g3 ?? (undefined as SmtEngine | undefined);
+    const engine = smtEngines[issuer];
     if (!engine) {
-      throw new Error("SMT engine not loaded; call load_smt first");
+      throw new Error(`SMT engine for issuer ${issuer} not loaded; call load_smt first`);
     }
     const resp = engine.createProof(serialHex);
     const inputs = convertSmtProofToCircuitInputs(resp);

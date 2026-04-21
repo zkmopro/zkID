@@ -6,10 +6,11 @@
 //
 // Keeping the server's exact field names on the interface avoids a remap
 // layer where a TS-side rename would silently cast to `undefined` at
-// runtime — the `createChallenge` shape guard enforces this invariant.
+// runtime — the runtime shape guards below enforce this invariant.
 //
-// The verifier has a 2 MB body limit; base64 inflates ~33%, so we cap
-// each raw proof at 700 KB to surface a clean error before the server 413s.
+// The verifier has a 2 MB body limit and base64 inflates raw bytes ~33%.
+// Each raw proof is capped at 700 KB to surface a clean error before the
+// server rejects the request with 413.
 
 import { composeSignal, parsePositiveInt } from "./abort-utils";
 
@@ -106,7 +107,13 @@ export async function submitLinkVerify(
       `POST /link-verify returned ${r.status} ${r.statusText}${text ? ` — ${text}` : ""}`,
     );
   }
-  return (await r.json()) as LinkVerifyResult;
+  const parsed = (await r.json()) as Partial<LinkVerifyResult>;
+  if (typeof parsed?.verified !== "boolean" || typeof parsed?.nullifier !== "string") {
+    throw new Error(
+      `POST /link-verify: unexpected response shape (got keys: ${Object.keys(parsed ?? {}).join(", ") || "none"})`,
+    );
+  }
+  return parsed as LinkVerifyResult;
 }
 
 function assertProofSize(field: string, bytes: Uint8Array): void {

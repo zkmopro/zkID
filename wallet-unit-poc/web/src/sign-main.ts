@@ -100,7 +100,7 @@ function boot(): void {
         signal: myController.signal,
       });
       // The Worker is about to be torn down by the page navigation; drop
-      // our refs first so no late message can fire into a disposed FSM.
+      // the refs here first so no late message can fire into a disposed FSM.
       terminateWorker();
       saveProveInput(proveInput);
       window.location.assign("/prove");

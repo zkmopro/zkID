@@ -192,6 +192,7 @@ describe("fetchSmtProof (worker wrapper)", () => {
       }),
     });
     const out: SmtCircuitInputs = await fetchSmtProof(worker, {
+      issuer: "g2",
       serialHex: "0xdeadbeef",
     });
     expect(out.smt_root).toBe("42");
@@ -205,7 +206,7 @@ describe("fetchSmtProof (worker wrapper)", () => {
       onError: () => "engine not loaded",
     });
     await expect(
-      fetchSmtProof(worker, { serialHex: "0x1" }),
+      fetchSmtProof(worker, { issuer: "g2", serialHex: "0x1" }),
     ).rejects.toThrow(/engine not loaded/);
   });
 
@@ -216,7 +217,7 @@ describe("fetchSmtProof (worker wrapper)", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(
-      fetchSmtProof(worker, { serialHex: "0x1", signal: controller.signal }),
+      fetchSmtProof(worker, { issuer: "g2", serialHex: "0x1", signal: controller.signal }),
     ).rejects.toThrow(/aborted/i);
   });
 
@@ -229,6 +230,7 @@ describe("fetchSmtProof (worker wrapper)", () => {
     } as unknown as Worker;
     const controller = new AbortController();
     const p = fetchSmtProof(worker, {
+      issuer: "g2",
       serialHex: "0x1",
       signal: controller.signal,
     });
@@ -237,8 +239,8 @@ describe("fetchSmtProof (worker wrapper)", () => {
   });
 
   it("ignores messages intended for other requests", async () => {
-    // Two sequential requests — we want the second one to NOT pick up the
-    // first one's smt_proof_done reply.
+    // Sequential requests must not cross-contaminate: the second request must
+    // ignore the first's smt_proof_done reply.
     let seen = 0;
     const worker = makeFakeWorker({
       onProof: () => {
@@ -250,8 +252,8 @@ describe("fetchSmtProof (worker wrapper)", () => {
         };
       },
     });
-    const a = await fetchSmtProof(worker, { serialHex: "0x1" });
-    const b = await fetchSmtProof(worker, { serialHex: "0x2" });
+    const a = await fetchSmtProof(worker, { issuer: "g2", serialHex: "0x1" });
+    const b = await fetchSmtProof(worker, { issuer: "g2", serialHex: "0x2" });
     expect(a.smt_root).toBe("1");
     expect(b.smt_root).toBe("2");
   });

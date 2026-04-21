@@ -262,8 +262,8 @@ async function startSmtWasm(
 
   // Go's `main()` blocks on `select{}`. Kick it off without awaiting — the
   // JS exports (smtInitTree, etc.) are registered synchronously before the
-  // blocking select runs, so we can call them as soon as `run()` returns
-  // control to the event loop.
+  // blocking select runs, so the caller can invoke them as soon as `run()`
+  // yields control back to the event loop.
   const runPromise = go.run(result.instance);
   runPromise.catch((err) => {
     console.error("smt.wasm exited unexpectedly", err);

@@ -2,8 +2,8 @@
 //
 // All requests route through the popupForm bridge (see `hipki-popup.ts`)
 // because LocalSignServer ships no CORS headers — direct fetch is blocked
-// by the browser. The popup is same-origin with localhost:61161 and we
-// talk to it via window.postMessage.
+// by the browser. The popup is same-origin with localhost:61161 and talks
+// to the main app via window.postMessage.
 //
 // Field names mirror `ecdsa-spartan2/src/hipki_client.rs` so responses
 // deserialize without renames (`subjectDN`, `issuerDN`, `cardSN`).
