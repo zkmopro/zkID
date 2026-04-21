@@ -13,7 +13,10 @@ use serde::Serialize;
 use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::prelude::*;
 use x509_cert::{der::{Decode, Encode}, Certificate};
-use zkid_input_builder::{generate_split_inputs, types::SmtCircuitInputs, MAX_CERT_CHAIN_LENGTH};
+use zkid_input_builder::{
+    cert::serial_bytes_to_hex_trimmed, generate_split_inputs, types::SmtCircuitInputs,
+    MAX_CERT_CHAIN_LENGTH,
+};
 
 /// Two-JSON return shape. `cert_chain` + `device_sig` match the keys the
 /// circom witness calculator expects in its input file.
@@ -114,23 +117,16 @@ pub fn build_split_inputs(
     )
     .map_err(|e| JsError::new(&e))?;
 
-    // `serde_json::Value::Object` serialises as a JS `Map` by default, which
-    // `JSON.stringify` flattens to `"{}"`. The witness calculator then parses
-    // an empty object and bails with "Not all inputs have been set. Only 0
-    // out of N" — the same class of failure the `__placeholder__` drift test
-    // is meant to catch. Force plain JS objects so downstream `JSON.stringify`
-    // produces the circuit-input JSON the witness calc expects.
+    // `serde_json::Value::Object` would otherwise serialise to a JS `Map`, and
+    // `JSON.stringify(map)` returns `"{}"` — the witness calc sees zero inputs.
     let serializer = Serializer::new().serialize_maps_as_objects(true);
     out.serialize(&serializer)
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
-/// Parse an X.509 certificate DER and return the RSA modulus bit width of
-/// its subjectPublicKey. Used by the web app to deterministically select
-/// `cert_chain_rs2048` vs `cert_chain_rs4096` from the detected card's
-/// issuer cert, rather than the previous fragile DN-regex match that
-/// picked the wrong circuit (kIssuer=17, 2057-bit cap) for MOICA-G3
-/// cards with 4096-bit issuer keys.
+/// RSA modulus bit width of the cert's `subjectPublicKey`. Used by the web
+/// app to pick `cert_chain_rs2048` vs `cert_chain_rs4096` from the real
+/// issuer key, rather than guessing from the issuer DN string.
 #[wasm_bindgen]
 pub fn cert_modulus_bits(cert_der: &[u8]) -> Result<u32, JsError> {
     let cert = Certificate::from_der(cert_der)
@@ -142,38 +138,19 @@ pub fn cert_modulus_bits(cert_der: &[u8]) -> Result<u32, JsError> {
         .map_err(|e| JsError::new(&format!("SPKI encode: {e}")))?;
     let pubkey = RsaPublicKey::from_public_key_der(&spki_der)
         .map_err(|e| JsError::new(&format!("not an RSA cert: {e}")))?;
-    let modulus_bytes = pubkey.n().to_bytes_be();
-    let leading_zeros = modulus_bytes
-        .iter()
-        .next()
-        .map(|b| b.leading_zeros())
-        .unwrap_or(0);
-    let bits = modulus_bytes.len() as u32 * 8 - leading_zeros;
-    Ok(bits)
+    Ok(pubkey.n().bits() as u32)
 }
 
-/// Parse the cert's `serialNumber` field and return it as a hex string with
-/// leading zero bytes stripped. Matches `serial_bytes_to_hex_trimmed` in
-/// `zkid-input-builder::cert` so the web path produces the same serial hex
-/// the native CLI uses. Required because the user's real cert (and its
-/// serial) is only known after HiPKI `/sign` returns — the /pkcs11info
-/// entry may be a different cert from the same card.
+/// Trimmed-hex serial of an X.509 cert. Called after HiPKI `/sign` returns —
+/// that cert may differ from the `/pkcs11info` entry, and the circuit keys
+/// off the signing cert's serial.
 #[wasm_bindgen]
 pub fn cert_serial_hex(cert_der: &[u8]) -> Result<String, JsError> {
     let cert = Certificate::from_der(cert_der)
         .map_err(|e| JsError::new(&format!("cert DER parse: {e}")))?;
-    let bytes = cert.tbs_certificate.serial_number.as_bytes();
-    let trimmed: Vec<u8> = bytes
-        .iter()
-        .skip_while(|&&b| b == 0)
-        .copied()
-        .collect();
-    let out = if trimmed.is_empty() { bytes } else { &trimmed };
-    let mut s = String::with_capacity(out.len() * 2);
-    for b in out {
-        s.push_str(&format!("{b:02x}"));
-    }
-    Ok(s)
+    Ok(serial_bytes_to_hex_trimmed(
+        cert.tbs_certificate.serial_number.as_bytes(),
+    ))
 }
 
 /// Compute `pk_blind = SHA-256(user_pk_be || tbs || "zkID/pk-commit/v1")`.

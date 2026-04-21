@@ -3,11 +3,11 @@
 // and handing the inputs off to the already-warm Worker for the CPU/wasm
 // proving steps. Submission is owned by the Review screen via main.ts.
 
-import init, { cert_modulus_bits, cert_serial_hex } from "./wasm/spartan2_wasm.js";
+import { cert_modulus_bits, cert_serial_hex } from "./wasm/spartan2_wasm.js";
 
 import { base64ToBytes, challengeBytesToTbs } from "./bytes";
 import { fetchPkcs11Info, signTbs } from "./hipki-client";
-import { buildInputs } from "./inputs";
+import { buildInputs, ensureWasm } from "./inputs";
 import type { CircuitKind } from "./manifest";
 import type { Pin } from "./pin";
 import { dispatch } from "./store";
@@ -123,14 +123,11 @@ export async function runProvingPipeline(
   // inputs.
   const tbs = challengeBytesToTbs(challenge.challenge_bytes);
 
-  // The HiPKI popup is user-driven and can't be cancelled mid-flight; we
-  // let it complete naturally and bail on the next abort check. Capture the
-  // cert that /sign returns alongside the signature — MOICA tokens can carry
-  // multiple user certs (signing + encryption), and /pkcs11info may return a
-  // different one than /sign used. The native CLI (main.rs:168) and the
-  // circuit both require the cert whose private key produced the signature,
-  // so we key everything downstream off sign_response.certb64 instead of the
-  // cert we cached during setup.
+  // The HiPKI popup is user-driven and can't be cancelled mid-flight; we let
+  // it complete naturally and bail on the next abort check. `/sign` returns
+  // the cert whose private key produced the signature — MOICA tokens carry
+  // multiple user certs, and `/pkcs11info` may hand back a different one.
+  // Key the proving inputs off this cert, not the one cached during setup.
   const { signatureB64: userSignatureB64, userCertDer: signedUserCertDer } =
     await stage("sign", async () => {
       const sig = await signTbs({
@@ -166,8 +163,7 @@ export async function runProvingPipeline(
         serialHex: signedSerialHex,
         signal,
       });
-      const ms = Math.max(1, Math.round(performance.now() - t0));
-      return { inputs, ms };
+      return { inputs, ms: Math.round(performance.now() - t0) };
     },
     ({ ms }) => `MerkleProof in ${ms}ms`,
   ).then((x) => x.inputs);
@@ -198,33 +194,18 @@ export async function runProvingPipeline(
   worker.postMessage(msg);
 }
 
-let wasmInit: Promise<unknown> | null = null;
-async function ensureWasm(): Promise<void> {
-  if (!wasmInit) wasmInit = init();
-  await wasmInit;
-}
-
-/** Route by the issuer cert's actual RSA modulus width. The previous DN-regex
- *  match was fragile: MOICA-G3 cards whose issuer DN didn't contain "G3" /
- *  "4096" silently picked the rs2048 circuit (kIssuer=17, 2057-bit cap) and
- *  blew up at `RSAVerifier65537` line 44 when the 4096-bit modulus truncated.
- *  A card is G3 iff its issuer cert's modulus is wider than 2048 bits. */
+/** Route to rs2048 / rs4096 by the issuer cert's actual modulus width, not
+ *  by guessing from the issuer DN — MOICA-G3 issuer DNs don't always carry
+ *  "G3" or "4096", and picking rs2048 for a 4096-bit key would truncate the
+ *  modulus into 17*121=2057 bits and fail the cert-chain RSA verify. */
 async function deriveIssuerFromCert(
   issuerCertDer: Uint8Array,
 ): Promise<{ issuer: SmtIssuer; kIssuer: 17 | 34; certKind: CircuitKind }> {
   await ensureWasm();
   const bits = cert_modulus_bits(issuerCertDer);
-  const routed = bits > 2048
-    ? { issuer: "g3" as const, kIssuer: 34 as const, certKind: "cert_chain_rs4096" as const }
-    : { issuer: "g2" as const, kIssuer: 17 as const, certKind: "cert_chain_rs2048" as const };
-  // Temporary diagnostic — help surface the real issuer modulus width when
-  // cards misbehave in the wild. Safe to log: bit count is derivable from
-  // any public cert, and the circuit choice is already user-visible on the
-  // setup panel. Remove once the real-card flow is confirmed green.
-  console.info(
-    `[zkID] issuer modulus = ${bits} bits → ${routed.certKind} (kIssuer=${routed.kIssuer})`,
-  );
-  return routed;
+  return bits > 2048
+    ? { issuer: "g3", kIssuer: 34, certKind: "cert_chain_rs4096" }
+    : { issuer: "g2", kIssuer: 17, certKind: "cert_chain_rs2048" };
 }
 
 /** Fetch + parse the HiPKI pkcs11info response into a `CardContext`.
