@@ -5,6 +5,12 @@
 // transitions and the transient ProvingRun blob that carries proof bytes
 // from `proving` through `review` / `submitting`. Per-step progress atoms
 // live in `ui.ts`.
+//
+// The `/prove` document bootstraps by writing `$state` directly to
+// `proving` (see prove-main.ts) — it receives a ProveInput via
+// sessionStorage from the `/` document and never goes through the usual
+// landing → setup → ready → proving sequence. The reducer below still
+// governs every subsequent transition on /prove.
 
 import { atom, type WritableAtom } from "nanostores";
 

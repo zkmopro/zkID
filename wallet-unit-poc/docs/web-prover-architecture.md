@@ -88,27 +88,49 @@ string is dropped. The "[object Object]" parse error visible in
 LocalSignServer's own console is one of those — harmless and out of our
 control.
 
-## Cross-Origin isolation tradeoff
+## Cross-Origin isolation — two-route COOP
 
-`vite.config.ts` sets:
+The HiPKI popup requires `Cross-Origin-Opener-Policy:
+same-origin-allow-popups` so the popup's script can reach back into the
+main page via `window.opener.postMessage`. The stricter `same-origin`
+value severs the opener and breaks the bridge.
 
-- `Cross-Origin-Opener-Policy: same-origin-allow-popups`
-- `Cross-Origin-Embedder-Policy: require-corp`
+The rayon thread pool (`wasm-bindgen-rayon`) needs `SharedArrayBuffer`,
+which only exists when `crossOriginIsolated === true`, which requires
+`COOP: same-origin` + `COEP: require-corp`. These two requirements look
+contradictory, but HiPKI and proving are strictly disjoint in time —
+signing is done before proving starts — so each phase can live in its
+own document with its own COOP.
 
-We need `same-origin-allow-popups` to keep `window.opener` alive across
-the cross-origin popup. The stricter `same-origin` value severs it.
+The app ships as **two same-origin entry points**:
 
-The cost: `crossOriginIsolated === false` in this configuration, which
-disables `SharedArrayBuffer`. `wasm-bindgen-rayon` needs SAB for its
-thread pool, so the Worker falls back to single-threaded proving when
-isolation is off. The fallback lives in `src/worker.ts::clampThreads`:
-returns 1 when `crossOriginIsolated !== true`, otherwise proceeds with
-the usual hardware-concurrency clamp.
+| Route       | COOP                         | `crossOriginIsolated` | Responsibility                                |
+| ----------- | ---------------------------- | --------------------- | --------------------------------------------- |
+| `/`         | `same-origin-allow-popups`   | `false`               | Landing, setup, ready, HiPKI sign, SMT, build |
+| `/prove`    | `same-origin`                | `true`                | Worker warmup + witness + prove (threaded)    |
 
-The single-threaded path is meaningfully slower (proving is the dominant
-step), but it works. Re-enabling SAB would require moving HiPKI behind a
-proxy or out-of-process bridge so we can drop the popup and tighten COOP
-back to `same-origin`. Out of scope here.
+- `index.html` loads `src/sign-main.ts`. All screens up to and including
+  the sign-phase pipeline (challenge → sign → SMT → build) run here.
+- `prove.html` loads `src/prove-main.ts`. It reads a `ProveInput` that
+  `/` wrote to `sessionStorage` (see `src/storage-handoff.ts`), spawns a
+  fresh Worker inside the isolated context, runs warmup (fast — OPFS is
+  origin-scoped and already contains the PK bytes from `/`), then posts
+  `{type:"prove"}`. `clampThreads` in `src/worker.ts` returns a pool
+  size ≥ 2 here because `crossOriginIsolated === true`.
+
+The path-scoped headers are enforced in dev by the `coopPerPath` plugin
+in `vite.config.ts` and in prod by the host (`public/_headers` is read
+by Netlify / Cloudflare Pages; nginx / CDN snippets live in the
+`web/README.md`). Hosts that can't scope headers by path fall back to
+serving `same-origin-allow-popups` everywhere, which keeps the app
+working at reduced speed — `clampThreads` returns 1 when isolation is
+off and the pipeline degrades cleanly to single-threaded proving.
+
+Data handoff between the two documents is a single `sessionStorage`
+entry holding the built `ProveInput` (two input JSONs + circuit kind +
+challenge id + nullifier). `sessionStorage` is same-origin, survives a
+hard navigation, and is cleared by `consumeProveInput` on a successful
+read so a `/prove` reload can't replay a stale run.
 
 ## State machine
 

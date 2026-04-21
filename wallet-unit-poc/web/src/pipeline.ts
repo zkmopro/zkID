@@ -1,7 +1,8 @@
-// Main-thread proving orchestrator. Lives between the setup screen and the
-// Worker, running the network/IO pipeline (challenge → sign → smt → build)
-// and handing the inputs off to the already-warm Worker for the CPU/wasm
-// proving steps. Submission is owned by the Review screen via main.ts.
+// Main-thread sign-phase pipeline. Runs the network/IO portion (challenge →
+// sign → smt → build) on the sign route (/) and returns a `ProveInput` that
+// the caller hands off (via sessionStorage) to the proving route (/prove),
+// where a fresh, cross-origin-isolated Worker owns the CPU/wasm proving
+// steps. Submission is owned by the Review screen via prove-main.ts.
 
 import { cert_modulus_bits, cert_serial_hex } from "./wasm/spartan2_wasm.js";
 
@@ -14,7 +15,7 @@ import { dispatch } from "./store";
 import { fetchSmtProof, type SmtIssuer } from "./smt-client";
 import { result, steps, type Step } from "./ui";
 import type { Challenge } from "./verifier-client";
-import type { ProveInput, WorkerInMsg } from "./worker";
+import type { ProveInput } from "./worker";
 
 export interface CardContext {
   userCertDer: Uint8Array;
@@ -102,13 +103,13 @@ async function stage<T>(
 }
 
 /** Run the main-thread portion of the proving pipeline (challenge → sign →
- *  smt → build) and hand off to the warm Worker. Returns once the `prove`
- *  message is posted; per-step progress + terminal events flow back through
- *  `progress.ts`. Caller owns Worker lifecycle. */
-export async function runProvingPipeline(
+ *  smt → build) and return the built `ProveInput`. Per-step progress flows
+ *  through `progress.ts`. The SMT Worker is only used for the smt_proof RPC;
+ *  the heavy prove Worker lives on /prove. Caller owns Worker lifecycle. */
+export async function runSignPhasePipeline(
   worker: Worker,
   ctx: ProvingContext,
-): Promise<void> {
+): Promise<ProveInput> {
   const { signal, challenge } = ctx;
 
   // Pre-fetched by the Ready screen — paint the row as done immediately.
@@ -190,8 +191,7 @@ export async function runProvingPipeline(
     challengeId: challenge.challenge_id,
     nullifier: signedNullifier,
   };
-  const msg: WorkerInMsg = { type: "prove", input };
-  worker.postMessage(msg);
+  return input;
 }
 
 /** Route to rs2048 / rs4096 by the issuer cert's actual modulus width, not

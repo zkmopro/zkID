@@ -53,7 +53,7 @@ function warmupSublabel(p: WarmupEvent): string {
   }
 }
 
-function markPriorStepsDone(step: Step): void {
+export function markPriorStepsDone(step: Step): void {
   for (const s of STEP_ORDER) {
     if (s === step) return;
     const cur = steps[s].get();

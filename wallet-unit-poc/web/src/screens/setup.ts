@@ -417,12 +417,12 @@ export function mountSetup(root: HTMLElement): () => void {
   // --- Warmup retry ---------------------------------------------------
 
   function retryWarmup(): void {
-    // main.ts listens for idle warmup during the setup phase and re-kicks.
+    // sign-main.ts listens for idle warmup during the setup phase and re-kicks.
     $warmup.set({ status: "idle" });
   }
 
   function retrySmt(): void {
-    // main.ts listens for idle SMT during the setup phase (with a ready
+    // sign-main.ts listens for idle SMT during the setup phase (with a ready
     // card) and re-kicks `load_smt` on the Worker.
     $smt.set({ status: "idle" });
   }

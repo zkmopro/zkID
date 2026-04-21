@@ -1,5 +1,5 @@
-// Submitting screen: spinner + live elapsed counter while main.ts POSTs
-// both proofs to /link-verify. Actual submission lives in main.ts.
+// Submitting screen: spinner + live elapsed counter while prove-main.ts POSTs
+// both proofs to /link-verify. Actual submission lives in prove-main.ts.
 
 import { $state } from "../store";
 

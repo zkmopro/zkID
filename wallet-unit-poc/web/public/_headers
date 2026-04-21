@@ -1,0 +1,21 @@
+# Path-scoped COOP/COEP for Netlify-style static hosts.
+#
+# /prove needs `same-origin` so crossOriginIsolated is true, which enables
+# SharedArrayBuffer for wasm-bindgen-rayon's thread pool.
+# Every other path uses `same-origin-allow-popups` so the HiPKI popup can
+# reach back into the opener via `window.opener.postMessage`.
+#
+# Hosts that don't honour this file: add an equivalent path-scoped rule in
+# their own config (see web/README.md for nginx and Cloudflare snippets).
+
+/prove
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+
+/prove.html
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+
+/*
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  Cross-Origin-Embedder-Policy: require-corp

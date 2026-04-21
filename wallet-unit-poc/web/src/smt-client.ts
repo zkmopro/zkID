@@ -63,9 +63,9 @@ interface SmtProofError {
 /** Page-global test escape hatch. When present, `fetchSmtProof` skips the
  *  Worker entirely and returns fake inputs derived from the fixture proof.
  *  Playwright injects this through `page.addInitScript` — Worker globals are
- *  isolated so the equivalent Worker-side hook would never fire. `main.ts`
- *  checks the same hook to short-circuit `load_smt` and flip `$smt` to
- *  ready synchronously. */
+ *  isolated so the equivalent Worker-side hook would never fire.
+ *  `sign-main.ts` checks the same hook to short-circuit `load_smt` and flip
+ *  `$smt` to ready synchronously. */
 interface SmtTestHookGlobal {
   __SMT_TEST_PROOF__?: SmtProofResponse;
 }
@@ -78,7 +78,7 @@ let requestCounter = 0;
 
 /** Post `{type:"smt_proof"}` to the Worker and resolve with the matching
  *  `smt_proof_done` reply. The Worker must already have an SMT engine
- *  loaded for the card's issuer (main.ts sends `{type:"load_smt"}` once
+ *  loaded for the card's issuer (sign-main.ts sends `{type:"load_smt"}` once
  *  HiPKI reaches `card_ready`). */
 export function fetchSmtProof(
   worker: Worker,
