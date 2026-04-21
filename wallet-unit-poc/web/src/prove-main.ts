@@ -37,7 +37,13 @@ function boot(): void {
   // deliberately bypasses the store's `start_proving` transition because
   // /prove enters proving directly from a stored handoff — see the note
   // in store.ts on the `landing → proving` direct bootstrap.
+  //
+  // Mark sign-phase steps (challenge/sign/smt/build) done BEFORE first
+  // render — they completed on / and the user just saw green checks for
+  // them. Deferring this until `warmup_done` leaves them gray for the
+  // multi-second warmup and looks like their prior work was lost.
   resetUi();
+  markPriorStepsDone("prove_cert");
   result.set({ kind: "running" });
   $state.set({ phase: "proving", startedAt: performance.now() });
 
@@ -50,9 +56,6 @@ function boot(): void {
     onProgress: (data, w) => {
       if (data.step === "warmup_done" && !postedProve) {
         postedProve = true;
-        // Sign-phase rows already completed on /; fast-forward them so
-        // the /prove step list starts at `prove_cert`.
-        markPriorStepsDone("prove_cert");
         const msg: WorkerInMsg = { type: "prove", input: proveInput };
         w.postMessage(msg);
         return;
