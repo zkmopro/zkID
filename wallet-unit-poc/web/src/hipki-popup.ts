@@ -80,6 +80,10 @@ export function openHipkiPopup(baseUrl: string = HIPKI_BASE): Promise<void> {
 
   if (!messageListener) {
     messageListener = (ev: MessageEvent) => {
+      // Origin-filter first. Browser extensions postMessage objects into
+      // every window; the HiPKI popupForm logs `JSON.parse("[object Object]")`
+      // errors when those reach it, which is harmless noise on the popup
+      // side but a sign that we MUST stay strict on our side.
       if (ev.origin !== popupOrigin) return;
       const data = ev.data;
       if (data === "getTbs") {
