@@ -8,6 +8,8 @@
 // cap before encoding is ~1.5 MB. We set a conservative per-proof raw cap of
 // 700 KB that surfaces a clean error instead of letting the server 413.
 
+import { composeSignal, parsePositiveInt } from "./abort-utils";
+
 const VERIFIER_BASE =
   import.meta.env.VITE_VERIFIER_BASE_URL ?? "http://localhost:8080";
 
@@ -34,8 +36,27 @@ export interface LinkVerifyParams {
   nullifier: string;
 }
 
-export async function createChallenge(): Promise<Challenge> {
-  const r = await fetch(`${VERIFIER_BASE}/challenge`, { method: "POST" });
+/** Default per-request timeout. Overridable via VITE_VERIFIER_TIMEOUT_MS. */
+const VERIFIER_TIMEOUT_MS = parsePositiveInt(
+  import.meta.env.VITE_VERIFIER_TIMEOUT_MS,
+  15_000,
+);
+
+export interface CreateChallengeOptions {
+  signal?: AbortSignal;
+}
+
+export interface SubmitLinkVerifyOptions {
+  signal?: AbortSignal;
+}
+
+export async function createChallenge(
+  opts: CreateChallengeOptions = {},
+): Promise<Challenge> {
+  const r = await fetch(`${VERIFIER_BASE}/challenge`, {
+    method: "POST",
+    signal: composeSignal(opts.signal, VERIFIER_TIMEOUT_MS),
+  });
   if (!r.ok) {
     throw new Error(`POST /challenge returned ${r.status} ${r.statusText}`);
   }
@@ -44,6 +65,7 @@ export async function createChallenge(): Promise<Challenge> {
 
 export async function submitLinkVerify(
   params: LinkVerifyParams,
+  opts: SubmitLinkVerifyOptions = {},
 ): Promise<LinkVerifyResult> {
   assertProofSize("cert_chain_proof", params.certChainProofBytes);
   assertProofSize("device_sig_proof", params.deviceSigProofBytes);
@@ -61,6 +83,7 @@ export async function submitLinkVerify(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: composeSignal(opts.signal, VERIFIER_TIMEOUT_MS),
   });
   if (!r.ok) {
     const text = await r.text().catch(() => "");

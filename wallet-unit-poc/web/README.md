@@ -90,34 +90,35 @@ Go server and it has its own copy.
 Three services the browser talks to at runtime. Each is configurable via a
 `VITE_*` env var (see `.env.example`):
 
-| Service                 | Env var                  | Default     | Purpose                                      |
-| ----------------------- | ------------------------ | ----------- | -------------------------------------------- |
-| `go-zkid-verifier`      | `VITE_VERIFIER_BASE_URL` | `http://localhost:8080` | Challenge + `link-verify`        |
-| HiPKI LocalSignServer   | `VITE_HIPKI_BASE_URL`    | `/hipki`    | `pkcs11info` + `sign` (proxied to localhost:61161) |
-| `moica-revocation-smt`  | `VITE_SMT_BASE_URL`      | `/smt`      | SMT non-membership proofs (proxied to localhost:3000) |
+| Service                 | Env var                       | Default                          | Purpose                                            |
+| ----------------------- | ----------------------------- | -------------------------------- | -------------------------------------------------- |
+| `go-zkid-verifier`      | `VITE_VERIFIER_BASE_URL`      | `http://localhost:8080`          | Challenge + `link-verify`                          |
+| HiPKI LocalSignServer   | `VITE_HIPKI_BASE_URL`         | `http://localhost:61161`         | `pkcs11info` + `sign` via popupForm postMessage    |
+| `moica-revocation-smt`  | `VITE_SMT_BASE_URL`           | `http://localhost:3000`          | SMT non-membership proofs                          |
 
 Plus `VITE_SMT_ISSUER` (default `g2`, use `g3` for RSA-4096 issuer chains).
+Per-request timeouts are configurable via `VITE_VERIFIER_TIMEOUT_MS`
+(default 15000) and `VITE_SMT_TIMEOUT_MS` (default 10000) — a hung server
+aborts cleanly instead of leaving the UI spinning.
 
-### HiPKI CORS + mixed-content (why we proxy)
+### HiPKI CORS + mixed-content (why we use the popup bridge)
 
 HiPKI's LocalSignServer does **not** send `Access-Control-Allow-Origin`
 headers. A direct `fetch("http://localhost:61161/pkcs11info")` from the
 browser will return 200 *and* be blocked — the browser delivers an opaque
 "net::ERR_FAILED 200 (OK)" error to JS and never lets the app see the body.
 
-The `/hipki/*` proxy in `vite.config.ts` works around this by forwarding
-through the Vite dev origin so the browser sees a same-origin request.
-Same trick for `/smt/*`. Override the upstream targets via
-`VITE_HIPKI_PROXY_TARGET` / `VITE_SMT_PROXY_TARGET` if your services run
-on non-default ports.
+The app sidesteps this with HiPKI's official `popupForm` postMessage
+bridge: each HiPKI operation opens a small popup at
+`http://localhost:61161/popupForm` and exchanges JSON over
+`window.postMessage`. Because the popup is same-origin with
+LocalSignServer, its own XHRs are unblocked. See
+[`docs/web-prover-architecture.md`](../docs/web-prover-architecture.md)
+for the full protocol and the COOP/COEP tradeoff this forces (single-
+threaded proving fallback when `crossOriginIsolated === false`).
 
-If you host the web app over HTTPS, the browser will also refuse direct
-`http://localhost:61161` requests under its mixed-content policy. The
-proxy avoids this too — same-origin requests to `/hipki/*` ride the page's
-own scheme. **For production deploys, the host serving the static bundle
-must run an equivalent reverse proxy** so browser → host → user's
-LocalSignServer all stays same-origin (see `## Production deployment`
-below).
+The SMT server still rides `VITE_SMT_BASE_URL` directly; configure CORS
+on that server or run it behind a same-origin proxy in production.
 
 ## Production deployment
 
@@ -151,16 +152,15 @@ CORS / mixed-content rules.
 
 ## Browser requirements
 
-The app uses `SharedArrayBuffer` for multi-threaded proving, which requires
-cross-origin isolation:
-
-- `Cross-Origin-Opener-Policy: same-origin`
-- `Cross-Origin-Embedder-Policy: require-corp`
-
-Vite's dev server and `preview` set both; for production deploys, your host
-must too (GitHub Pages cannot — use Cloudflare Pages, Netlify, Vercel, or a
-custom server). At runtime the Worker checks `self.crossOriginIsolated` and
-reports to the console.
+The app uses the HiPKI popupForm bridge, which requires
+`Cross-Origin-Opener-Policy: same-origin-allow-popups` to keep
+`window.opener` alive across the cross-origin popup. Combined with
+`Cross-Origin-Embedder-Policy: require-corp`, this leaves
+`crossOriginIsolated === false` and disables `SharedArrayBuffer`.
+The Worker detects this and falls back to single-threaded proving
+(`src/worker.ts::clampThreads`). Multi-thread proving requires moving
+HiPKI behind a same-origin proxy so COOP can be tightened to
+`same-origin` — out of scope for v1.
 
 ## Thread-count policy
 
@@ -197,13 +197,16 @@ pnpm test:e2e     # Playwright against pnpm preview (mock verifier)
 
 The e2e suite under `e2e/`:
 
-- **`prove-fixtures.spec.ts`** — runs on every PR. Intercepts
-  `/challenge` + `/link-verify` with deterministic mocks. Fixture PKs are not
-  bundled (they land with Phase 3 CI), so the pipeline reaches `step-error`
-  at the download step on a bare checkout — the test accepts either terminal
+- **`prove-fixtures.spec.ts`** — runs on every PR. Mocks the verifier +
+  SMT via `page.route()` and the HiPKI popup via
+  `globalThis.__HIPKI_TEST_HANDLER__` (set in `e2e/mock-services.ts`).
+  Fixture PKs are not bundled, so the pipeline reaches `step-error` at the
+  download step on a bare checkout — the test accepts either terminal
   state (done or error) to prove the pipeline plumbing works.
-- **`prove-real.spec.ts`** (`@real`) — gated by `E2E_MODE=real`. Runs against
-  a live `go-zkid-verifier` and real Release keys. Nightly CI only.
+- **`prove-negative.spec.ts`** — wrong PIN three times → card-locked
+  state with disabled inputs; verifier 500 → error + Retry.
+- **`prove-real.spec.ts`** (`@real`) — gated by `E2E_MODE=real`. Runs
+  against a live `go-zkid-verifier` and real Release keys. Nightly CI only.
 
 Install browsers before first run: `pnpm exec playwright install --with-deps chromium`.
 
@@ -216,5 +219,9 @@ Install browsers before first run: `pnpm exec playwright install --with-deps chr
   *only if* `manifest.json` was hydrated.
 - `link_verify` runs server-side only; the WASM crate's `link_verify` export
   exists for the drift test but is not called from the production pipeline.
-- No fetch timeouts yet — if HiPKI or SMT hangs, the setup screen hangs with
-  it. Phase 5 adds `AbortSignal.timeout` + retry limiters.
+- The HiPKI popup bridge is single-shot per operation: every probe needs a
+  user gesture, so live polling for card insertion is not possible.
+  "Detect readers" + "Read card" are explicit clicks for that reason.
+- The Worker can't be cancelled mid-step; `Retry` terminates and respawns
+  the Worker, paying a small wasm-init cost in exchange for clean
+  cancellation semantics.

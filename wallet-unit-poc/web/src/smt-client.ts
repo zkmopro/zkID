@@ -5,12 +5,17 @@
 // (`smt_root`, `smt_siblings`, ...) so the object deserializes directly
 // into `zkid_input_builder::types::SmtCircuitInputs` via the wasm entry.
 
+import { composeSignal, parsePositiveInt } from "./abort-utils";
 import { stripTrailingSlash } from "./url-utils";
 
 const SMT_BASE =
   import.meta.env.VITE_SMT_BASE_URL ?? "http://localhost:3000";
 const SMT_ISSUER_DEFAULT: SmtIssuer = parseIssuer(
   import.meta.env.VITE_SMT_ISSUER,
+);
+const SMT_TIMEOUT_MS = parsePositiveInt(
+  import.meta.env.VITE_SMT_TIMEOUT_MS,
+  10_000,
 );
 
 function parseIssuer(raw: unknown): SmtIssuer {
@@ -46,6 +51,7 @@ export interface FetchSmtProofParams {
   serialHex: string;
   baseUrl?: string;
   depth?: number;
+  signal?: AbortSignal;
 }
 
 export async function fetchSmtProof(
@@ -58,7 +64,10 @@ export async function fetchSmtProof(
     params.serialHex,
   )}`;
 
-  const r = await fetch(url, { method: "GET" });
+  const r = await fetch(url, {
+    method: "GET",
+    signal: composeSignal(params.signal, SMT_TIMEOUT_MS),
+  });
   if (!r.ok) {
     throw new Error(
       `GET /proof/${issuer}/${params.serialHex} returned ${r.status} ${r.statusText}`,
