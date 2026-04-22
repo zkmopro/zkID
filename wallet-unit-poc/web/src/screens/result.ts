@@ -1,8 +1,12 @@
 // Result screen: covers both the terminal `result` phase (verified / not
 // verified) and the `error` phase so users see a consistent outcome surface.
 
-import { formatDuration } from "../format";
+import { escapeText } from "../dom-utils";
+import { formatDuration, truncateMiddle } from "../format";
 import { $state, dispatch } from "../store";
+import type { ParsedInputs } from "../verifier-client";
+
+const shortHex = (h: string): string => truncateMiddle(h, 10, 6);
 
 export function mountResult(root: HTMLElement): () => void {
   const state = $state.get();
@@ -38,12 +42,18 @@ export function mountResult(root: HTMLElement): () => void {
     testidBadge = "result-unknown";
   }
 
+  const parsedBlock =
+    isResult && state.verified
+      ? renderParsedInputs(state.nullifier, state.parsedInputs)
+      : "";
+
   root.innerHTML = `
     <section class="screen screen-result">
       <h1 data-testid="result-headline">${headline}</h1>
       <div class="result-banner" data-kind="${tone}" data-testid="${testidBadge}">
         <div class="result-line" data-testid="result-detail"></div>
       </div>
+      ${parsedBlock}
       <div class="button-row">
         <button class="secondary-button" data-testid="result-home" type="button">
           Home
@@ -77,4 +87,52 @@ export function mountResult(root: HTMLElement): () => void {
     againBtn.removeEventListener("click", onAgain);
     homeBtn.removeEventListener("click", onHome);
   };
+}
+
+function debugRow(label: string, testid: string, value: string): string {
+  return `<div class="debug-row"><span class="debug-label">${label}</span><span class="debug-value mono" data-testid="${testid}">${escapeText(value)}</span></div>`;
+}
+
+function formatModulus(limbs: string[] | undefined): string {
+  if (!limbs || limbs.length === 0) return "—";
+  return `${limbs.length} limbs — ${shortHex(limbs[0])} …`;
+}
+
+// Scalar `ParsedInputs` fields rendered as simple rows. `issuer_rsa_modulus`
+// is intentionally omitted here and rendered below via `formatModulus` because
+// it's an array of limbs, not a single scalar. When adding a new scalar field
+// to `ParsedInputs`, append it here too or it won't appear in the debug block.
+const PARSED_FIELDS = [
+  "subject_dn_hash",
+  "pk_commit",
+  "smt_root",
+  "serial_number",
+  "challenge",
+] as const satisfies ReadonlyArray<keyof ParsedInputs>;
+
+function renderParsedInputs(
+  nullifier: string | undefined,
+  parsed: ParsedInputs | undefined,
+): string {
+  if (!nullifier && !parsed) return "";
+  const rows: string[] = [];
+  if (nullifier) {
+    rows.push(debugRow("nullifier", "result-nullifier", shortHex(nullifier)));
+  }
+  if (parsed) {
+    for (const key of PARSED_FIELDS) {
+      rows.push(debugRow(key, `result-${key.replace(/_/g, "-")}`, shortHex(parsed[key])));
+    }
+    rows.push(
+      debugRow("issuer_rsa_modulus", "result-issuer-modulus", formatModulus(parsed.issuer_rsa_modulus)),
+    );
+  }
+  return `
+    <details class="debug-block" data-testid="result-debug">
+      <summary>Proof public inputs</summary>
+      <div class="debug-grid">
+        ${rows.join("\n        ")}
+      </div>
+    </details>
+  `;
 }
