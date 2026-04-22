@@ -19,3 +19,8 @@ export function formatDuration(ms: number): string {
   if (ms < 1_000) return `${ms.toFixed(0)} ms`;
   return `${(ms / 1_000).toFixed(1)} s`;
 }
+
+export function truncateMiddle(value: string, head: number, tail: number): string {
+  if (value.length <= head + tail + 1) return value;
+  return `${value.slice(0, head)}…${value.slice(-tail)}`;
+}

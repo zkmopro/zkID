@@ -29,7 +29,6 @@ export interface ProveInput {
   deviceJson: string;
   certKind: Kind;
   challengeId: string;
-  nullifier: string;
 }
 
 export type WorkerInMsg =
@@ -82,7 +81,6 @@ export type Progress =
       deviceProofBytes: Uint8Array;
       certKind: Kind;
       challengeId: string;
-      nullifier: string;
       provingMs: number;
       /** Per-circuit timing breakdown for measurement logs. */
       certWitnessMs: number;
@@ -415,7 +413,6 @@ async function runProve(inputs: ProveInput): Promise<void> {
       deviceProofBytes,
       certKind,
       challengeId: inputs.challengeId,
-      nullifier: inputs.nullifier,
       provingMs: performance.now() - t0,
       certWitnessMs,
       certProveMs,

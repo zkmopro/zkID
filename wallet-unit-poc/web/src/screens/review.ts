@@ -1,15 +1,14 @@
 // Review screen: user-gated checkpoint between `proving` and `submitting`.
 // Proofs live only in memory until the user clicks Send.
 
-import { formatDuration, humanBytes } from "../format";
+import { formatDuration, humanBytes, truncateMiddle } from "../format";
 import { $state, dispatch, type ProvingRun } from "../store";
 
 const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 const SAFE_THRESHOLD = Math.round(MAX_TOTAL_BYTES * 0.8);
 
 function shortId(id: string): string {
-  if (id.length <= 16) return id;
-  return `${id.slice(0, 8)}…${id.slice(-4)}`;
+  return truncateMiddle(id, 8, 4);
 }
 
 export function mountReview(root: HTMLElement): () => void {
@@ -44,10 +43,6 @@ export function mountReview(root: HTMLElement): () => void {
           <span class="review-value" data-testid="review-chain"></span>
         </div>
         <div class="review-row">
-          <span class="review-label">Nullifier</span>
-          <span class="review-value mono" data-testid="review-nullifier"></span>
-        </div>
-        <div class="review-row">
           <span class="review-label">Cert-chain proof</span>
           <span class="review-value" data-testid="review-cert-size"></span>
         </div>
@@ -77,7 +72,6 @@ export function mountReview(root: HTMLElement): () => void {
 
   const challengeEl = root.querySelector<HTMLElement>('[data-testid="review-challenge"]')!;
   const chainEl = root.querySelector<HTMLElement>('[data-testid="review-chain"]')!;
-  const nullifierEl = root.querySelector<HTMLElement>('[data-testid="review-nullifier"]')!;
   const certSizeEl = root.querySelector<HTMLElement>('[data-testid="review-cert-size"]')!;
   const deviceSizeEl = root.querySelector<HTMLElement>('[data-testid="review-device-size"]')!;
   const provingMsEl = root.querySelector<HTMLElement>('[data-testid="review-proving-ms"]')!;
@@ -87,7 +81,6 @@ export function mountReview(root: HTMLElement): () => void {
 
   challengeEl.textContent = shortId(run.challengeId);
   chainEl.textContent = run.certChainType.toUpperCase();
-  nullifierEl.textContent = run.nullifier;
   certSizeEl.textContent = humanBytes(certBytes, "0 B");
   deviceSizeEl.textContent = humanBytes(deviceBytes, "0 B");
   provingMsEl.textContent = formatDuration(run.provingMs);

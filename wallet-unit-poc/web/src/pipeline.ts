@@ -40,7 +40,6 @@ export interface DetectedCard {
 export interface ProvingContext {
   card: CardContext;
   pin: Pin;
-  nullifier: string;
   /** Pre-fetched by the Ready screen so the Start-proving click reaches
    *  window.open with user-activation still live. An awaited fetch here
    *  would consume activation and get the HiPKI popup blocked. */
@@ -153,7 +152,6 @@ export async function runSignPhasePipeline(
 
   await ensureWasm();
   const signedSerialHex = cert_serial_hex(signedUserCertDer);
-  const signedNullifier = `zkid-${signedSerialHex}`;
 
   const smtInputs = await stage(
     "smt",
@@ -189,7 +187,6 @@ export async function runSignPhasePipeline(
     deviceJson,
     certKind: ctx.card.certKind,
     challengeId: challenge.challenge_id,
-    nullifier: signedNullifier,
   };
   return input;
 }

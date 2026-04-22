@@ -140,15 +140,37 @@ export async function installMockServices(
       typeof body?.device_sig_proof === "string" &&
       body.cert_chain_proof.length > 0 &&
       body.device_sig_proof.length > 0 &&
-      ["rs2048", "rs4096"].includes(body?.cert_chain_type);
+      ["rs2048", "rs4096"].includes(body?.cert_chain_type) &&
+      // Server derives challenge + nullifier from proof public signals now,
+      // so the client MUST NOT send them. Regressions that start forwarding
+      // them again should fail the mock contract.
+      !("challenge_id" in (body ?? {})) &&
+      !("nullifier" in (body ?? {}));
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(
-        opts.linkVerifyBody ?? {
-          verified: shapeOk,
-          nullifier: body?.nullifier ?? "mock",
-        },
+        opts.linkVerifyBody ??
+          (shapeOk
+            ? {
+                verified: true,
+                nullifier: "0xmocksubjectdnhash",
+                id_verified: true,
+                persisted: true,
+                public_signals: {
+                  cert_chain: ["0xmocksubjectdnhash", "0xmockpkcommit"],
+                  device_sig: ["0xmockpkcommit", "0xmockpackedtbs"],
+                },
+                parsed_inputs: {
+                  challenge: "0xdeadbeef",
+                  pk_commit: "0xmockpkcommit",
+                  subject_dn_hash: "0xmocksubjectdnhash",
+                  smt_root: "0xmocksmtroot",
+                  serial_number: "0xdeadbeef",
+                  issuer_rsa_modulus: ["0xaaaa", "0xbbbb"],
+                },
+              }
+            : { verified: false }),
       ),
     });
   });

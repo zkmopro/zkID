@@ -2,15 +2,19 @@
 //
 // Wire shape (snake_case, byte-for-byte with the native Rust client):
 //   POST /challenge    → { challenge_id, challenge_bytes, expires_at }
-//   POST /link-verify  → { verified, nullifier, id_verified?, persisted? }
+//   POST /link-verify  → { verified, nullifier?, id_verified?, persisted?,
+//                          public_signals?, parsed_inputs? }
 //
-// Keeping the server's exact field names on the interface avoids a remap
-// layer where a TS-side rename would silently cast to `undefined` at
-// runtime — the runtime shape guards below enforce this invariant.
+// Server-side, `/link-verify` recovers the challenge from the device-sig
+// proof's `packed_tbs` public signal and derives the nullifier from the
+// cert-chain proof's `subject_dn_hash` — the client must not forward
+// either, or the server rejects the request.
 //
-// The verifier has a 2 MB body limit and base64 inflates raw bytes ~33%.
-// Each raw proof is capped at 700 KB to surface a clean error before the
-// server rejects the request with 413.
+// Interface uses the server's snake_case field names verbatim; the runtime
+// shape guards below catch silent drift if they ever change.
+//
+// 2 MB body limit + ~33% base64 inflation → raw proofs are capped at
+// 700 KB to surface a clean client-side error before the server 413s.
 
 import { composeSignal, parsePositiveInt } from "./abort-utils";
 
@@ -25,19 +29,38 @@ export interface Challenge {
   expires_at: string;
 }
 
+/** Raw public-input field elements the server returned alongside the verdict.
+ *  Hex strings in the same layout the Go verifier emits. */
+export interface PublicSignals {
+  cert_chain: string[];
+  device_sig: string[];
+}
+
+/** Named parse of the public signals. Mirrors go-zkid-verifier's
+ *  `verifier.ParsedInputs`. */
+export interface ParsedInputs {
+  challenge: string;
+  pk_commit: string;
+  subject_dn_hash: string;
+  smt_root: string;
+  serial_number: string;
+  issuer_rsa_modulus: string[];
+}
+
 export interface LinkVerifyResult {
   verified: boolean;
-  nullifier: string;
+  /** Present on success only — the server returns `VerifyFailResponse{ verified: false }` on a failed verification. */
+  nullifier?: string;
   id_verified?: boolean;
   persisted?: boolean;
+  public_signals?: PublicSignals;
+  parsed_inputs?: ParsedInputs;
 }
 
 export interface LinkVerifyParams {
-  challengeId: string;
   certChainType: "rs2048" | "rs4096";
   certChainProofBytes: Uint8Array;
   deviceSigProofBytes: Uint8Array;
-  nullifier: string;
 }
 
 /** Default per-request timeout. Overridable via VITE_VERIFIER_TIMEOUT_MS. */
@@ -87,12 +110,10 @@ export async function submitLinkVerify(
   assertProofSize("device_sig_proof", params.deviceSigProofBytes);
 
   const body = {
-    challenge_id: params.challengeId,
     cert_chain_type: params.certChainType,
     // Go's json.Unmarshal decodes base64 into []byte automatically.
     cert_chain_proof: bytesToBase64(params.certChainProofBytes),
     device_sig_proof: bytesToBase64(params.deviceSigProofBytes),
-    nullifier: params.nullifier,
   };
 
   const r = await fetch(`${VERIFIER_BASE}/link-verify`, {
@@ -108,9 +129,14 @@ export async function submitLinkVerify(
     );
   }
   const parsed = (await r.json()) as Partial<LinkVerifyResult>;
-  if (typeof parsed?.verified !== "boolean" || typeof parsed?.nullifier !== "string") {
+  if (typeof parsed?.verified !== "boolean") {
     throw new Error(
       `POST /link-verify: unexpected response shape (got keys: ${Object.keys(parsed ?? {}).join(", ") || "none"})`,
+    );
+  }
+  if (parsed.verified && typeof parsed.nullifier !== "string") {
+    throw new Error(
+      `POST /link-verify: verified=true response missing string nullifier`,
     );
   }
   return parsed as LinkVerifyResult;

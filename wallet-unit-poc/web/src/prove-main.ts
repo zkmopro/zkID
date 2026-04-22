@@ -125,16 +125,20 @@ function boot(): void {
     try {
       const res = await submitLinkVerify(
         {
-          challengeId: state.run.challengeId,
           certChainType: state.run.certChainType,
           certChainProofBytes: state.run.certProofBytes,
           deviceSigProofBytes: state.run.deviceProofBytes,
-          nullifier: state.run.nullifier,
         },
         { signal: mine.signal },
       );
       const submitMs = performance.now() - t0;
-      dispatch({ type: "submit_complete", verified: res.verified, submitMs });
+      dispatch({
+        type: "submit_complete",
+        verified: res.verified,
+        submitMs,
+        nullifier: res.verified ? res.nullifier : undefined,
+        parsedInputs: res.parsed_inputs,
+      });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       const message = err instanceof Error ? err.message : String(err);

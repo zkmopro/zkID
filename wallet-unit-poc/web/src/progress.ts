@@ -148,7 +148,6 @@ export function applyProgress(p: Progress): void {
             done.certKind === "cert_chain_rs4096" ? "rs4096" : "rs2048",
           certProofBytes: done.certProofBytes,
           deviceProofBytes: done.deviceProofBytes,
-          nullifier: done.nullifier,
           certKind: done.certKind,
           provingMs: done.provingMs,
         },

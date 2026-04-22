@@ -95,7 +95,6 @@ function boot(): void {
       const proveInput = await runSignPhasePipeline(ensureWorker(), {
         card: hipkiState.card,
         pin: pinState.pin,
-        nullifier: `zkid-${hipkiState.card.serialHex}`,
         challenge: challengeState.challenge,
         signal: myController.signal,
       });

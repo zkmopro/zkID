@@ -45,7 +45,7 @@ describe("verifier-client", () => {
     await expect(createChallenge()).rejects.toThrow(/unexpected response shape/);
   });
 
-  it("base64-encodes proofs and POSTs to /link-verify", async () => {
+  it("base64-encodes proofs and POSTs to /link-verify without challenge_id or nullifier", async () => {
     const certProof = new Uint8Array([1, 2, 3, 4]);
     const deviceProof = new Uint8Array([9, 9, 9, 9, 9]);
     const fetchSpy = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -53,15 +53,16 @@ describe("verifier-client", () => {
       expect(init?.method).toBe("POST");
       const body = JSON.parse(String(init?.body));
       expect(body.cert_chain_type).toBe("rs2048");
-      expect(body.challenge_id).toBe("ch-1");
-      expect(body.nullifier).toBe("null-1");
       // Base64 of [1,2,3,4] = "AQIDBA=="; of [9,9,9,9,9] = "CQkJCQk="
       expect(body.cert_chain_proof).toBe("AQIDBA==");
       expect(body.device_sig_proof).toBe("CQkJCQk=");
+      // Server derives both — client must not send them.
+      expect(body).not.toHaveProperty("challenge_id");
+      expect(body).not.toHaveProperty("nullifier");
       return new Response(
         JSON.stringify({
           verified: true,
-          nullifier: "null-1",
+          nullifier: "0xabc",
           id_verified: true,
           persisted: true,
         }),
@@ -71,18 +72,78 @@ describe("verifier-client", () => {
     globalThis.fetch = fetchSpy;
 
     const res = await submitLinkVerify({
-      challengeId: "ch-1",
       certChainType: "rs2048",
       certChainProofBytes: certProof,
       deviceSigProofBytes: deviceProof,
-      nullifier: "null-1",
     });
     expect(res).toEqual({
       verified: true,
-      nullifier: "null-1",
+      nullifier: "0xabc",
       id_verified: true,
       persisted: true,
     });
+  });
+
+  it("passes public_signals and parsed_inputs through on the response", async () => {
+    const fetchSpy = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            verified: true,
+            nullifier: "0xabc",
+            id_verified: true,
+            persisted: true,
+            public_signals: {
+              cert_chain: ["0x1", "0x2"],
+              device_sig: ["0x2", "0x3"],
+            },
+            parsed_inputs: {
+              challenge: "0xdead",
+              pk_commit: "0x2",
+              subject_dn_hash: "0xabc",
+              smt_root: "0xbeef",
+              serial_number: "0x42",
+              issuer_rsa_modulus: ["0xaaaa", "0xbbbb"],
+            },
+          }),
+          { status: 200 },
+        ),
+    ) as typeof fetch;
+    globalThis.fetch = fetchSpy;
+
+    const res = await submitLinkVerify({
+      certChainType: "rs2048",
+      certChainProofBytes: new Uint8Array([1]),
+      deviceSigProofBytes: new Uint8Array([1]),
+    });
+    expect(res.public_signals?.cert_chain).toEqual(["0x1", "0x2"]);
+    expect(res.parsed_inputs?.subject_dn_hash).toBe("0xabc");
+    expect(res.parsed_inputs?.issuer_rsa_modulus).toEqual(["0xaaaa", "0xbbbb"]);
+  });
+
+  it("tolerates verified=false without a nullifier", async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ verified: false }), { status: 200 }),
+    ) as typeof fetch;
+    const res = await submitLinkVerify({
+      certChainType: "rs2048",
+      certChainProofBytes: new Uint8Array([1]),
+      deviceSigProofBytes: new Uint8Array([1]),
+    });
+    expect(res.verified).toBe(false);
+  });
+
+  it("rejects verified=true responses missing a nullifier", async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ verified: true }), { status: 200 }),
+    ) as typeof fetch;
+    await expect(
+      submitLinkVerify({
+        certChainType: "rs2048",
+        certChainProofBytes: new Uint8Array([1]),
+        deviceSigProofBytes: new Uint8Array([1]),
+      }),
+    ).rejects.toThrow(/verified=true response missing string nullifier/);
   });
 
   it("refuses to submit a proof that exceeds the raw cap", async () => {
@@ -92,11 +153,9 @@ describe("verifier-client", () => {
     globalThis.fetch = vi.fn(async () => new Response("{}", { status: 200 })) as typeof fetch;
     await expect(
       submitLinkVerify({
-        challengeId: "ch",
         certChainType: "rs2048",
         certChainProofBytes: huge,
         deviceSigProofBytes: small,
-        nullifier: "n",
       }),
     ).rejects.toThrow(/raw cap/);
   });
@@ -107,11 +166,9 @@ describe("verifier-client", () => {
     ) as typeof fetch;
     await expect(
       submitLinkVerify({
-        challengeId: "ch",
         certChainType: "rs2048",
         certChainProofBytes: new Uint8Array([1]),
         deviceSigProofBytes: new Uint8Array([1]),
-        nullifier: "n",
       }),
     ).rejects.toThrow(/invalid cert_chain_type/);
   });

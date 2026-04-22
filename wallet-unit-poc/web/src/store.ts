@@ -15,13 +15,13 @@
 import { atom, type WritableAtom } from "nanostores";
 
 import type { CircuitKind } from "./manifest";
+import type { ParsedInputs } from "./verifier-client";
 
 export interface ProvingRun {
   challengeId: string;
   certChainType: "rs2048" | "rs4096";
   certProofBytes: Uint8Array;
   deviceProofBytes: Uint8Array;
-  nullifier: string;
   certKind: CircuitKind;
   provingMs: number;
 }
@@ -38,6 +38,8 @@ export type AppState =
       verified: boolean;
       provingMs: number;
       submitMs: number;
+      nullifier?: string;
+      parsedInputs?: ParsedInputs;
     }
   | { phase: "error"; where: string; message: string };
 
@@ -47,7 +49,13 @@ export type AppEvent =
   | { type: "start_proving" }
   | { type: "proving_complete"; run: ProvingRun }
   | { type: "send_proof" }
-  | { type: "submit_complete"; verified: boolean; submitMs: number }
+  | {
+      type: "submit_complete";
+      verified: boolean;
+      submitMs: number;
+      nullifier?: string;
+      parsedInputs?: ParsedInputs;
+    }
   | { type: "retry_proving" }
   | { type: "reset_to_setup" }
   | { type: "pipeline_error"; where: string; message: string }
@@ -83,6 +91,8 @@ export function transition(state: AppState, event: AppEvent): AppState {
             verified: event.verified,
             provingMs: state.run.provingMs,
             submitMs: event.submitMs,
+            nullifier: event.nullifier,
+            parsedInputs: event.parsedInputs,
           }
         : state;
     case "retry_proving":
