@@ -1,9 +1,9 @@
 //! spartan2-wasm — Standalone WebAssembly crate for Spartan2 zkID proving.
 //!
 //! Supports all three zkID circuits via a runtime `CircuitKind` enum:
-//!  * CertChainRs2048 — NUM_PUBLIC = 21
-//!  * CertChainRs4096 — NUM_PUBLIC = 38
-//!  * DeviceSigRs2048 — NUM_PUBLIC = 51
+//!  * CertChainRs2048 — NUM_PUBLIC = 20
+//!  * CertChainRs4096 — NUM_PUBLIC = 37
+//!  * DeviceSigRs2048 — NUM_PUBLIC = 2
 //!
 //! Zero dependency on `ecdsa-spartan2` at runtime. Duplicates the transcript
 //! sequence from `ecdsa-spartan2/src/prover.rs::prove_circuit_in_memory` with
@@ -50,16 +50,16 @@ impl CircuitKind {
     /// `ecdsa-spartan2/src/circuits/split_circuits.rs`.
     pub fn num_public(self) -> usize {
         match self {
-            CircuitKind::CertChainRs2048 => 21,
-            CircuitKind::CertChainRs4096 => 38,
-            CircuitKind::DeviceSigRs2048 => 51,
+            CircuitKind::CertChainRs2048 => 20,
+            CircuitKind::CertChainRs4096 => 37,
+            CircuitKind::DeviceSigRs2048 => 2,
         }
     }
 
     /// Index into `public_values` where `pk_commit` lives.
     /// Cert-chain emits `subject_dn_hash` at slot 0, then `pk_commit` at slot 1.
-    /// Device-sig emits `pk_commit` at slot 0 (followed by packed_tbs).
-    /// Verified against `ecdsa-spartan2/src/main.rs:297-300` (run_link_verify).
+    /// Device-sig emits `pk_commit` at slot 0 (followed by a single `packed_tbs`).
+    /// Verified against `ecdsa-spartan2/src/main.rs` (run_link_verify).
     pub fn pk_commit_index(self) -> usize {
         match self {
             CircuitKind::CertChainRs2048 | CircuitKind::CertChainRs4096 => 1,
@@ -322,9 +322,9 @@ mod tests {
         assert!(parse_witness(&[]).is_err());
     }
     #[test] fn num_public_matches_spec() {
-        assert_eq!(CircuitKind::CertChainRs2048.num_public(), 21);
-        assert_eq!(CircuitKind::CertChainRs4096.num_public(), 38);
-        assert_eq!(CircuitKind::DeviceSigRs2048.num_public(), 51);
+        assert_eq!(CircuitKind::CertChainRs2048.num_public(), 20);
+        assert_eq!(CircuitKind::CertChainRs4096.num_public(), 37);
+        assert_eq!(CircuitKind::DeviceSigRs2048.num_public(), 2);
     }
 
     /// Regression: oversized section lengths must return Err, not panic.
