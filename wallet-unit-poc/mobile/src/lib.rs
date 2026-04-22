@@ -1,3 +1,5 @@
+mod smt;
+
 use ecdsa_spartan2::{
     generate_split_inputs, load_proof, prove_circuit, prove_circuit_with_pk, save_keys,
     serial_bytes_to_hex_trimmed, setup_circuit_keys, setup_circuit_keys_no_save, verify_circuit,
@@ -118,14 +120,17 @@ fn get_file_size(path: impl AsRef<std::path::Path>) -> Result<u64, ZkProofError>
 ///   - `device_sig_rs2048_input.json`
 ///
 /// These are the input files expected by `prove` via `PathConfig::mobile`.
+///
+/// `smt_proof` should be the non-membership proof for the certificate's serial
+/// number, produced by `create_smt_proof_from_gz` / `create_smt_proof`.
+/// Pass `None` to omit SMT revocation checking.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn generate_cert_chain_rs4096_input(
     certb64: String,
     signed_response: String,
     tbs: String,
     issuer_cert_path: String,
-    smt_server: Option<String>,
-    issuer_id: String,
+    smt_snapshot_path: Option<String>,
     output_dir: String,
 ) -> Result<String, ZkProofError> {
     let user_cert = CertChainRs4096Circuit::generate_user_cert_from_certb64(&certb64)
@@ -137,14 +142,21 @@ pub fn generate_cert_chain_rs4096_input(
     let serial_hex =
         serial_bytes_to_hex_trimmed(user_cert.tbs_certificate.serial_number.as_bytes());
 
-    let smt_inputs = smt_server
-        .as_deref()
-        .map(|url| {
-            ecdsa_spartan2::smt_client::fetch_smt_proof(url, &issuer_id, &serial_hex, 128).map_err(
-                |e| ZkProofError::InvalidInput {
-                    msg: format!("SMT fetch failed: {}", e),
-                },
-            )
+    // If a snapshot path is provided, build the SMT proof from it.
+    let smt_inputs: Option<ecdsa_spartan2::smt_client::SmtCircuitInputs> = smt_snapshot_path
+        .map(|path| -> Result<_, ZkProofError> {
+            let gz_bytes =
+                std::fs::read(&path).map_err(|e| ZkProofError::IoError { msg: e.to_string() })?;
+            let proof = create_smt_proof_from_gz(gz_bytes, serial_hex.clone())?;
+            let ci = smt_proof_to_circuit_inputs(proof, 128)?;
+            Ok(ecdsa_spartan2::smt_client::SmtCircuitInputs {
+                smt_root: ci.smt_root,
+                serial_number: ci.serial_number,
+                smt_siblings: ci.smt_siblings,
+                smt_old_key: ci.smt_old_key,
+                smt_old_value: ci.smt_old_value,
+                smt_is_old0: ci.smt_is_old0,
+            })
         })
         .transpose()?;
 
@@ -230,7 +242,8 @@ pub fn setup_keys(documents_path: String) -> Result<String, ZkProofError> {
 pub fn prove_cert_chain_rs4096(documents_path: String) -> Result<ProofResult, ZkProofError> {
     let config = make_config(&documents_path);
 
-    let input_dir = PathBuf::from(documents_path).join(format!("{}_input.json", CertChainRsa4096::CIRCUIT_NAME));
+    let input_dir = PathBuf::from(documents_path)
+        .join(format!("{}_input.json", CertChainRsa4096::CIRCUIT_NAME));
 
     if !input_dir.exists() {
         return Err(ZkProofError::FileNotFound {
@@ -274,12 +287,11 @@ pub fn prove_cert_chain_rs4096(documents_path: String) -> Result<ProofResult, Zk
 /// Witnesses are pre-warmed before any Spartan2 key I/O so that witnesscalc's
 /// C++ realloc runs on a clean heap and avoids macOS SIGSEGV from moved pointers.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn prove_device_sig_rs2048(
-    documents_path: String,
-) -> Result<ProofResult, ZkProofError> {
+pub fn prove_device_sig_rs2048(documents_path: String) -> Result<ProofResult, ZkProofError> {
     let config = make_config(&documents_path);
 
-    let input_dir = PathBuf::from(documents_path).join(format!("{}_input.json", DeviceSigRsa2048::CIRCUIT_NAME));
+    let input_dir = PathBuf::from(documents_path)
+        .join(format!("{}_input.json", DeviceSigRsa2048::CIRCUIT_NAME));
 
     if !input_dir.exists() {
         return Err(ZkProofError::FileNotFound {
@@ -388,9 +400,7 @@ pub fn link_verify(documents_path: String) -> Result<bool, ZkProofError> {
 /// Each circuit is then processed in isolation (setup → save → drop PK → prove → verify) to
 /// avoid holding two large proving keys in memory simultaneously. Timings and sizes are combined.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
-pub fn run_complete_benchmark(
-    documents_path: String,
-) -> Result<BenchmarkResults, ZkProofError> {
+pub fn run_complete_benchmark(documents_path: String) -> Result<BenchmarkResults, ZkProofError> {
     use ecdsa_spartan2::load_proving_key;
     let config = make_config(&documents_path);
 
@@ -536,6 +546,172 @@ pub fn run_complete_benchmark(
 }
 
 // ============================================================================
+// SMT (Sparse Merkle Tree) Operations
+// ============================================================================
+
+/// SMT proof from the moica-revocation-smt server, all values as hex strings.
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct SmtProof {
+    /// Tree root at proof time (hex string).
+    pub root: String,
+    /// Sibling hashes from leaf level upward (hex strings).
+    pub siblings: Vec<String>,
+    /// [key] for non-membership; [key, value, marker] for membership.
+    pub entry: Vec<String>,
+    /// Present for non-membership proofs when a conflicting leaf exists.
+    pub matching_entry: Option<Vec<String>>,
+    /// True if the key is claimed to exist in the tree.
+    pub membership: bool,
+}
+
+/// Circom-ready SMT inputs — all values as decimal strings, siblings padded to depth.
+/// Mirrors `ecdsa_spartan2::smt_client::SmtCircuitInputs`.
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct SmtCircuitInputs {
+    pub smt_root: String,
+    pub serial_number: String,
+    pub smt_siblings: Vec<String>,
+    pub smt_old_key: String,
+    pub smt_old_value: String,
+    pub smt_is_old0: String,
+}
+
+/// Verify an SMT non-membership (or membership) proof against a trusted root.
+///
+/// Recomputes the Merkle root from `proof.entry` + `proof.siblings` using
+/// Poseidon-P256, then compares against `expected_root`.  Returns `true` iff
+/// the proof is valid.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn verify_smt_proof(proof: SmtProof, expected_root: String) -> bool {
+    smt::verify_smt_proof(
+        &proof.entry,
+        proof.matching_entry.as_ref(),
+        &proof.siblings,
+        &expected_root,
+        proof.membership,
+        128,
+    )
+}
+
+/// Parse a @zk-kit/smt v1.0.2-compatible snapshot JSON and return its root.
+///
+/// The returned root can be used as `expected_root` in subsequent calls to
+/// `verify_smt_proof`.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn build_smt_from_snapshot(snapshot_json: String) -> String {
+    smt::parse_snapshot_root(&snapshot_json)
+}
+
+/// Convert an `SmtProof` (hex strings) into the `SmtCircuitInputs` that the
+/// Circom cert-chain circuit expects (decimal strings, siblings padded to `depth`).
+///
+/// This is the offline equivalent of `ecdsa_spartan2::smt_client::fetch_smt_proof`:
+/// instead of hitting the server you supply the proof generated from the local snapshot.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn smt_proof_to_circuit_inputs(
+    proof: SmtProof,
+    depth: u32,
+) -> Result<SmtCircuitInputs, ZkProofError> {
+    let depth = depth as usize;
+
+    fn hex_to_dec(s: &str) -> Result<String, ZkProofError> {
+        let hex = s
+            .strip_prefix("0x")
+            .or_else(|| s.strip_prefix("0X"))
+            .unwrap_or(s);
+        num_bigint::BigUint::parse_bytes(hex.as_bytes(), 16)
+            .map(|n| n.to_string())
+            .ok_or_else(|| ZkProofError::InvalidInput {
+                msg: format!("invalid hex: {}", s),
+            })
+    }
+
+    let smt_root = hex_to_dec(&proof.root)?;
+
+    let serial_number =
+        hex_to_dec(
+            proof
+                .entry
+                .first()
+                .ok_or_else(|| ZkProofError::InvalidInput {
+                    msg: "empty entry in SmtProof".into(),
+                })?,
+        )?;
+
+    // Convert siblings and zero-pad to `depth`
+    let mut smt_siblings: Vec<String> = proof
+        .siblings
+        .iter()
+        .map(|s| hex_to_dec(s))
+        .collect::<Result<_, _>>()?;
+    smt_siblings.resize(depth, "0".to_string());
+    smt_siblings.truncate(depth);
+
+    // matching_entry present → non-membership with conflict (is_old0 = 0)
+    // matching_entry absent  → empty slot              (is_old0 = 1)
+    let (smt_old_key, smt_old_value, smt_is_old0) = match &proof.matching_entry {
+        Some(me) if me.len() >= 2 => (hex_to_dec(&me[0])?, hex_to_dec(&me[1])?, "0".to_string()),
+        _ => ("0".to_string(), "0".to_string(), "1".to_string()),
+    };
+
+    Ok(SmtCircuitInputs {
+        smt_root,
+        serial_number,
+        smt_siblings,
+        smt_old_key,
+        smt_old_value,
+        smt_is_old0,
+    })
+}
+
+/// Load a snapshot and generate a proof for `key_hex` in one call (JSON input).
+///
+/// # Arguments
+/// * `snapshot_json` – decompressed snapshot JSON string
+/// * `key_hex`       – certificate serial number as a hex string (with or without `0x`)
+///
+/// Returns the proof ready to pass straight into `verify_smt_proof`.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn create_smt_proof(snapshot_json: String, key_hex: String) -> Result<SmtProof, ZkProofError> {
+    let tree = smt::SmtTree::from_json(&snapshot_json)
+        .map_err(|e| ZkProofError::InvalidInput { msg: e })?;
+    let key = smt::parse_hex(&key_hex);
+    let (entry, matching_entry, siblings, membership) = tree.create_proof(&key);
+    Ok(SmtProof {
+        root: tree.root_hex(),
+        siblings,
+        entry,
+        matching_entry,
+        membership,
+    })
+}
+
+/// Load a snapshot and generate a proof for `key_hex` in one call (gzip input).
+///
+/// # Arguments
+/// * `gz_data` – raw bytes of the `.json.gz` snapshot file
+/// * `key_hex` – certificate serial number as a hex string (with or without `0x`)
+///
+/// Returns the proof ready to pass straight into `verify_smt_proof`.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn create_smt_proof_from_gz(
+    gz_data: Vec<u8>,
+    key_hex: String,
+) -> Result<SmtProof, ZkProofError> {
+    let tree =
+        smt::SmtTree::from_gz(&gz_data).map_err(|e| ZkProofError::InvalidInput { msg: e })?;
+    let key = smt::parse_hex(&key_hex);
+    let (entry, matching_entry, siblings, membership) = tree.create_proof(&key);
+    Ok(SmtProof {
+        root: tree.root_hex(),
+        siblings,
+        entry,
+        matching_entry,
+        membership,
+    })
+}
+
+// ============================================================================
 // Legacy Test Function
 // ============================================================================
 
@@ -646,7 +822,8 @@ mod tests {
         }
 
         let cc_input_src = manifest.join("../circom/inputs/cert_chain_rs4096/input.json");
-        let ds_input_src = manifest.join("../circom/inputs/device_sig_rs2048_chain_rs4096/input.json");
+        let ds_input_src =
+            manifest.join("../circom/inputs/device_sig_rs2048_chain_rs4096/input.json");
         assert!(
             cc_input_src.exists(),
             "cert_chain_rs4096 input not found at {}.",
@@ -700,7 +877,8 @@ mod tests {
         let ds_r1cs_src = manifest
             .join("../circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.r1cs");
         let cc_input_src = manifest.join("../circom/inputs/cert_chain_rs4096/input.json");
-        let ds_input_src = manifest.join("../circom/inputs/device_sig_rs2048_chain_rs4096/input.json");
+        let ds_input_src =
+            manifest.join("../circom/inputs/device_sig_rs2048_chain_rs4096/input.json");
 
         assert!(
             cc_r1cs_src.exists(),
@@ -738,9 +916,7 @@ mod tests {
         let dir_str = dir.to_string_lossy().to_string();
         let results = std::thread::Builder::new()
             .stack_size(256 * 1024 * 1024)
-            .spawn(move || {
-                run_complete_benchmark(dir_str).expect("run_complete_benchmark failed")
-            })
+            .spawn(move || run_complete_benchmark(dir_str).expect("run_complete_benchmark failed"))
             .expect("Failed to spawn thread")
             .join()
             .expect("Thread panicked");
@@ -789,8 +965,10 @@ mod tests {
     fn test_generate_cert_chain_rs4096_input_e2e() {
         use ecdsa_spartan2::circuits::types::Rs4096SignResponse;
 
-        let response_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../ecdsa-spartan2/tests/testdata/rs4096_response_sign.json");
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+        let response_path =
+            manifest.join("../ecdsa-spartan2/tests/testdata/rs4096_response_sign.json");
         let response_str = std::fs::read_to_string(&response_path).unwrap();
         let response: Rs4096SignResponse = serde_json::from_str(&response_str).unwrap();
         let certb64 = response.result.cert;
@@ -798,33 +976,67 @@ mod tests {
         let tbs = std::str::from_utf8(ecdsa_spartan2::DEFAULT_TBS)
             .unwrap()
             .to_string();
-        let issuer_cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../ecdsa-spartan2/tests/testdata/test_ca_rs4096.der");
-        let smt_server = None;
-        let issuer_id = "g3".to_string();
-        let output_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../circom/inputs")
-            .to_string_lossy()
-            .to_string();
+        let issuer_cert_path =
+            manifest.join("../ecdsa-spartan2/tests/testdata/test_ca_rs4096.der");
+
+        // Use a temp dir as documents_path so input + key files stay isolated.
+        let tmp = tempfile::tempdir().unwrap();
+        let documents_path = tmp.path().to_string_lossy().to_string();
+        std::fs::create_dir_all(tmp.path().join("keys")).unwrap();
+
+        // Copy R1CS files — built by `yarn compile:cert_chain_rs4096/device_sig_rs2048`.
+        let cc_r1cs_src = manifest.join(
+            "../circom/build/cert_chain_rs4096/cert_chain_rs4096_js/cert_chain_rs4096.r1cs",
+        );
+        let ds_r1cs_src = manifest.join(
+            "../circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.r1cs",
+        );
+        assert!(
+            cc_r1cs_src.exists(),
+            "cert_chain_rs4096 R1CS not found at {}. Run `yarn compile:cert_chain_rs4096` first.",
+            cc_r1cs_src.display()
+        );
+        assert!(
+            ds_r1cs_src.exists(),
+            "device_sig_rs2048 R1CS not found at {}. Run `yarn compile:device_sig_rs2048` first.",
+            ds_r1cs_src.display()
+        );
+        std::fs::copy(&cc_r1cs_src, tmp.path().join("cert_chain_rs4096.r1cs")).unwrap();
+        std::fs::copy(&ds_r1cs_src, tmp.path().join("device_sig_rs2048.r1cs")).unwrap();
+
+        // Generate circuit inputs, writing directly into documents_path.
+        let snapshot_path = "/tmp/g3-tree-snapshot.json.gz";
+        let smt_snapshot = std::path::Path::new(snapshot_path)
+            .exists()
+            .then(|| snapshot_path.to_string());
 
         let result = generate_cert_chain_rs4096_input(
             certb64,
             signed_response,
             tbs,
             issuer_cert_path.to_string_lossy().to_string(),
-            smt_server,
-            issuer_id,
-            output_dir.clone(),
+            smt_snapshot,
+            documents_path.clone(),
         )
         .unwrap();
-
         assert!(result.contains("cert_chain"));
         assert!(result.contains("device_sig"));
-        assert!(PathBuf::from(&output_dir)
-            .join("cert_chain_rs4096_input.json")
-            .exists());
-        assert!(PathBuf::from(&output_dir)
-            .join("device_sig_rs2048_input.json")
-            .exists());
+
+        // Setup, prove, verify both circuits.
+        setup_keys(documents_path.clone()).unwrap();
+
+        let cc_result = prove_cert_chain_rs4096(documents_path.clone()).unwrap();
+        println!("cert_chain proved in {}ms", cc_result.prove_ms);
+        let cc_ok = verify_cert_chain_rs4096(documents_path.clone()).unwrap();
+        assert!(cc_ok, "cert_chain_rs4096 verification failed");
+
+        let ds_result = prove_device_sig_rs2048(documents_path.clone()).unwrap();
+        println!("device_sig proved in {}ms", ds_result.prove_ms);
+        let ds_ok = verify_device_sig_rs2048(documents_path.clone()).unwrap();
+        assert!(ds_ok, "device_sig_rs2048 verification failed");
+
+        let linked = link_verify(documents_path.clone()).unwrap();
+        assert!(linked, "link verification failed");
+        println!("All proofs verified successfully");
     }
 }

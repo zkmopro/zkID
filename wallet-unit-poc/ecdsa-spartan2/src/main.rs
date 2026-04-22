@@ -267,8 +267,8 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
 
 /// `link-verify` CLI: verify both proofs and check pk_commit equality.
 ///
-/// CertChain public values: [subject_dn_hash, pk_commit, issuer_modulus..., smtRoot, serialNumber]
-/// DeviceSig public values: [pk_commit, packed_tbs[0..50]]
+/// CertChain public values: [subject_dn_hash, pk_commit, issuer_modulus..., smtRoot]
+/// DeviceSig public values: [pk_commit, packed_tbs]
 ///
 /// The verifier checks `pk_commit_A == pk_commit_B` to bind the two proofs
 /// and prevent proof-mixing attacks.

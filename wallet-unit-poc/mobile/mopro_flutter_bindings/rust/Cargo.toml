@@ -3,7 +3,10 @@ flutter_rust_bridge = "=2.11.1"
 
 [dependencies.openac-mobile-app]
 default-features = false
-features = ["flutter", "mobile"]
+features = [
+    "flutter",
+    "mobile",
+]
 path = "../.."
 version = "0.1.0"
 

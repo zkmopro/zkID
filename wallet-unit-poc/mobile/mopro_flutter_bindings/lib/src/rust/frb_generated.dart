@@ -64,7 +64,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -690981767;
+  int get rustContentHash => 1810054927;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -79,13 +79,26 @@ abstract class RustLibApi extends BaseApi {
     required BigInt bytes,
   });
 
+  Future<String> openacMobileAppBuildSmtFromSnapshot({
+    required String snapshotJson,
+  });
+
+  Future<SmtProof> openacMobileAppCreateSmtProof({
+    required String snapshotJson,
+    required String keyHex,
+  });
+
+  Future<SmtProof> openacMobileAppCreateSmtProofFromGz({
+    required List<int> gzData,
+    required String keyHex,
+  });
+
   Future<String> openacMobileAppGenerateCertChainRs4096Input({
     required String certb64,
     required String signedResponse,
     required String tbs,
     required String issuerCertPath,
-    String? smtServer,
-    required String issuerId,
+    String? smtSnapshotPath,
     required String outputDir,
   });
 
@@ -109,12 +122,22 @@ abstract class RustLibApi extends BaseApi {
 
   Future<String> openacMobileAppSetupKeys({required String documentsPath});
 
+  Future<SmtCircuitInputs> openacMobileAppSmtProofToCircuitInputs({
+    required SmtProof proof,
+    required int depth,
+  });
+
   Future<bool> openacMobileAppVerifyCertChainRs4096({
     required String documentsPath,
   });
 
   Future<bool> openacMobileAppVerifyDeviceSigRs2048({
     required String documentsPath,
+  });
+
+  Future<bool> openacMobileAppVerifySmtProof({
+    required SmtProof proof,
+    required String expectedRoot,
   });
 
   RustArcIncrementStrongCountFnType
@@ -168,13 +191,117 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> openacMobileAppBuildSmtFromSnapshot({
+    required String snapshotJson,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(snapshotJson, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: null,
+        ),
+        constMeta: kOpenacMobileAppBuildSmtFromSnapshotConstMeta,
+        argValues: [snapshotJson],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kOpenacMobileAppBuildSmtFromSnapshotConstMeta =>
+      const TaskConstMeta(
+        debugName: "build_smt_from_snapshot",
+        argNames: ["snapshotJson"],
+      );
+
+  @override
+  Future<SmtProof> openacMobileAppCreateSmtProof({
+    required String snapshotJson,
+    required String keyHex,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(snapshotJson, serializer);
+          sse_encode_String(keyHex, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 3,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_smt_proof,
+          decodeErrorData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
+        ),
+        constMeta: kOpenacMobileAppCreateSmtProofConstMeta,
+        argValues: [snapshotJson, keyHex],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kOpenacMobileAppCreateSmtProofConstMeta =>
+      const TaskConstMeta(
+        debugName: "create_smt_proof",
+        argNames: ["snapshotJson", "keyHex"],
+      );
+
+  @override
+  Future<SmtProof> openacMobileAppCreateSmtProofFromGz({
+    required List<int> gzData,
+    required String keyHex,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(gzData, serializer);
+          sse_encode_String(keyHex, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_smt_proof,
+          decodeErrorData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
+        ),
+        constMeta: kOpenacMobileAppCreateSmtProofFromGzConstMeta,
+        argValues: [gzData, keyHex],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kOpenacMobileAppCreateSmtProofFromGzConstMeta =>
+      const TaskConstMeta(
+        debugName: "create_smt_proof_from_gz",
+        argNames: ["gzData", "keyHex"],
+      );
+
+  @override
   Future<String> openacMobileAppGenerateCertChainRs4096Input({
     required String certb64,
     required String signedResponse,
     required String tbs,
     required String issuerCertPath,
-    String? smtServer,
-    required String issuerId,
+    String? smtSnapshotPath,
     required String outputDir,
   }) {
     return handler.executeNormal(
@@ -185,13 +312,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(signedResponse, serializer);
           sse_encode_String(tbs, serializer);
           sse_encode_String(issuerCertPath, serializer);
-          sse_encode_opt_String(smtServer, serializer);
-          sse_encode_String(issuerId, serializer);
+          sse_encode_opt_String(smtSnapshotPath, serializer);
           sse_encode_String(outputDir, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 2,
+            funcId: 5,
             port: port_,
           );
         },
@@ -206,8 +332,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           signedResponse,
           tbs,
           issuerCertPath,
-          smtServer,
-          issuerId,
+          smtSnapshotPath,
           outputDir,
         ],
         apiImpl: this,
@@ -223,8 +348,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "signedResponse",
           "tbs",
           "issuerCertPath",
-          "smtServer",
-          "issuerId",
+          "smtSnapshotPath",
           "outputDir",
         ],
       );
@@ -238,7 +362,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 3,
+            funcId: 6,
             port: port_,
           );
         },
@@ -266,7 +390,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 7,
             port: port_,
           );
         },
@@ -296,7 +420,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 8,
             port: port_,
           );
         },
@@ -326,7 +450,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 9,
             port: port_,
           );
         },
@@ -360,7 +484,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 10,
             port: port_,
           );
         },
@@ -394,7 +518,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 11,
             port: port_,
           );
         },
@@ -426,7 +550,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 12,
             port: port_,
           );
         },
@@ -446,6 +570,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "setup_keys", argNames: ["documentsPath"]);
 
   @override
+  Future<SmtCircuitInputs> openacMobileAppSmtProofToCircuitInputs({
+    required SmtProof proof,
+    required int depth,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_smt_proof(proof, serializer);
+          sse_encode_u_32(depth, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_smt_circuit_inputs,
+          decodeErrorData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerZkProofError,
+        ),
+        constMeta: kOpenacMobileAppSmtProofToCircuitInputsConstMeta,
+        argValues: [proof, depth],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kOpenacMobileAppSmtProofToCircuitInputsConstMeta =>
+      const TaskConstMeta(
+        debugName: "smt_proof_to_circuit_inputs",
+        argNames: ["proof", "depth"],
+      );
+
+  @override
   Future<bool> openacMobileAppVerifyCertChainRs4096({
     required String documentsPath,
   }) {
@@ -457,7 +617,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 14,
             port: port_,
           );
         },
@@ -491,7 +651,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 15,
             port: port_,
           );
         },
@@ -511,6 +671,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "verify_device_sig_rs2048",
         argNames: ["documentsPath"],
+      );
+
+  @override
+  Future<bool> openacMobileAppVerifySmtProof({
+    required SmtProof proof,
+    required String expectedRoot,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_smt_proof(proof, serializer);
+          sse_encode_String(expectedRoot, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 16,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kOpenacMobileAppVerifySmtProofConstMeta,
+        argValues: [proof, expectedRoot],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kOpenacMobileAppVerifySmtProofConstMeta =>
+      const TaskConstMeta(
+        debugName: "verify_smt_proof",
+        argNames: ["proof", "expectedRoot"],
       );
 
   RustArcIncrementStrongCountFnType
@@ -569,6 +764,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  SmtProof dco_decode_box_autoadd_smt_proof(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_smt_proof(raw);
+  }
+
+  @protected
+  List<String> dco_decode_list_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_String).toList();
+  }
+
+  @protected
+  List<int> dco_decode_list_prim_u_8_loose(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as List<int>;
+  }
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
@@ -581,6 +794,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<String>? dco_decode_opt_list_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_String(raw);
+  }
+
+  @protected
   ProofResult dco_decode_proof_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -590,6 +809,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       proveMs: dco_decode_u_64(arr[0]),
       proofSizeBytes: dco_decode_u_64(arr[1]),
     );
+  }
+
+  @protected
+  SmtCircuitInputs dco_decode_smt_circuit_inputs(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    return SmtCircuitInputs(
+      smtRoot: dco_decode_String(arr[0]),
+      serialNumber: dco_decode_String(arr[1]),
+      smtSiblings: dco_decode_list_String(arr[2]),
+      smtOldKey: dco_decode_String(arr[3]),
+      smtOldValue: dco_decode_String(arr[4]),
+      smtIsOld0: dco_decode_String(arr[5]),
+    );
+  }
+
+  @protected
+  SmtProof dco_decode_smt_proof(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return SmtProof(
+      root: dco_decode_String(arr[0]),
+      siblings: dco_decode_list_String(arr[1]),
+      entry: dco_decode_list_String(arr[2]),
+      matchingEntry: dco_decode_opt_list_String(arr[3]),
+      membership: dco_decode_bool(arr[4]),
+    );
+  }
+
+  @protected
+  int dco_decode_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
   }
 
   @protected
@@ -675,6 +931,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  SmtProof sse_decode_box_autoadd_smt_proof(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_smt_proof(deserializer));
+  }
+
+  @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <String>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var len_ = sse_decode_i_32(deserializer);
+    return deserializer.buffer.getUint8List(len_);
+  }
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -693,6 +974,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<String>? sse_decode_opt_list_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   ProofResult sse_decode_proof_result(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_proveMs = sse_decode_u_64(deserializer);
@@ -701,6 +993,48 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       proveMs: var_proveMs,
       proofSizeBytes: var_proofSizeBytes,
     );
+  }
+
+  @protected
+  SmtCircuitInputs sse_decode_smt_circuit_inputs(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_smtRoot = sse_decode_String(deserializer);
+    var var_serialNumber = sse_decode_String(deserializer);
+    var var_smtSiblings = sse_decode_list_String(deserializer);
+    var var_smtOldKey = sse_decode_String(deserializer);
+    var var_smtOldValue = sse_decode_String(deserializer);
+    var var_smtIsOld0 = sse_decode_String(deserializer);
+    return SmtCircuitInputs(
+      smtRoot: var_smtRoot,
+      serialNumber: var_serialNumber,
+      smtSiblings: var_smtSiblings,
+      smtOldKey: var_smtOldKey,
+      smtOldValue: var_smtOldValue,
+      smtIsOld0: var_smtIsOld0,
+    );
+  }
+
+  @protected
+  SmtProof sse_decode_smt_proof(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_root = sse_decode_String(deserializer);
+    var var_siblings = sse_decode_list_String(deserializer);
+    var var_entry = sse_decode_list_String(deserializer);
+    var var_matchingEntry = sse_decode_opt_list_String(deserializer);
+    var var_membership = sse_decode_bool(deserializer);
+    return SmtProof(
+      root: var_root,
+      siblings: var_siblings,
+      entry: var_entry,
+      matchingEntry: var_matchingEntry,
+      membership: var_membership,
+    );
+  }
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint32();
   }
 
   @protected
@@ -786,6 +1120,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_smt_proof(
+    SmtProof self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_smt_proof(self, serializer);
+  }
+
+  @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_String(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_prim_u_8_loose(
+    List<int> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    serializer.buffer.putUint8List(
+      self is Uint8List ? self : Uint8List.fromList(self),
+    );
+  }
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
     SseSerializer serializer,
@@ -806,10 +1170,53 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_list_String(
+    List<String>? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_String(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_proof_result(ProofResult self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_64(self.proveMs, serializer);
     sse_encode_u_64(self.proofSizeBytes, serializer);
+  }
+
+  @protected
+  void sse_encode_smt_circuit_inputs(
+    SmtCircuitInputs self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.smtRoot, serializer);
+    sse_encode_String(self.serialNumber, serializer);
+    sse_encode_list_String(self.smtSiblings, serializer);
+    sse_encode_String(self.smtOldKey, serializer);
+    sse_encode_String(self.smtOldValue, serializer);
+    sse_encode_String(self.smtIsOld0, serializer);
+  }
+
+  @protected
+  void sse_encode_smt_proof(SmtProof self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.root, serializer);
+    sse_encode_list_String(self.siblings, serializer);
+    sse_encode_list_String(self.entry, serializer);
+    sse_encode_opt_list_String(self.matchingEntry, serializer);
+    sse_encode_bool(self.membership, serializer);
+  }
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint32(self);
   }
 
   @protected

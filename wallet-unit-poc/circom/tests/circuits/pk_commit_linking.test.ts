@@ -14,7 +14,7 @@ import assert from "assert";
  *
  * Witness layout (circom convention: index 0 = constant 1, then outputs):
  *   cert_chain:  witness[1] = subject_dn_hash, witness[2] = pk_commit
- *   device_sig:  witness[1] = pk_commit, witness[2..51] = packed_tbs
+ *   device_sig:  witness[1] = pk_commit, witness[2] = packed_tbs
  */
 describe("pk_commit linking (CertChain <-> DeviceSig)", function () {
   let certChainCircuit: WitnessTester<any, ["subject_dn_hash", "pk_commit"]>;
@@ -46,7 +46,7 @@ describe("pk_commit linking (CertChain <-> DeviceSig)", function () {
 
     // cert_chain outputs: [subject_dn_hash, pk_commit] → pk_commit at index 2
     const ccPkCommit = ccWitness[2];
-    // device_sig outputs: [pk_commit, packed_tbs[0..49]] → pk_commit at index 1
+    // device_sig outputs: [pk_commit, packed_tbs] → pk_commit at index 1
     const dsPkCommit = dsWitness[1];
 
     assert.strictEqual(

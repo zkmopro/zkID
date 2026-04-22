@@ -27,7 +27,7 @@ pub struct CertChainRsa4096;
 impl RsaKeySize for CertChainRsa2048 {
     const RSA_K: usize = 17;
     const CIRCUIT_NAME: &'static str = "cert_chain_rs2048";
-    const NUM_PUBLIC: usize = 21;
+    const NUM_PUBLIC: usize = 20;
     const PROVING_KEY: &'static str = "cert_chain_rs2048_proving.key";
     const VERIFYING_KEY: &'static str = "cert_chain_rs2048_verifying.key";
     const PROOF: &'static str = "cert_chain_rs2048_proof.bin";
@@ -46,7 +46,7 @@ impl RsaKeySize for CertChainRsa2048 {
 impl RsaKeySize for CertChainRsa4096 {
     const RSA_K: usize = 34;
     const CIRCUIT_NAME: &'static str = "cert_chain_rs4096";
-    const NUM_PUBLIC: usize = 38;
+    const NUM_PUBLIC: usize = 37;
     const PROVING_KEY: &'static str = "cert_chain_rs4096_proving.key";
     const VERIFYING_KEY: &'static str = "cert_chain_rs4096_verifying.key";
     const PROOF: &'static str = "cert_chain_rs4096_proof.bin";
@@ -65,14 +65,11 @@ impl RsaKeySize for CertChainRsa4096 {
 #[derive(Debug, Clone, Copy)]
 pub struct DeviceSigRsa2048;
 
-/// ceil(MAX_MESSAGE_LENGTH / 31) -- packed-tbs output field count.
-const PACKED_TBS_FIELDS: usize = (1536 + 30) / 31;
-
 #[allow(unused_variables)]
 impl RsaKeySize for DeviceSigRsa2048 {
     const RSA_K: usize = 17;
     const CIRCUIT_NAME: &'static str = "device_sig_rs2048";
-    const NUM_PUBLIC: usize = 1 + PACKED_TBS_FIELDS;
+    const NUM_PUBLIC: usize = 2;
     const PROVING_KEY: &'static str = "device_sig_rs2048_proving.key";
     const VERIFYING_KEY: &'static str = "device_sig_rs2048_verifying.key";
     const PROOF: &'static str = "device_sig_rs2048_proof.bin";

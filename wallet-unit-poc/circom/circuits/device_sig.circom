@@ -40,7 +40,7 @@ template DeviceSigRSA256(maxMessageLength, n, k) {
     var N_FIELDS = (maxMessageLength + BYTES_PER_FIELD - 1) \ BYTES_PER_FIELD;
 
     signal output pk_commit;
-    signal output packed_tbs[N_FIELDS];
+    signal output packed_tbs;
 
     // --- Step 1: device-signature verify (user_pk verifies sig over tbs) ---
     CertRSA256Verify(maxMessageLength, n, k)(
@@ -60,5 +60,8 @@ template DeviceSigRSA256(maxMessageLength, n, k) {
     pk_commit <== pkCommit.out;
 
     // --- Step 3: packed_tbs commits to what was signed (public output) ---
-    PackBytes(maxMessageLength, maxMessageLength)(tbs) ==> packed_tbs;
+    var MAX_TBS_BYTES = 31;
+    signal packed_tbs_fields[1];
+    PackBytes(MAX_TBS_BYTES, maxMessageLength)(tbs) ==> packed_tbs_fields;
+    packed_tbs <== packed_tbs_fields[0];
 }

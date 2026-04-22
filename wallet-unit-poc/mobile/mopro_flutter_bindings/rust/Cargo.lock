@@ -2091,7 +2091,6 @@ dependencies = [
  "group",
  "halo2curves",
  "itertools 0.14.0",
- "mimalloc",
  "mopro-ffi",
  "num-bigint 0.4.6",
  "num-integer",

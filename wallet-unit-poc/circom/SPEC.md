@@ -55,7 +55,6 @@ Circuit A and Circuit B are linked via `pk_commit`: the verifier checks
 | ----------------------- | ------------- | --------------------------------------------- |
 | `issuer_rsa_modulus[k]` | public input  | MOICA's RSA public key (trust anchor)         |
 | `smtRoot`               | public input  | Revocation SMT root                           |
-| `serialNumber`          | public input  | Cert serial (planned to become private once client-side SMT lands) |
 | `subject_dn_hash`       | public output | `Poseidon(packed subject_dn)`                 |
 | `pk_commit`             | public output | Links to Circuit B                            |
 
@@ -64,7 +63,7 @@ Circuit A and Circuit B are linked via `pk_commit`: the verifier checks
 | Signal          | Visibility    | Notes                                         |
 | --------------- | ------------- | --------------------------------------------- |
 | `pk_commit`     | public output | Must match Circuit A's `pk_commit`            |
-| `packed_tbs[N]` | public output | `PackBytes(31, …)(tbs)` — commitment to user-signed bytes |
+| `packed_tbs` | public output | `PackBytes(31, …)(tbs)` — commitment to user-signed bytes |
 
 All other signals (user cert bytes, RSA signatures, SMT proof path,
 `subject_dn`, `tbs`, `pk_blind`) are private.

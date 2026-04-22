@@ -17,21 +17,23 @@ Future<void> initApp() => RustLib.instance.api.openacMobileAppInitApp();
 ///   - `device_sig_rs2048_input.json`
 ///
 /// These are the input files expected by `prove` via `PathConfig::mobile`.
+///
+/// `smt_proof` should be the non-membership proof for the certificate's serial
+/// number, produced by `create_smt_proof_from_gz` / `create_smt_proof`.
+/// Pass `None` to omit SMT revocation checking.
 Future<String> generateCertChainRs4096Input({
   required String certb64,
   required String signedResponse,
   required String tbs,
   required String issuerCertPath,
-  String? smtServer,
-  required String issuerId,
+  String? smtSnapshotPath,
   required String outputDir,
 }) => RustLib.instance.api.openacMobileAppGenerateCertChainRs4096Input(
   certb64: certb64,
   signedResponse: signedResponse,
   tbs: tbs,
   issuerCertPath: issuerCertPath,
-  smtServer: smtServer,
-  issuerId: issuerId,
+  smtSnapshotPath: smtSnapshotPath,
   outputDir: outputDir,
 );
 
@@ -98,6 +100,71 @@ Future<BenchmarkResults> runCompleteBenchmark({
   required String documentsPath,
 }) => RustLib.instance.api.openacMobileAppRunCompleteBenchmark(
   documentsPath: documentsPath,
+);
+
+/// Verify an SMT non-membership (or membership) proof against a trusted root.
+///
+/// Recomputes the Merkle root from `proof.entry` + `proof.siblings` using
+/// Poseidon-P256, then compares against `expected_root`.  Returns `true` iff
+/// the proof is valid.
+Future<bool> verifySmtProof({
+  required SmtProof proof,
+  required String expectedRoot,
+}) => RustLib.instance.api.openacMobileAppVerifySmtProof(
+  proof: proof,
+  expectedRoot: expectedRoot,
+);
+
+/// Parse a @zk-kit/smt v1.0.2-compatible snapshot JSON and return its root.
+///
+/// The returned root can be used as `expected_root` in subsequent calls to
+/// `verify_smt_proof`.
+Future<String> buildSmtFromSnapshot({required String snapshotJson}) => RustLib
+    .instance
+    .api
+    .openacMobileAppBuildSmtFromSnapshot(snapshotJson: snapshotJson);
+
+/// Convert an `SmtProof` (hex strings) into the `SmtCircuitInputs` that the
+/// Circom cert-chain circuit expects (decimal strings, siblings padded to `depth`).
+///
+/// This is the offline equivalent of `ecdsa_spartan2::smt_client::fetch_smt_proof`:
+/// instead of hitting the server you supply the proof generated from the local snapshot.
+Future<SmtCircuitInputs> smtProofToCircuitInputs({
+  required SmtProof proof,
+  required int depth,
+}) => RustLib.instance.api.openacMobileAppSmtProofToCircuitInputs(
+  proof: proof,
+  depth: depth,
+);
+
+/// Load a snapshot and generate a proof for `key_hex` in one call (JSON input).
+///
+/// # Arguments
+/// * `snapshot_json` – decompressed snapshot JSON string
+/// * `key_hex`       – certificate serial number as a hex string (with or without `0x`)
+///
+/// Returns the proof ready to pass straight into `verify_smt_proof`.
+Future<SmtProof> createSmtProof({
+  required String snapshotJson,
+  required String keyHex,
+}) => RustLib.instance.api.openacMobileAppCreateSmtProof(
+  snapshotJson: snapshotJson,
+  keyHex: keyHex,
+);
+
+/// Load a snapshot and generate a proof for `key_hex` in one call (gzip input).
+///
+/// # Arguments
+/// * `gz_data` – raw bytes of the `.json.gz` snapshot file
+/// * `key_hex` – certificate serial number as a hex string (with or without `0x`)
+///
+/// Returns the proof ready to pass straight into `verify_smt_proof`.
+Future<SmtProof> createSmtProofFromGz({
+  required List<int> gzData,
+  required String keyHex,
+}) => RustLib.instance.api.openacMobileAppCreateSmtProofFromGz(
+  gzData: gzData,
+  keyHex: keyHex,
 );
 
 /// Test function for basic UniFFI integration
@@ -175,4 +242,90 @@ class ProofResult {
           runtimeType == other.runtimeType &&
           proveMs == other.proveMs &&
           proofSizeBytes == other.proofSizeBytes;
+}
+
+/// Circom-ready SMT inputs — all values as decimal strings, siblings padded to depth.
+/// Mirrors `ecdsa_spartan2::smt_client::SmtCircuitInputs`.
+class SmtCircuitInputs {
+  final String smtRoot;
+  final String serialNumber;
+  final List<String> smtSiblings;
+  final String smtOldKey;
+  final String smtOldValue;
+  final String smtIsOld0;
+
+  const SmtCircuitInputs({
+    required this.smtRoot,
+    required this.serialNumber,
+    required this.smtSiblings,
+    required this.smtOldKey,
+    required this.smtOldValue,
+    required this.smtIsOld0,
+  });
+
+  @override
+  int get hashCode =>
+      smtRoot.hashCode ^
+      serialNumber.hashCode ^
+      smtSiblings.hashCode ^
+      smtOldKey.hashCode ^
+      smtOldValue.hashCode ^
+      smtIsOld0.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SmtCircuitInputs &&
+          runtimeType == other.runtimeType &&
+          smtRoot == other.smtRoot &&
+          serialNumber == other.serialNumber &&
+          smtSiblings == other.smtSiblings &&
+          smtOldKey == other.smtOldKey &&
+          smtOldValue == other.smtOldValue &&
+          smtIsOld0 == other.smtIsOld0;
+}
+
+/// SMT proof from the moica-revocation-smt server, all values as hex strings.
+class SmtProof {
+  /// Tree root at proof time (hex string).
+  final String root;
+
+  /// Sibling hashes from leaf level upward (hex strings).
+  final List<String> siblings;
+
+  /// [key] for non-membership; [key, value, marker] for membership.
+  final List<String> entry;
+
+  /// Present for non-membership proofs when a conflicting leaf exists.
+  final List<String>? matchingEntry;
+
+  /// True if the key is claimed to exist in the tree.
+  final bool membership;
+
+  const SmtProof({
+    required this.root,
+    required this.siblings,
+    required this.entry,
+    this.matchingEntry,
+    required this.membership,
+  });
+
+  @override
+  int get hashCode =>
+      root.hashCode ^
+      siblings.hashCode ^
+      entry.hashCode ^
+      matchingEntry.hashCode ^
+      membership.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SmtProof &&
+          runtimeType == other.runtimeType &&
+          root == other.root &&
+          siblings == other.siblings &&
+          entry == other.entry &&
+          matchingEntry == other.matchingEntry &&
+          membership == other.membership;
 }

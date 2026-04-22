@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -690981767;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1810054927;
 
 // Section: executor
 
@@ -81,6 +81,111 @@ fn wire__openac_mobile_app__benchmark_results_format_size_impl(
         },
     )
 }
+fn wire__openac_mobile_app__build_smt_from_snapshot_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "build_smt_from_snapshot",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_snapshot_json = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(
+                        openac_mobile_app::build_smt_from_snapshot(api_snapshot_json),
+                    )?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__openac_mobile_app__create_smt_proof_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "create_smt_proof",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_snapshot_json = <String>::sse_decode(&mut deserializer);
+            let api_key_hex = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ZkProofError>((move || {
+                    let output_ok =
+                        openac_mobile_app::create_smt_proof(api_snapshot_json, api_key_hex)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__openac_mobile_app__create_smt_proof_from_gz_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "create_smt_proof_from_gz",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_gz_data = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_key_hex = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ZkProofError>((move || {
+                    let output_ok =
+                        openac_mobile_app::create_smt_proof_from_gz(api_gz_data, api_key_hex)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__openac_mobile_app__generate_cert_chain_rs4096_input_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -107,8 +212,7 @@ fn wire__openac_mobile_app__generate_cert_chain_rs4096_input_impl(
             let api_signed_response = <String>::sse_decode(&mut deserializer);
             let api_tbs = <String>::sse_decode(&mut deserializer);
             let api_issuer_cert_path = <String>::sse_decode(&mut deserializer);
-            let api_smt_server = <Option<String>>::sse_decode(&mut deserializer);
-            let api_issuer_id = <String>::sse_decode(&mut deserializer);
+            let api_smt_snapshot_path = <Option<String>>::sse_decode(&mut deserializer);
             let api_output_dir = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
@@ -118,8 +222,7 @@ fn wire__openac_mobile_app__generate_cert_chain_rs4096_input_impl(
                         api_signed_response,
                         api_tbs,
                         api_issuer_cert_path,
-                        api_smt_server,
-                        api_issuer_id,
+                        api_smt_snapshot_path,
                         api_output_dir,
                     )?;
                     Ok(output_ok)
@@ -359,6 +462,41 @@ fn wire__openac_mobile_app__setup_keys_impl(
         },
     )
 }
+fn wire__openac_mobile_app__smt_proof_to_circuit_inputs_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "smt_proof_to_circuit_inputs",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_proof = <openac_mobile_app::SmtProof>::sse_decode(&mut deserializer);
+            let api_depth = <u32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ZkProofError>((move || {
+                    let output_ok =
+                        openac_mobile_app::smt_proof_to_circuit_inputs(api_proof, api_depth)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__openac_mobile_app__verify_cert_chain_rs4096_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -427,6 +565,43 @@ fn wire__openac_mobile_app__verify_device_sig_rs2048_impl(
         },
     )
 }
+fn wire__openac_mobile_app__verify_smt_proof_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "verify_smt_proof",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_proof = <openac_mobile_app::SmtProof>::sse_decode(&mut deserializer);
+            let api_expected_root = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(openac_mobile_app::verify_smt_proof(
+                        api_proof,
+                        api_expected_root,
+                    ))?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 
 // Section: static_checks
 
@@ -446,6 +621,23 @@ const _: fn() = || {
         let ProofResult = None::<openac_mobile_app::ProofResult>.unwrap();
         let _: u64 = ProofResult.prove_ms;
         let _: u64 = ProofResult.proof_size_bytes;
+    }
+    {
+        let SmtCircuitInputs = None::<openac_mobile_app::SmtCircuitInputs>.unwrap();
+        let _: String = SmtCircuitInputs.smt_root;
+        let _: String = SmtCircuitInputs.serial_number;
+        let _: Vec<String> = SmtCircuitInputs.smt_siblings;
+        let _: String = SmtCircuitInputs.smt_old_key;
+        let _: String = SmtCircuitInputs.smt_old_value;
+        let _: String = SmtCircuitInputs.smt_is_old0;
+    }
+    {
+        let SmtProof = None::<openac_mobile_app::SmtProof>.unwrap();
+        let _: String = SmtProof.root;
+        let _: Vec<String> = SmtProof.siblings;
+        let _: Vec<String> = SmtProof.entry;
+        let _: Option<Vec<String>> = SmtProof.matching_entry;
+        let _: bool = SmtProof.membership;
     }
 };
 
@@ -514,6 +706,18 @@ impl SseDecode for bool {
     }
 }
 
+impl SseDecode for Vec<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<String>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<u8> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -537,6 +741,17 @@ impl SseDecode for Option<String> {
     }
 }
 
+impl SseDecode for Option<Vec<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<Vec<String>>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for openac_mobile_app::ProofResult {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -546,6 +761,51 @@ impl SseDecode for openac_mobile_app::ProofResult {
             prove_ms: var_proveMs,
             proof_size_bytes: var_proofSizeBytes,
         };
+    }
+}
+
+impl SseDecode for openac_mobile_app::SmtCircuitInputs {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_smtRoot = <String>::sse_decode(deserializer);
+        let mut var_serialNumber = <String>::sse_decode(deserializer);
+        let mut var_smtSiblings = <Vec<String>>::sse_decode(deserializer);
+        let mut var_smtOldKey = <String>::sse_decode(deserializer);
+        let mut var_smtOldValue = <String>::sse_decode(deserializer);
+        let mut var_smtIsOld0 = <String>::sse_decode(deserializer);
+        return openac_mobile_app::SmtCircuitInputs {
+            smt_root: var_smtRoot,
+            serial_number: var_serialNumber,
+            smt_siblings: var_smtSiblings,
+            smt_old_key: var_smtOldKey,
+            smt_old_value: var_smtOldValue,
+            smt_is_old0: var_smtIsOld0,
+        };
+    }
+}
+
+impl SseDecode for openac_mobile_app::SmtProof {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_root = <String>::sse_decode(deserializer);
+        let mut var_siblings = <Vec<String>>::sse_decode(deserializer);
+        let mut var_entry = <Vec<String>>::sse_decode(deserializer);
+        let mut var_matchingEntry = <Option<Vec<String>>>::sse_decode(deserializer);
+        let mut var_membership = <bool>::sse_decode(deserializer);
+        return openac_mobile_app::SmtProof {
+            root: var_root,
+            siblings: var_siblings,
+            entry: var_entry,
+            matching_entry: var_matchingEntry,
+            membership: var_membership,
+        };
+    }
+}
+
+impl SseDecode for u32 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_u32::<NativeEndian>().unwrap()
     }
 }
 
@@ -597,37 +857,54 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        2 => wire__openac_mobile_app__generate_cert_chain_rs4096_input_impl(
+        2 => {
+            wire__openac_mobile_app__build_smt_from_snapshot_impl(port, ptr, rust_vec_len, data_len)
+        }
+        3 => wire__openac_mobile_app__create_smt_proof_impl(port, ptr, rust_vec_len, data_len),
+        4 => wire__openac_mobile_app__create_smt_proof_from_gz_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        3 => wire__openac_mobile_app__init_app_impl(port, ptr, rust_vec_len, data_len),
-        4 => wire__openac_mobile_app__link_verify_impl(port, ptr, rust_vec_len, data_len),
-        5 => wire__openac_mobile_app__mopro_hello_world_impl(port, ptr, rust_vec_len, data_len),
-        6 => {
+        5 => wire__openac_mobile_app__generate_cert_chain_rs4096_input_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        6 => wire__openac_mobile_app__init_app_impl(port, ptr, rust_vec_len, data_len),
+        7 => wire__openac_mobile_app__link_verify_impl(port, ptr, rust_vec_len, data_len),
+        8 => wire__openac_mobile_app__mopro_hello_world_impl(port, ptr, rust_vec_len, data_len),
+        9 => {
             wire__openac_mobile_app__prove_cert_chain_rs4096_impl(port, ptr, rust_vec_len, data_len)
         }
-        7 => {
+        10 => {
             wire__openac_mobile_app__prove_device_sig_rs2048_impl(port, ptr, rust_vec_len, data_len)
         }
-        8 => {
+        11 => {
             wire__openac_mobile_app__run_complete_benchmark_impl(port, ptr, rust_vec_len, data_len)
         }
-        9 => wire__openac_mobile_app__setup_keys_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__openac_mobile_app__verify_cert_chain_rs4096_impl(
+        12 => wire__openac_mobile_app__setup_keys_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__openac_mobile_app__smt_proof_to_circuit_inputs_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        11 => wire__openac_mobile_app__verify_device_sig_rs2048_impl(
+        14 => wire__openac_mobile_app__verify_cert_chain_rs4096_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
+        15 => wire__openac_mobile_app__verify_device_sig_rs2048_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        16 => wire__openac_mobile_app__verify_smt_proof_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -708,6 +985,55 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<openac_mobile_app::ProofResult
         self.into()
     }
 }
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<openac_mobile_app::SmtCircuitInputs> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.0.smt_root.into_into_dart().into_dart(),
+            self.0.serial_number.into_into_dart().into_dart(),
+            self.0.smt_siblings.into_into_dart().into_dart(),
+            self.0.smt_old_key.into_into_dart().into_dart(),
+            self.0.smt_old_value.into_into_dart().into_dart(),
+            self.0.smt_is_old0.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for FrbWrapper<openac_mobile_app::SmtCircuitInputs>
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<openac_mobile_app::SmtCircuitInputs>>
+    for openac_mobile_app::SmtCircuitInputs
+{
+    fn into_into_dart(self) -> FrbWrapper<openac_mobile_app::SmtCircuitInputs> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<openac_mobile_app::SmtProof> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.0.root.into_into_dart().into_dart(),
+            self.0.siblings.into_into_dart().into_dart(),
+            self.0.entry.into_into_dart().into_dart(),
+            self.0.matching_entry.into_into_dart().into_dart(),
+            self.0.membership.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for FrbWrapper<openac_mobile_app::SmtProof>
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<openac_mobile_app::SmtProof>>
+    for openac_mobile_app::SmtProof
+{
+    fn into_into_dart(self) -> FrbWrapper<openac_mobile_app::SmtProof> {
+        self.into()
+    }
+}
 
 impl SseEncode for ZkProofError {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -754,6 +1080,16 @@ impl SseEncode for bool {
     }
 }
 
+impl SseEncode for Vec<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <String>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<u8> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -774,11 +1110,51 @@ impl SseEncode for Option<String> {
     }
 }
 
+impl SseEncode for Option<Vec<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <Vec<String>>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for openac_mobile_app::ProofResult {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <u64>::sse_encode(self.prove_ms, serializer);
         <u64>::sse_encode(self.proof_size_bytes, serializer);
+    }
+}
+
+impl SseEncode for openac_mobile_app::SmtCircuitInputs {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.smt_root, serializer);
+        <String>::sse_encode(self.serial_number, serializer);
+        <Vec<String>>::sse_encode(self.smt_siblings, serializer);
+        <String>::sse_encode(self.smt_old_key, serializer);
+        <String>::sse_encode(self.smt_old_value, serializer);
+        <String>::sse_encode(self.smt_is_old0, serializer);
+    }
+}
+
+impl SseEncode for openac_mobile_app::SmtProof {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.root, serializer);
+        <Vec<String>>::sse_encode(self.siblings, serializer);
+        <Vec<String>>::sse_encode(self.entry, serializer);
+        <Option<Vec<String>>>::sse_encode(self.matching_entry, serializer);
+        <bool>::sse_encode(self.membership, serializer);
+    }
+}
+
+impl SseEncode for u32 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_u32::<NativeEndian>(self).unwrap();
     }
 }
 
