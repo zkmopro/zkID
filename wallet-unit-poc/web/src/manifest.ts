@@ -39,21 +39,21 @@ export interface SmtAssetManifest {
 export const CIRCUITS: Record<CircuitKind, CircuitManifest> = {
   cert_chain_rs2048: {
     kind: "cert_chain_rs2048",
-    numPublic: 21,
+    numPublic: 20,
     pkUrl: "/keys/cert_chain_rs2048_proving.key.gz",
     witnessWasmUrl: "/keys/cert_chain_rs2048.wasm.gz",
     expected: { pk: "", witnessWasm: "" },
   },
   cert_chain_rs4096: {
     kind: "cert_chain_rs4096",
-    numPublic: 38,
+    numPublic: 37,
     pkUrl: "/keys/cert_chain_rs4096_proving.key.gz",
     witnessWasmUrl: "/keys/cert_chain_rs4096.wasm.gz",
     expected: { pk: "", witnessWasm: "" },
   },
   device_sig_rs2048: {
     kind: "device_sig_rs2048",
-    numPublic: 51,
+    numPublic: 2,
     pkUrl: "/keys/device_sig_rs2048_proving.key.gz",
     witnessWasmUrl: "/keys/device_sig_rs2048.wasm.gz",
     expected: { pk: "", witnessWasm: "" },
