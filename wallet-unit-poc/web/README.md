@@ -30,13 +30,18 @@ Start    Continue  Start    (auto)    Send     (auto)      Prove again
   Per-step durations appear as each step completes. Cancel returns the
   user to setup. The revocation step queries an SMT that was rebuilt
   in-browser during setup, so the card's serial never leaves the device.
-- **Review** shows proof sizes + nullifier + proving time. Proofs live
-  only in memory at this point — nothing has been sent to the verifier.
+- **Review** shows proof sizes + proving time. Proofs live only in memory
+  at this point — nothing has been sent to the verifier. The nullifier is
+  derived by the server from the proof's `subject_dn_hash` public signal,
+  so it only appears on the Result screen after `/link-verify` returns.
   **Send proof to verifier** submits; **Retry proving** discards and
   routes back through setup for PIN re-verify (strict single-use — the
   session Pin was consumed by the sign step during this run).
 - **Submitting** is a single-spinner screen for the `/link-verify` POST.
-- **Result** shows verified/not-verified with both timings. **Prove again**
+- **Result** shows verified/not-verified with both timings, the
+  server-derived nullifier, and an expandable debug block with the
+  parsed public inputs (`subject_dn_hash`, `pk_commit`, `smt_root`,
+  `serial_number`, `challenge`, `issuer_rsa_modulus`). **Prove again**
   routes back to setup for PIN re-verify; card + warm runtime stay green
   so only the PIN panel needs a fresh entry.
 
