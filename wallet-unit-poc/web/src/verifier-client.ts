@@ -1,20 +1,5 @@
-// Client for the go-zkid-verifier REST API.
-//
-// Wire shape (snake_case, byte-for-byte with the native Rust client):
-//   POST /challenge    → { challenge_id, challenge_bytes, expires_at }
-//   POST /link-verify  → { verified, nullifier?, id_verified?, persisted?,
-//                          public_signals?, parsed_inputs? }
-//
-// Server-side, `/link-verify` recovers the challenge from the device-sig
-// proof's `packed_tbs` public signal and derives the nullifier from the
-// cert-chain proof's `subject_dn_hash` — the client must not forward
-// either, or the server rejects the request.
-//
-// Interface uses the server's snake_case field names verbatim; the runtime
-// shape guards below catch silent drift if they ever change.
-//
-// 2 MB body limit + ~33% base64 inflation → raw proofs are capped at
-// 700 KB to surface a clean client-side error before the server 413s.
+// Client for go-zkid-verifier REST API.
+// Keep snake_case to match server wire format.
 
 import { composeSignal, parsePositiveInt } from "./abort-utils";
 
@@ -29,15 +14,13 @@ export interface Challenge {
   expires_at: string;
 }
 
-/** Raw public-input field elements the server returned alongside the verdict.
- *  Hex strings in the same layout the Go verifier emits. */
+/** Raw verifier public inputs (hex strings). */
 export interface PublicSignals {
   cert_chain: string[];
   device_sig: string[];
 }
 
-/** Named parse of the public signals. Mirrors go-zkid-verifier's
- *  `verifier.ParsedInputs`. */
+/** Named parse of public signals from the verifier response. */
 export interface ParsedInputs {
   challenge: string;
   pk_commit: string;
@@ -49,7 +32,7 @@ export interface ParsedInputs {
 
 export interface LinkVerifyResult {
   verified: boolean;
-  /** Present on success only — the server returns `VerifyFailResponse{ verified: false }` on a failed verification. */
+  /** Present only when `verified` is true. */
   nullifier?: string;
   id_verified?: boolean;
   persisted?: boolean;
@@ -63,7 +46,7 @@ export interface LinkVerifyParams {
   deviceSigProofBytes: Uint8Array;
 }
 
-/** Default per-request timeout. Overridable via VITE_VERIFIER_TIMEOUT_MS. */
+/** Default request timeout; can be overridden by VITE_VERIFIER_TIMEOUT_MS. */
 const VERIFIER_TIMEOUT_MS = parsePositiveInt(
   import.meta.env.VITE_VERIFIER_TIMEOUT_MS,
   15_000,
@@ -88,9 +71,7 @@ export async function createChallenge(
     throw new Error(`POST /challenge returned ${r.status} ${r.statusText}`);
   }
   const body = (await r.json()) as Partial<Challenge>;
-  // Runtime shape guard. The `as Challenge` cast alone is unsound — if the
-  // server ever changes field names, downstream code would read `undefined`
-  // and break silently. Fail fast here instead.
+  // Runtime shape guard to catch server field drift early.
   if (
     typeof body?.challenge_id !== "string" ||
     typeof body?.challenge_bytes !== "string"
@@ -111,7 +92,7 @@ export async function submitLinkVerify(
 
   const body = {
     cert_chain_type: params.certChainType,
-    // Go's json.Unmarshal decodes base64 into []byte automatically.
+    // Go's json.Unmarshal decodes base64 into []byte.
     cert_chain_proof: bytesToBase64(params.certChainProofBytes),
     device_sig_proof: bytesToBase64(params.deviceSigProofBytes),
   };
@@ -151,7 +132,7 @@ function assertProofSize(field: string, bytes: Uint8Array): void {
 }
 
 function bytesToBase64(b: Uint8Array): string {
-  // TextEncoder-free; works in Worker context without globalThis.atob polyfills.
+  // TextEncoder-free and Worker-safe.
   let s = "";
   // Chunk to avoid hitting String.fromCharCode arg-count limits on large inputs.
   const CHUNK = 0x8000;

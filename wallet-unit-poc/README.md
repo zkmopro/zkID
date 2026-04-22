@@ -7,8 +7,7 @@ a fresh challenge, the prover emits two Spartan2 proofs that together attest to
 against an SMT root, and (c) possession of the user private key — without
 revealing personal data from the cert.
 
-Three proving surfaces share the same circuits, input builder, and proving
-engine:
+Three proving surfaces share the same circuits, input builder, and proving engine:
 
 | Surface | Path | Use for |
 |---|---|---|
@@ -26,7 +25,7 @@ Shared crates:
 
 Web prover architecture in short: the app uses two routes with different COOP
 headers (`/` for popup-compatible signing, `/prove` for cross-origin-isolated
-threaded proving), with `ProveInput` handed across via sessionStorage.
+threaded proving), and hands off `ProveInput` via sessionStorage.
 
 ## Quick start (web prover)
 
@@ -43,8 +42,8 @@ pnpm install
 pnpm dev                     # runs build:wasm + copy:assets + vite
 ```
 
-Open the printed URL (typically `http://localhost:5173`). The landing page
-drives setup; `/prove` runs the cross-origin-isolated proving document.
+Open the printed URL (typically `http://localhost:5173`). The landing page drives
+setup; `/prove` runs the cross-origin-isolated proving document.
 
 ## Quick start (native CLI)
 
@@ -98,10 +97,9 @@ cd wallet-unit-poc/web && pnpm install && pnpm test && pnpm lint
 ```
 
 CI wires these up across five workflows (`circom-tests`, `rust-tests`,
-`web-tests`, `mobile-tests`, plus the reusable `compile-circuits`). The full
-split E2E (RS2048 + RS4096 cert-chain + device-sig + link-verify) runs on every
-PR that touches the relevant paths. See [`CLAUDE.md`](../CLAUDE.md#ci-workflows)
-for the full matrix.
+`web-tests`, `mobile-tests`, plus reusable `compile-circuits`). The full split
+E2E (RS2048 + RS4096 cert-chain + device-sig + link-verify) runs on PRs that
+touch relevant paths. See [`CLAUDE.md`](../CLAUDE.md#ci-workflows) for the full matrix.
 
 ## Repo layout
 

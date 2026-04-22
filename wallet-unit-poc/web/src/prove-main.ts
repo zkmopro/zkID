@@ -1,11 +1,6 @@
-// Entry point for `/prove` (proving route). Picks up a `ProveInput` handed
-// over from `/` via sessionStorage, runs a fresh Worker in a cross-origin-
-// isolated document so `wasm-bindgen-rayon` can spawn a real thread pool,
-// then drives proving → review → submitting → result.
-//
-// If no stored input exists (e.g., user navigates directly to /prove, or
-// refreshes mid-proving), redirect back to `/` rather than render an
-// empty page.
+// Entry point for `/prove`.
+// Consumes `ProveInput` from sessionStorage, runs proving with a fresh Worker,
+// and drives proving → review → submitting → result.
 
 import "./style.css";
 import { markPriorStepsDone } from "./progress";
@@ -25,23 +20,14 @@ function boot(): void {
 
   const proveInput = consumeProveInput();
   if (!proveInput) {
-    // No handoff — someone navigated to /prove directly or refreshed
-    // mid-proving. Bounce back to / for a clean restart.
+    // No handoff (direct nav/refresh). Restart from `/`.
     clearProveInput();
     window.location.replace("/");
     return;
   }
 
-  // Bootstrap state before anything subscribes to $state so the first
-  // render paints the proving screen, not a flash of landing. This
-  // deliberately bypasses the store's `start_proving` transition because
-  // /prove enters proving directly from a stored handoff — see the note
-  // in store.ts on the `landing → proving` direct bootstrap.
-  //
-  // Mark sign-phase steps (challenge/sign/smt/build) done BEFORE first
-  // render — they completed on / and the user just saw green checks for
-  // them. Deferring this until `warmup_done` leaves them gray for the
-  // multi-second warmup and looks like their prior work was lost.
+  // Initialize state before subscriptions to avoid landing flash.
+  // Sign-phase steps already completed on `/`, so mark them done up front.
   resetUi();
   markPriorStepsDone("prove_cert");
   result.set({ kind: "running" });
@@ -71,9 +57,7 @@ function boot(): void {
     submitController = null;
   }
 
-  // retry_proving and reset_to_setup land on `setup` (and `reset` on
-  // `landing`). /prove has no sign-phase screens — redirect guard makes
-  // this idempotent so a second transition during teardown is a no-op.
+  // `/prove` cannot render sign-phase screens; redirect transitions to `/`.
   function sendUserBackToSign(): void {
     if (redirected) return;
     redirected = true;
@@ -84,8 +68,7 @@ function boot(): void {
     window.location.replace("/");
   }
 
-  // Listener runs before mountRouter's subscription, so a transition to
-  // setup/landing is intercepted before the router paints those screens.
+  // Listen before router mount to intercept setup/landing transitions early.
   $state.listen(async (state) => {
     if (redirected) return;
     if (state.phase !== "submitting") cancelActiveSubmit();
@@ -93,9 +76,7 @@ function boot(): void {
     switch (state.phase) {
       case "proving":
       case "review":
-        // Worker stays alive across review — user may click Retry or the
-        // final submit, and tearing the pool down between prove and submit
-        // is pure waste.
+        // Keep Worker alive across review for retry/submit.
         return;
       case "submitting":
         await handleSubmittingPhase(state);
@@ -152,10 +133,7 @@ function boot(): void {
   ensureWorker().postMessage(warmupMsg);
 }
 
-// Measurement harness: one line per complete run, carrying the per-circuit
-// breakdown + whether the rayon pool actually ran. Lets before/after
-// threaded-vs-single-threaded comparisons land in console logs without a
-// profiler.
+// Emit one proving timing record for quick before/after comparisons.
 function logProvingComplete(
   data: Extract<Progress, { step: "proving_complete" }>,
 ): void {

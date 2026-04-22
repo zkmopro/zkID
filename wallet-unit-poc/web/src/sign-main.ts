@@ -1,12 +1,7 @@
-// Entry point for `/` (sign route). Runs landing → setup → ready, drives
-// HiPKI + SMT via a Worker, then on Start-proving runs the sign-phase
-// pipeline (challenge → sign → smt → build) and hands off `ProveInput` to
-// `/prove` via sessionStorage.
-//
-// Kept separate from `prove-main.ts` because `/` and `/prove` are served
-// with different COOP headers (see `vite.config.ts`): `/` preserves
-// `window.opener` for the HiPKI popup; `/prove` runs in a cross-origin-
-// isolated context so `wasm-bindgen-rayon` can use SharedArrayBuffer.
+// Entry point for `/` (sign route): landing → setup → ready → sign-phase
+// pipeline, then handoff to `/prove` via sessionStorage.
+// Kept separate from `prove-main.ts` because `/` must preserve popup opener,
+// while `/prove` is cross-origin-isolated for threaded proving.
 
 import "./style.css";
 import { $challenge, clearChallenge } from "./challenge-state";
@@ -98,8 +93,7 @@ function boot(): void {
         challenge: challengeState.challenge,
         signal: myController.signal,
       });
-      // The Worker is about to be torn down by the page navigation; drop
-      // the refs here first so no late message can fire into a disposed FSM.
+      // Drop Worker refs before navigation to avoid late events.
       terminateWorker();
       saveProveInput(proveInput);
       window.location.assign("/prove");
@@ -122,11 +116,7 @@ function boot(): void {
     }
   }
 
-  // Triggered by HiPKI reaching `card_ready`: the Worker now knows the
-  // issuer and can download/ingest the per-issuer SMT snapshot. Separate
-  // from warmup because warmup fires on setup entry (before any card is
-  // read) and loading both g2 and g3 snapshots would waste ~94 MB of
-  // bandwidth on a card the user isn't holding.
+  // Load SMT snapshot once card issuer is known; avoids downloading both trees.
   function triggerLoadSmtForCard(): void {
     const hipki = $hipki.get();
     if (hipki.status !== "card_ready") return;
@@ -180,8 +170,7 @@ function boot(): void {
         $warmup.set({ status: "idle" });
         return;
       case "setup":
-        // Cancel mid-proving lands here. Kill the warm Worker and reset
-        // $pin so the user must re-verify before the next attempt.
+        // Cancel from proving: kill Worker and require PIN re-verify.
         if (wasProving) {
           killWorkerForCancel();
           $pin.set({ status: "pending" });
@@ -194,9 +183,7 @@ function boot(): void {
       case "proving":
         await handleSignPhase();
         return;
-      // review / submitting / result / error can only be reached on /prove;
-      // if the FSM somehow lands here on /, fall through to no-op so the
-      // existing error screen still renders.
+      // These phases belong to `/prove`; ignore if reached here.
       case "review":
       case "submitting":
       case "result":

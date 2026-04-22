@@ -1,13 +1,12 @@
 # spartan2-wasm
 
-Standalone WebAssembly crate that produces the Spartan2 proving binary consumed
-by [`wallet-unit-poc/web/`](../web). It compiles the three zkID circuits
-(cert_chain_rs2048, cert_chain_rs4096, device_sig_rs2048) into a single
+Standalone WebAssembly crate that builds the Spartan2 prover used by
+[`wallet-unit-poc/web/`](../web). It compiles the three zkID circuits
+(`cert_chain_rs2048`, `cert_chain_rs4096`, `device_sig_rs2048`) into a single
 `spartan2_wasm.wasm` module with wasm-bindgen + wasm-bindgen-rayon bindings.
-Verification in the production web pipeline happens server-side via
-[`go-zkid-verifier`](https://github.com/zkmopro/go-zkid-verifier/pull/8) — the
-`verify` and `link_verify` exports here exist only for the native drift test
-and in-browser debugging, not for the production flow.
+Production verification is server-side via
+[`go-zkid-verifier`](https://github.com/zkmopro/go-zkid-verifier/pull/8);
+`verify` and `link_verify` are for drift tests and debugging.
 
 ## Build
 
@@ -84,16 +83,16 @@ All exports come from the generated `pkg/spartan2_wasm.js`.
 
 ## Separation from `ecdsa-spartan2`
 
-This crate has zero runtime dependency on `ecdsa-spartan2` by design. The only
-usage is a dev-dependency in `tests/native_drift.rs`, which cross-verifies
-proofs produced here against the upstream verifier to detect transcript drift.
+This crate has no runtime dependency on `ecdsa-spartan2`. The only coupling is
+the dev-dependency in `tests/native_drift.rs`, which cross-verifies proofs to
+detect transcript drift.
 
 `prove_core` in `src/lib.rs` duplicates the transcript sequence from
 `ecdsa-spartan2/src/prover.rs::prove_circuit_in_memory`. If that upstream
 function changes (new transcript absorb, reordered calls, different labels),
 the drift test fails and this crate must be re-synced.
 
-Three pieces of `src/lib.rs` are critical and must not be weakened:
+Three parts of `src/lib.rs` are critical and must not be weakened:
 `prove_core` itself (do not inline into the wasm_bindgen entry point — the
 native test needs a shared path), the bounded arithmetic in `parse_witness`
 (prevents `usize` overflow crashes on 32-bit wasm), and `lock_pk_mut`'s poison
@@ -116,17 +115,14 @@ extra flags from consumers.
 ## Thread-count guidance
 
 The web app picks `clamp(navigator.hardwareConcurrency - 1, 2, 8)`. Leaving one
-core for the main thread keeps the UI responsive during proving. The upper cap
-of 8 is not arbitrary: wasm32 has a 4 GB linear-memory ceiling, and
-`cert_chain_rs4096` proofs push close to that limit at higher thread counts due
-to per-worker scratch space.
+core for the main thread keeps the UI responsive. The 8-thread cap is
+intentional: wasm32 has a 4 GB linear-memory ceiling, and
+`cert_chain_rs4096` can approach that limit at higher thread counts.
 
 ## Drift test
 
-`tests/native_drift.rs` exists because a silent transcript divergence between
-this crate and `ecdsa-spartan2` produces proofs that one side generates but
-the other cannot verify — a failure mode that only surfaces in end-to-end
-runs if left uncaught.
+`tests/native_drift.rs` exists because transcript divergence between this crate
+and `ecdsa-spartan2` can produce proofs that the other side cannot verify.
 
 The test runs setup locally (so it does not depend on committed PK artifacts),
 calls `prove_core` here to produce a proof and instance, then deserializes
@@ -138,7 +134,6 @@ The test runs in CI via `web-tests.yaml` on every PR that touches
 `spartan2-wasm/` or `ecdsa-spartan2/src/prover.rs`, and can be run locally on
 demand with `cargo test --test native_drift --release`.
 
-If it fails, the fix is to re-sync `prove_core` with the current
-`prove_circuit_in_memory` in `ecdsa-spartan2/src/prover.rs` — compare transcript
-absorbs, label bytes, and the order of `prep_prove` / `r1cs_instance_and_witness`
-/ `prove_inner` calls. Do not patch the drift test to pass; patch the prover.
+If it fails, re-sync `prove_core` with
+`ecdsa-spartan2/src/prover.rs::prove_circuit_in_memory` (transcript absorbs,
+labels, and call order). Do not patch the test to pass; patch the prover.

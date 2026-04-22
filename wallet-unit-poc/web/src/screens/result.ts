@@ -1,5 +1,4 @@
-// Result screen: covers both the terminal `result` phase (verified / not
-// verified) and the `error` phase so users see a consistent outcome surface.
+// Result screen for both terminal `result` and `error` phases.
 
 import { escapeText } from "../dom-utils";
 import { formatDuration, truncateMiddle } from "../format";
@@ -36,7 +35,7 @@ export function mountResult(root: HTMLElement): () => void {
     tone = "error";
     testidBadge = "result-error";
   } else {
-    // Router guards should prevent this branch; kept as a defensive fallback.
+    // Defensive fallback; router guards should prevent this branch.
     headline = "";
     detail = "";
     testidBadge = "result-unknown";
@@ -70,10 +69,7 @@ export function mountResult(root: HTMLElement): () => void {
   const homeBtn = root.querySelector<HTMLButtonElement>('[data-testid="result-home"]')!;
   const againBtn = root.querySelector<HTMLButtonElement>('[data-testid="result-prove-again"]')!;
 
-  // From `result`, "Prove again" returns to setup so the PIN can be
-  // re-verified (strict single-use: session Pin was consumed during the
-  // previous sign). Card + warm runtime stay green. From `error`, the
-  // full setup chain may be suspect — send the user back to landing.
+  // `result` retries from setup (PIN must be re-verified); `error` resets home.
   const onAgain = () => {
     if (isError) dispatch({ type: "reset" });
     else dispatch({ type: "retry_proving" });
@@ -98,10 +94,7 @@ function formatModulus(limbs: string[] | undefined): string {
   return `${limbs.length} limbs — ${shortHex(limbs[0])} …`;
 }
 
-// Scalar `ParsedInputs` fields rendered as simple rows. `issuer_rsa_modulus`
-// is intentionally omitted here and rendered below via `formatModulus` because
-// it's an array of limbs, not a single scalar. When adding a new scalar field
-// to `ParsedInputs`, append it here too or it won't appear in the debug block.
+// Scalar ParsedInputs fields shown as rows; modulus is rendered separately.
 const PARSED_FIELDS = [
   "subject_dn_hash",
   "pk_commit",

@@ -1,8 +1,6 @@
-// Main-thread sign-phase pipeline. Runs the network/IO portion (challenge →
-// sign → smt → build) on the sign route (/) and returns a `ProveInput` that
-// the caller hands off (via sessionStorage) to the proving route (/prove),
-// where a fresh, cross-origin-isolated Worker owns the CPU/wasm proving
-// steps. Submission is owned by the Review screen via prove-main.ts.
+// Main-thread sign-phase pipeline (challenge → sign → smt → build).
+// Returns `ProveInput` for handoff to `/prove`, where proving runs in a
+// cross-origin-isolated Worker.
 
 import { cert_modulus_bits, cert_serial_hex } from "./wasm/spartan2_wasm.js";
 
@@ -24,13 +22,11 @@ export interface CardContext {
   kIssuer: 17 | 34;
   issuer: SmtIssuer;
   certKind: CircuitKind;
-  /** Reader the cert was read from. Threaded through to /sign so the
-   *  proving signature uses the same physical card. */
+  /** Reader the cert came from; reused for signing on `/sign`. */
   slotDescription?: string;
 }
 
-/** Pipeline context plus the humanised fields the setup panel displays.
- *  Folded into one return so HiPKI is hit just once. */
+/** Setup display fields plus pipeline card context. */
 export interface DetectedCard {
   card: CardContext;
   subjectDN?: string;
@@ -40,17 +36,13 @@ export interface DetectedCard {
 export interface ProvingContext {
   card: CardContext;
   pin: Pin;
-  /** Pre-fetched by the Ready screen so the Start-proving click reaches
-   *  window.open with user-activation still live. An awaited fetch here
-   *  would consume activation and get the HiPKI popup blocked. */
+  /** Pre-fetched so popup `window.open` keeps user activation. */
   challenge: Challenge;
-  /** Aborts in-flight network calls on phase exit. CPU/wasm work in the
-   *  Worker is cancelled separately by the caller. */
+  /** Cancels in-flight network calls; Worker cancel is handled separately. */
   signal?: AbortSignal;
 }
 
-/** Sentinel thrown when `runProvingPipeline` notices its `AbortSignal`
- *  has fired. Callers swallow it without emitting a duplicate FSM error. */
+/** Internal cancellation sentinel to avoid duplicate FSM errors. */
 export class PipelineAborted extends Error {
   constructor() {
     super("pipeline aborted");
@@ -82,9 +74,7 @@ function checkAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw new PipelineAborted();
 }
 
-/** Step runner: set spinner → run body → mark done → surface errors through
- *  `fail`. AbortError / PipelineAborted bypass `fail` so cancellation doesn't
- *  paint a fake error in the UI. */
+/** Step helper with progress updates and unified error handling. */
 async function stage<T>(
   step: Step,
   run: () => Promise<T>,
@@ -101,33 +91,21 @@ async function stage<T>(
   }
 }
 
-/** Run the main-thread portion of the proving pipeline (challenge → sign →
- *  smt → build) and return the built `ProveInput`. Per-step progress flows
- *  through `progress.ts`. The SMT Worker is only used for the smt_proof RPC;
- *  the heavy prove Worker lives on /prove. Caller owns Worker lifecycle. */
+/** Run sign-phase steps and return a `ProveInput` for `/prove`. */
 export async function runSignPhasePipeline(
   worker: Worker,
   ctx: ProvingContext,
 ): Promise<ProveInput> {
   const { signal, challenge } = ctx;
 
-  // Pre-fetched by the Ready screen — paint the row as done immediately.
-  // There must be NO awaited work between here and the `signTbs` call
-  // below so the user-activation window from the Start-proving click is
-  // still live when `window.open` fires inside the popup bridge.
+  // Pre-fetched in Ready; keep this path await-free until `signTbs` so popup
+  // user activation remains valid.
   stepDone("challenge", `id=${challenge.challenge_id}`);
-  // Byte-for-byte parity with the native prover: `challenge_bytes` is an
-  // opaque string. HiPKI signs it as-is; the circuit consumes its UTF-8
-  // bytes. Do NOT hex-decode — the server can emit odd-length strings,
-  // and hex-decoding would diverge from the Rust CLI even on even-length
-  // inputs.
+  // Keep challenge bytes opaque for Rust parity; do not hex-decode.
   const tbs = challengeBytesToTbs(challenge.challenge_bytes);
 
-  // The HiPKI popup is user-driven and can't be cancelled mid-flight; let it
-  // complete naturally and bail on the next abort check. `/sign` returns the
-  // cert whose private key produced the signature — MOICA tokens carry
-  // multiple user certs, and `/pkcs11info` may hand back a different one.
-  // Key the proving inputs off this cert, not the one cached during setup.
+  // Popup signing cannot be interrupted; abort on next check. Use cert from
+  // `/sign` response, not setup cache, to match actual signing key.
   const { signatureB64: userSignatureB64, userCertDer: signedUserCertDer } =
     await stage("sign", async () => {
       const sig = await signTbs({
@@ -191,10 +169,7 @@ export async function runSignPhasePipeline(
   return input;
 }
 
-/** Route to rs2048 / rs4096 by the issuer cert's actual modulus width, not
- *  by guessing from the issuer DN — MOICA-G3 issuer DNs don't always carry
- *  "G3" or "4096", and picking rs2048 for a 4096-bit key would truncate the
- *  modulus into 17*121=2057 bits and fail the cert-chain RSA verify. */
+/** Select circuit by issuer modulus width, not issuer-DN heuristics. */
 async function deriveIssuerFromCert(
   issuerCertDer: Uint8Array,
 ): Promise<{ issuer: SmtIssuer; kIssuer: 17 | 34; certKind: CircuitKind }> {
@@ -205,10 +180,7 @@ async function deriveIssuerFromCert(
     : { issuer: "g2", kIssuer: 17, certKind: "cert_chain_rs2048" };
 }
 
-/** Fetch + parse the HiPKI pkcs11info response into a `CardContext`.
- *  When `slotDescription` is supplied, require the response to contain
- *  that exact slot so a silent scoping failure can't route the signature
- *  to a different physical reader than the one the user picked. */
+/** Build `CardContext` from HiPKI `/pkcs11info`, optionally scoped to a slot. */
 export async function buildCardContext(
   slotDescription?: string,
 ): Promise<DetectedCard> {

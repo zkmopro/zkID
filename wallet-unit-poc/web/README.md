@@ -3,9 +3,8 @@
 Vite + TypeScript app that runs cert-chain + device-sig Spartan2 proving fully
 in the browser using [`../spartan2-wasm`](../spartan2-wasm). Verification is
 **server-side** via [`go-zkid-verifier`](https://github.com/zkmopro/go-zkid-verifier)
-(the app POSTs the two proofs to `POST /link-verify`). A dedicated Web Worker
-handles the heavy wasm work; the main thread orchestrates the user-gated
-checkpoint flow.
+(`POST /link-verify`). A dedicated Web Worker handles heavy wasm work; the main
+thread orchestrates user-gated checkpoints.
 
 ## Flow
 
@@ -22,21 +21,17 @@ Start    Continue  Start    (auto)    Send     (auto)      Prove again
   warmup, HiPKI card detect + read, per-issuer revocation-tree snapshot
   download + local rebuild, PIN verify with 3-attempt lockout). The
   **Continue to proving** button is disabled until all four are green.
-- **Ready** is a confirmation gate — user reviews the card + runtime state
-  before the proving run begins (which will open a HiPKI popup to sign a
-  fresh challenge).
+- **Ready** is a confirmation gate before proving starts (and before opening
+  the HiPKI signing popup).
 - **Proving** runs 6 steps: fetch challenge → sign with card → check
   revocation locally → build inputs → prove cert-chain → prove device-sig.
   Per-step durations appear as each step completes. Cancel returns the
   user to setup. The revocation step queries an SMT that was rebuilt
   in-browser during setup, so the card's serial never leaves the device.
-- **Review** shows proof sizes + proving time. Proofs live only in memory
-  at this point — nothing has been sent to the verifier. The nullifier is
-  derived by the server from the proof's `subject_dn_hash` public signal,
-  so it only appears on the Result screen after `/link-verify` returns.
-  **Send proof to verifier** submits; **Retry proving** discards and
-  routes back through setup for PIN re-verify (strict single-use — the
-  session Pin was consumed by the sign step during this run).
+- **Review** shows proof sizes + proving time. Proofs are still local only.
+  The nullifier appears only after `/link-verify` returns.
+  **Send proof to verifier** submits; **Retry proving** discards and routes
+  back through setup for PIN re-verify (single-use PIN policy).
 - **Submitting** is a single-spinner screen for the `/link-verify` POST.
 - **Result** shows verified/not-verified with both timings, the
   server-derived nullifier, and an expandable debug block with the
@@ -61,10 +56,9 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Open `http://localhost:5173` and click **Start**. On first entry to the setup
-screen, the Worker downloads the proving keys + witness-gen WASMs from the
-GitHub Release (proxied through the Vite dev server to work around CORS) and
-caches them locally; subsequent runs skip the download.
+Open `http://localhost:5173` and click **Start**. On first setup entry, the
+Worker downloads proving keys + witness WASMs (via dev proxy) and caches them;
+later runs reuse the cache.
 
 ## Architecture
 
@@ -167,10 +161,9 @@ configurable via a `VITE_*` env var (see `.env.example`):
 | `moica-revocation-smt`    | (dev proxy)                        | `/smt-snapshot` → GH release     | Binary SMT snapshot + `smt.wasm` (read-only asset) |
 
 The revocation-tree path replaces the previous `moica-revocation-smt` REST
-server: `/proof/{issuer}/{serial}` leaked the user's serial to a third-party
-on every proof, which undermined the privacy premise. The app now downloads
-the full snapshot once, rebuilds the tree in-browser via the Go-compiled
-`smt.wasm`, and queries it locally.
+server (`/proof/{issuer}/{serial}`), which leaked user serials per request.
+The app now downloads snapshots once, rebuilds the tree in-browser via
+`smt.wasm`, and queries locally.
 
 Per-request timeouts are configurable via `VITE_VERIFIER_TIMEOUT_MS`
 (default 15000) — a hung verifier aborts cleanly instead of leaving the UI
@@ -223,10 +216,9 @@ that work:
   machine (`http://localhost:<port>`), and a tiny local server provides
   both the static files and the `/hipki/*` reverse proxy.
 
-A pure cloud-hosted "any user can visit" deployment is **not viable**
-without one of these helpers. The browser cannot reach the user's
-localhost LocalSignServer from a remote origin under any combination of
-CORS / mixed-content rules.
+A pure cloud-hosted "visit from any browser" deployment is **not viable**
+without one of these helpers, because browsers cannot reach a user's local
+HiPKI server from a remote origin.
 
 ## Browser requirements — two-route COOP
 
@@ -239,14 +231,11 @@ thread pool can both work:
 | `/`      | `same-origin-allow-popups`   | `false`               | Landing, setup, ready, HiPKI sign, SMT, build     |
 | `/prove` | `same-origin`                | `true`                | Worker warmup + witness + prove (rayon threads)   |
 
-When the user clicks **Start proving** on `/`, the sign-phase pipeline
-runs (challenge → sign → SMT → build) and the resulting `ProveInput` is
-handed off via `sessionStorage` (see `src/storage-handoff.ts`). A hard
-navigation to `/prove` lands in the isolated document, where a fresh
-Worker does warmup (fast — OPFS re-hits the already-cached PKs) and then
-runs the prove. `wasm-bindgen-rayon` picks up `SharedArrayBuffer` and
-`clampThreads` scales the pool up; the fallback to single-threaded is
-kept for hosts that can't serve path-scoped headers.
+When the user clicks **Start proving** on `/`, the sign-phase pipeline runs
+(challenge → sign → SMT → build) and hands off `ProveInput` via
+`sessionStorage` (see `src/storage-handoff.ts`). Navigation to `/prove` enters
+the isolated document, where a fresh Worker warms up and proves. Hosts that
+cannot serve path-scoped headers fall back to single-threaded mode.
 
 The Vite dev server enforces this split via a tiny middleware plugin
 (`coopPerPath` in `vite.config.ts`). Production hosts need the same
@@ -265,9 +254,8 @@ scoping:
   and set `same-origin`; else set `same-origin-allow-popups`. Always
   set `Cross-Origin-Embedder-Policy: require-corp`.
 
-If the chosen host cannot serve path-scoped headers, the fallback is the
-single-threaded path (serve `same-origin-allow-popups` globally). The
-app still works; proving is just slower.
+If the host cannot serve path-scoped headers, fall back to single-threaded mode
+(`same-origin-allow-popups` globally). The app still works, but proving is slower.
 
 ## Thread-count policy
 

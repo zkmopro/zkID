@@ -1,15 +1,6 @@
-// Circuit manifest — source of truth mapping CircuitKind to Release asset URLs
-// and the SHA-256 hashes of the *decompressed* bytes. Hashes start empty and
-// are overlaid at runtime from /keys/manifest.json (published by CI in Phase 3).
-// If manifest.json is absent, hash verification is skipped so the app still
-// runs against local fixtures served by the dev proxy.
-//
-// SMT snapshot assets follow the same pattern — /smt-snapshot/* is a same-origin
-// path (dev: Vite proxy to the moica-revocation-smt release; prod: a reverse
-// proxy the deployer configures). Pointing the base URL directly at a bare
-// GitHub Release is unsupported — GitHub's CORS behaviour is not something the
-// app relies on; same-origin serving is the contract. If /keys CORS breaks,
-// /smt-snapshot breaks with it (single shared failure mode).
+// Asset manifest for proving keys, witness wasm, and SMT snapshots.
+// Hashes are filled from runtime manifests; empty hash means "skip verification".
+// Assets are expected to be served same-origin via /keys and /smt-snapshot.
 
 import type { SmtIssuer } from "./smt-client";
 
@@ -21,10 +12,10 @@ export type CircuitKind =
 export interface CircuitManifest {
   kind: CircuitKind;
   numPublic: number;
-  // /keys/<asset>.gz in dev (proxied to GitHub Release); absolute in prod.
+  // /keys/<asset>.gz in dev (proxy), absolute URL in prod.
   pkUrl: string;
   witnessWasmUrl: string;
-  // SHA-256 of the *decompressed* bytes. Populated by hydrateManifest().
+  // SHA-256 of decompressed bytes; populated by hydrateManifest().
   expected: { pk: string; witnessWasm: string };
 }
 
@@ -32,7 +23,7 @@ export interface SmtAssetManifest {
   issuer: SmtIssuer;
   /** /smt-snapshot/<issuer>-tree-snapshot.bin.gz in dev. */
   snapshotUrl: string;
-  /** SHA-256 of the *decompressed* snapshot bytes. Populated by hydrateManifest(). */
+  /** SHA-256 of decompressed snapshot bytes; set by hydrateManifest(). */
   expectedSnapshot: string;
 }
 
@@ -73,9 +64,9 @@ export const SMT_SNAPSHOTS: Record<SmtIssuer, SmtAssetManifest> = {
   },
 };
 
-/** Go SMT engine bytes. Not gzipped on the release — served raw. */
+/** Go SMT engine wasm (served raw, not gzipped). */
 export const SMT_WASM = { url: "/smt-snapshot/smt.wasm", expected: "" };
-/** Go's JS loader shim — text, not gzipped. */
+/** Go wasm_exec.js loader (text). */
 export const SMT_WASM_EXEC = { url: "/smt-snapshot/wasm_exec.js", expected: "" };
 
 interface PublishedManifest {
@@ -89,12 +80,7 @@ function basename(url: string): string {
   return slash === -1 ? clean : clean.slice(slash + 1);
 }
 
-/** Fetch the published manifest.json and overlay expected hashes on CIRCUITS.
- *  Never throws: a missing/malformed manifest simply leaves hashes empty and
- *  downstream code treats empty-string as "skip hash verification".
- *  Log messages distinguish fetch-level failures (network/CORS/non-2xx) from
- *  parse-level failures so ops can tell "server gave us nothing" from "server
- *  gave us something unintelligible". */
+/** Overlay `/keys/manifest.json` hashes onto circuit entries; fail-open. */
 export async function hydrateManifest(): Promise<void> {
   let body: PublishedManifest | null = null;
   try {
@@ -135,10 +121,7 @@ export async function hydrateManifest(): Promise<void> {
   await hydrateSmtManifest();
 }
 
-/** Overlay SMT asset hashes from /smt-snapshot/snapshot-manifest.json. Shares
- *  the "fail-open" semantics of hydrateManifest(): a missing or malformed
- *  manifest leaves `expected*` empty so ensureAsset() skips hash verification.
- *  That matches how local fixtures and pre-CI releases are handled for PKs. */
+/** Overlay `/smt-snapshot/snapshot-manifest.json` hashes; also fail-open. */
 async function hydrateSmtManifest(): Promise<void> {
   let body: PublishedManifest | null = null;
   try {

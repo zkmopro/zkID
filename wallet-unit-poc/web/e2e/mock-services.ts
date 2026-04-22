@@ -1,28 +1,15 @@
-// Playwright mocks for every external service the pipeline hits.
-//
-// HiPKI XHRs come from the popupForm postMessage bridge popup window, out
-// of reach of `page.route()`. The popup module exposes a test override via
-// `globalThis.__HIPKI_TEST_HANDLER__`; we inject it through `addInitScript`
-// before any app code runs. Verifier mocks stay on `page.route()` since
-// those calls are issued from the app origin.
-//
-// SMT is different: instead of mocking a network endpoint, we inject a
-// fake SMT engine via `globalThis.__SMT_TEST_ENGINE__` so the app skips
-// the real Go WASM bootstrap entirely. That hook runs inside the proving
-// Worker, which is why the init script uses `page.addInitScript` AND we
-// forward the same test hook via the module loader setup below.
-//
-// Cert fixtures re-use `ecdsa-spartan2/tests/testdata/*.json` so Rust/TS
-// schema drift surfaces in e2e too.
+// Playwright mocks for external services.
+// HiPKI popup calls are injected via `__HIPKI_TEST_HANDLER__` (cannot be
+// intercepted by `page.route()`), while verifier HTTP stays on `page.route()`.
+// SMT is stubbed via `__SMT_TEST_ENGINE__`/`__SMT_TEST_PROOF__` so tests skip
+// real Go WASM bootstrap. Fixtures come from Rust testdata for parity.
 
 import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// `__dirname` is not defined in ESM (`package.json` has `"type": "module"`);
-// derive it from `import.meta.url` so Playwright's ESM loader can run this
-// file without crashing at module init.
+// ESM replacement for `__dirname`.
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 const TESTDATA = resolve(HERE, "../../ecdsa-spartan2/tests/testdata");
@@ -31,14 +18,8 @@ const SIGN_FIXTURE_RAW = readFileSync(
   "utf8",
 );
 
-/** `pkcs11info_test.json` is authored for the Rust CLI and predates the
- *  slot-picker UI. Gap 1: slots have no `slotDescription`, so the setup
- *  screen stores `"(unnamed reader)"` as the selected slot and then
- *  `buildCardContext` fails to find it in the re-queried fixture. Gap 2:
- *  user certs carry no `sn` and tokens carry no `serialNumber`, so
- *  `deriveSerialHex` throws with "no serial number on user cert or token".
- *  Inject both here so the mock is self-contained without having to mutate
- *  a fixture that the Rust tests also read. */
+/** Patch Rust fixture gaps needed by the web setup flow (`slotDescription`,
+ *  token `serialNumber`, and user-cert `sn`) without mutating shared testdata. */
 const PKCS11_FIXTURE = (() => {
   const raw = readFileSync(
     resolve(TESTDATA, "pkcs11info_test.json"),
@@ -81,8 +62,7 @@ export interface InstallMockOptions {
   linkVerifyBody?: unknown;
   /** Force `signTbs` to fail with a non-zero ret_code (wrong PIN). */
   signRejectsPin?: boolean;
-  /** Replace the SMT proof the fake engine emits (e.g. for "no proof" paths).
-   *  Fields are hex strings, matching what smt.wasm's `smtCreateProof` returns. */
+  /** Replace the fake SMT proof payload (hex fields, same shape as smt.wasm). */
   smtBody?: {
     root: string;
     entry: string[];
@@ -141,9 +121,7 @@ export async function installMockServices(
       body.cert_chain_proof.length > 0 &&
       body.device_sig_proof.length > 0 &&
       ["rs2048", "rs4096"].includes(body?.cert_chain_type) &&
-      // Server derives challenge + nullifier from proof public signals now,
-      // so the client MUST NOT send them. Regressions that start forwarding
-      // them again should fail the mock contract.
+      // Server derives these fields; client must not send them.
       !("challenge_id" in (body ?? {})) &&
       !("nullifier" in (body ?? {}));
     await route.fulfill({
@@ -175,9 +153,7 @@ export async function installMockServices(
     });
   });
 
-  // Fail any stray request to the old SMT server path so regressions
-  // that forget to delete the remote-fetch code surface as loud test
-  // failures instead of silently passing.
+  // Fail any legacy SMT network path so regressions are loud.
   await page.route("**/smt-snapshot/**", async (route) => {
     await route.fulfill({
       status: 410,
@@ -203,11 +179,7 @@ interface SmtEngineOpts {
   };
 }
 
-/** Seed `globalThis.__SMT_TEST_PROOF__` on the main thread so the app's
- *  main-thread SMT client short-circuits the Worker round-trip and returns
- *  the fixture inputs directly. Worker globals are isolated from
- *  `page.addInitScript`, which is why the hook lives on the main thread.
- *  `main.ts` checks the same hook to flip `$smt` to ready synchronously. */
+/** Seed `__SMT_TEST_PROOF__` so SMT client paths return fixture data directly. */
 async function installSmtTestEngine(
   page: Page,
   opts: SmtEngineOpts,
@@ -232,9 +204,7 @@ interface PopupHandlerOpts {
   signRejectsPin: boolean;
 }
 
-/** Install the popup test handler before app boot. The handler runs in
- *  page context and must be self-contained — pass fixture text as
- *  JSON-serialisable args rather than closing over Node state. */
+/** Install popup handler before app boot; keep closure payload JSON-safe. */
 async function installHipkiPopupHandler(
   page: Page,
   opts: PopupHandlerOpts,

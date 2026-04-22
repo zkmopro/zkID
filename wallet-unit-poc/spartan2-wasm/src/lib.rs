@@ -1,14 +1,6 @@
-//! spartan2-wasm — Standalone WebAssembly crate for Spartan2 zkID proving.
-//!
-//! Supports all three zkID circuits via a runtime `CircuitKind` enum:
-//!  * CertChainRs2048 — NUM_PUBLIC = 20
-//!  * CertChainRs4096 — NUM_PUBLIC = 37
-//!  * DeviceSigRs2048 — NUM_PUBLIC = 2
-//!
-//! Zero dependency on `ecdsa-spartan2` at runtime. Duplicates the transcript
-//! sequence from `ecdsa-spartan2/src/prover.rs::prove_circuit_in_memory` with
-//! attribution below. The `tests/native_drift.rs` integration test enforces
-//! that these sequences stay in sync by cross-verifying proofs.
+//! Standalone WebAssembly crate for Spartan2 zkID proving.
+//! Supports all zkID circuits via runtime `CircuitKind`.
+//! Transcript flow is kept in sync with `ecdsa-spartan2` by `native_drift`.
 
 pub mod inputs;
 
@@ -46,8 +38,7 @@ pub enum CircuitKind {
 }
 
 impl CircuitKind {
-    /// NUM_PUBLIC per circuit — values cross-checked against
-    /// `ecdsa-spartan2/src/circuits/split_circuits.rs`.
+    /// NUM_PUBLIC per circuit.
     pub fn num_public(self) -> usize {
         match self {
             CircuitKind::CertChainRs2048 => 20,
@@ -56,10 +47,7 @@ impl CircuitKind {
         }
     }
 
-    /// Index into `public_values` where `pk_commit` lives.
-    /// Cert-chain emits `subject_dn_hash` at slot 0, then `pk_commit` at slot 1.
-    /// Device-sig emits `pk_commit` at slot 0 (followed by a single `packed_tbs`).
-    /// Verified against `ecdsa-spartan2/src/main.rs` (run_link_verify).
+    /// Index into `public_values` for `pk_commit`.
     pub fn pk_commit_index(self) -> usize {
         match self {
             CircuitKind::CertChainRs2048 | CircuitKind::CertChainRs4096 => 1,
@@ -178,21 +166,15 @@ fn pk_slot(kind: CircuitKind) -> &'static PkCell {
     }
 }
 
-/// Lock a PK slot, recovering the guard even if a prior prove() panicked and
-/// poisoned the Mutex. `.unwrap()` would abort the wasm instance (runtime abort)
-/// on poison; surface a clean JsError instead.
+/// Lock PK slot and recover from poison to avoid wasm runtime abort.
 fn lock_pk_mut(
     kind: CircuitKind,
 ) -> std::sync::MutexGuard<'static, Option<<R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey>> {
     pk_slot(kind).lock().unwrap_or_else(|e| e.into_inner())
 }
 
-// ── Core prove — shared by both the wasm_bindgen and native-test entry points.
-//
-// Replicates the transcript sequence from
-// `ecdsa-spartan2/src/prover.rs::prove_circuit_in_memory` (as of commit c6652de).
-// DO NOT edit without updating that function AND the native_drift integration
-// test in lock step.
+// Core prove path shared by wasm_bindgen and native test entry points.
+// Keep transcript order aligned with `ecdsa-spartan2` and `native_drift`.
 fn prove_core(
     pk: &<R1CSSNARK<E> as R1CSSNARKTrait<E>>::ProverKey,
     kind: CircuitKind,
