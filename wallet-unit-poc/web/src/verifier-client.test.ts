@@ -102,7 +102,6 @@ describe("verifier-client", () => {
               pk_commit: "0x2",
               subject_dn_hash: "0xabc",
               smt_root: "0xbeef",
-              serial_number: "0x42",
               issuer_rsa_modulus: ["0xaaaa", "0xbbbb"],
             },
           }),

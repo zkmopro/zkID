@@ -99,7 +99,6 @@ const PARSED_FIELDS = [
   "subject_dn_hash",
   "pk_commit",
   "smt_root",
-  "serial_number",
   "challenge",
 ] as const satisfies ReadonlyArray<keyof ParsedInputs>;
 

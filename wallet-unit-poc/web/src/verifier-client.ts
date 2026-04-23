@@ -26,7 +26,6 @@ export interface ParsedInputs {
   pk_commit: string;
   subject_dn_hash: string;
   smt_root: string;
-  serial_number: string;
   issuer_rsa_modulus: string[];
 }
 
