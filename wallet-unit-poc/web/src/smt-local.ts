@@ -71,7 +71,6 @@ export async function loadSmtEngine(
   const snapshot = SMT_SNAPSHOTS[issuer];
   const bytes = await ensureAsset(
     snapshot.snapshotUrl,
-    `smt_snapshot_${issuer}`,
     snapshot.expectedSnapshot,
     (p: DownloadProgress) =>
       onProgress({

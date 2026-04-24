@@ -8,7 +8,6 @@ import init, {
 } from "./wasm/spartan2_wasm.js";
 
 import { ensureAsset } from "./asset-download";
-import { assetStore } from "./asset-store";
 import {
   CIRCUITS,
   hydrateManifest,
@@ -246,7 +245,7 @@ async function runWarmup(): Promise<void> {
     await hydrateManifest();
     if (cancelled) return;
 
-    // Preload all PK + witness assets so proving starts without extra waits.
+    // Download all PK + witness assets and load them into memory.
     const kinds: Kind[] = [
       "cert_chain_rs2048",
       "cert_chain_rs4096",
@@ -254,7 +253,7 @@ async function runWarmup(): Promise<void> {
     ];
     for (const kind of kinds) {
       const m = CIRCUITS[kind];
-      await ensureAsset(m.pkUrl, `${kind}_pk`, m.expected.pk, (p) =>
+      const pk = await ensureAsset(m.pkUrl, m.expected.pk, (p) =>
         post({
           step: "warmup",
           status: "in_progress",
@@ -266,9 +265,8 @@ async function runWarmup(): Promise<void> {
         }),
       );
       if (cancelled) return;
-      await ensureAsset(
+      const wgen = await ensureAsset(
         m.witnessWasmUrl,
-        `${kind}_wgen`,
         m.expected.witnessWasm,
         (p) =>
           post({
@@ -282,18 +280,9 @@ async function runWarmup(): Promise<void> {
           }),
       );
       if (cancelled) return;
-    }
-
-    // Load PKs and cache witness-wasm bytes.
-    for (const kind of kinds) {
       post({ step: "warmup", status: "in_progress", phase: "load", kind });
-      const pk = await assetStore.get(`${kind}_pk`);
-      if (!pk) throw new Error(`missing cached PK for ${kind}`);
       load_pk(KIND_ENUM[kind], pk);
-      const wgen = await assetStore.get(`${kind}_wgen`);
-      if (!wgen) throw new Error(`missing cached witness-wasm for ${kind}`);
       witnessCache[kind] = wgen;
-      if (cancelled) return;
     }
 
     warmed = true;
