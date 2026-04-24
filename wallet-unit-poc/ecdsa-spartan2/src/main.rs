@@ -107,6 +107,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     let mut challenge_server = ecdsa_spartan2::challenge_client::default_server_url().to_string();
     let mut cert_chain_output = "../circom/inputs/cert_chain_rs2048/input.json".to_string();
     let mut device_sig_output = "../circom/inputs/device_sig_rs2048/input.json".to_string();
+    let mut app_id = "0".to_string();
 
     let mut i = 1;
     while i < command_args.len() {
@@ -125,6 +126,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             "--challenge-server" => {
                 challenge_server = require_arg(command_args, &mut i, "--challenge-server")
             }
+            "--app-id" => app_id = require_arg(command_args, &mut i, "--app-id"),
             _ => {}
         }
         i += 1;
@@ -243,6 +245,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         k_issuer,
         k_user,
         max_cert_length,
+        &app_id,
     )
     .unwrap_or_else(|e| {
         eprintln!("Error generating split inputs: {}", e);

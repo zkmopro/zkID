@@ -75,6 +75,9 @@ template CertChainRSA256(
     // === Linking (private; same value used in DeviceSigRSA256) ===
     signal input pk_blind;
 
+    // === Application binding (public) ===
+    signal input app_id;
+
     // === Outputs ===
     signal output subject_dn_hash;
     signal output pk_commit;
@@ -101,8 +104,8 @@ template CertChainRSA256(
         serialNumber
     );
 
-    // --- Step 4: subject_dn → Poseidon hash (public output) ---
-    PoseidonBytes(maxSubjectDNLength)(subject_dn) ==> subject_dn_hash;
+    // --- Step 4: subject_dn + app_id → Poseidon hash (public output) ---
+    PoseidonBytesWithField(maxSubjectDNLength)(subject_dn, app_id) ==> subject_dn_hash;
 
     // --- Step 5: extract user pk from cert SPKI — sized to k_user ---
     signal user_rsa_extracted_modulus[k_user];

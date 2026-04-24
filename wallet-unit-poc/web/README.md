@@ -159,6 +159,7 @@ configurable via a `VITE_*` env var (see `.env.example`):
 | `go-zkid-verifier`        | `VITE_VERIFIER_BASE_URL`           | `http://localhost:8080`          | Challenge + `link-verify`                          |
 | HiPKI LocalSignServer     | `VITE_HIPKI_BASE_URL`              | `http://localhost:61161`         | `pkcs11info` + `sign` via popupForm postMessage    |
 | `moica-revocation-smt`    | (dev proxy)                        | `/smt-snapshot` → GH release     | Binary SMT snapshot + `smt.wasm` (read-only asset) |
+| Application ID            | `VITE_APP_ID`                      | `0`                              | Decimal field element bound into `subject_dn_hash` — must match the verifier's expected `app_id` |
 
 The revocation-tree path replaces the previous `moica-revocation-smt` REST
 server (`/proof/{issuer}/{serial}`), which leaked user serials per request.

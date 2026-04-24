@@ -132,6 +132,7 @@ pub fn generate_cert_chain_rs4096_input(
     issuer_cert_path: String,
     smt_snapshot_path: Option<String>,
     output_dir: String,
+    app_id: String,
 ) -> Result<String, ZkProofError> {
     let user_cert = CertChainRs4096Circuit::generate_user_cert_from_certb64(&certb64)
         .map_err(|e| ZkProofError::InvalidInput { msg: e.to_string() })?;
@@ -170,6 +171,7 @@ pub fn generate_cert_chain_rs4096_input(
         CertChainRsa4096::RSA_K, // k_issuer = 34 (RSA-4096 CA)
         DeviceSigRsa2048::RSA_K, // k_user   = 17 (RSA-2048 device key)
         MAX_CERT_CHAIN_LENGTH,
+        &app_id,
     )
     .map_err(|e| ZkProofError::InvalidInput { msg: e.to_string() })?;
 
