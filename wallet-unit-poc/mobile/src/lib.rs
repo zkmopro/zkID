@@ -1012,6 +1012,7 @@ mod tests {
             .exists()
             .then(|| snapshot_path.to_string());
 
+        let app_id = "0".to_string();
         let result = generate_cert_chain_rs4096_input(
             certb64,
             signed_response,
@@ -1019,6 +1020,7 @@ mod tests {
             issuer_cert_path.to_string_lossy().to_string(),
             smt_snapshot,
             documents_path.clone(),
+            app_id,
         )
         .unwrap();
         assert!(result.contains("cert_chain"));
