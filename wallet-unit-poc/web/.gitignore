@@ -35,3 +35,4 @@ public/fixtures/nullifier.txt
 e2e/fixtures/
 playwright-report/
 test-results/
+.vercel
