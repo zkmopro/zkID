@@ -160,7 +160,12 @@ export function applyProgress(p: Progress): void {
       // load errors route to $smt; proving errors land on whichever proving
       // step is live.
       if (e.where === "manifest") {
-        $warmup.set({ status: "error", message: e.message, kind: "manifest" });
+        $warmup.set({
+          status: "error",
+          message: e.message,
+          kind: "manifest",
+          manifestCode: e.manifestCode,
+        });
         return;
       }
       if (e.where === "warmup") {

@@ -99,6 +99,8 @@ export type Progress =
       retryable: boolean;
       /** Set when `where === "manifest"` so the UI can paint a network-style copy. */
       kind?: "manifest";
+      /** Discriminates manifest failures: 403/429 vs network vs malformed body. */
+      manifestCode?: "rate_limited" | "unreachable" | "malformed" | "missing_asset";
     };
 
 const KIND_ENUM: Record<Kind, CircuitKind> = {
@@ -241,6 +243,7 @@ function postError(where: string, err: unknown): void {
   };
   if (where === "manifest" || err instanceof ManifestError) {
     msg.kind = "manifest";
+    if (err instanceof ManifestError) msg.manifestCode = err.code;
   }
   post(msg);
 }

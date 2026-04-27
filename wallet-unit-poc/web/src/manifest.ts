@@ -66,10 +66,22 @@ export interface ReleaseDigests {
   smt: DigestMap;
 }
 
+export type ManifestErrorCode =
+  | "rate_limited"
+  | "unreachable"
+  | "malformed"
+  | "missing_asset";
+
 export class ManifestError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
+  readonly code: ManifestErrorCode;
+  constructor(
+    message: string,
+    code: ManifestErrorCode,
+    options?: { cause?: unknown },
+  ) {
     super(message, options);
     this.name = "ManifestError";
+    this.code = code;
   }
 }
 
@@ -84,34 +96,50 @@ export function basename(url: string): string {
 }
 
 async function fetchReleaseJson(url: string): Promise<unknown> {
-  // ?t= defeats intermediate caches keyed on full URL.
-  const bust = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
   let res: Response;
   try {
-    res = await fetch(bust, {
-      cache: "no-store",
+    res = await fetch(url, {
       headers: { Accept: "application/vnd.github+json" },
     });
   } catch (err) {
-    throw new ManifestError(`cannot reach ${url}`, { cause: err });
+    throw new ManifestError(`cannot reach ${url}`, "unreachable", { cause: err });
+  }
+  if (res.status === 403 || res.status === 429) {
+    // GitHub returns 403 with X-RateLimit-Remaining: 0 (or 429) when the
+    // unauthenticated 60/h budget is exhausted — common behind shared NAT.
+    throw new ManifestError(
+      `${url} rate-limited (${res.status} ${res.statusText})`,
+      "rate_limited",
+    );
   }
   if (!res.ok) {
-    throw new ManifestError(`${url} returned ${res.status} ${res.statusText}`);
+    throw new ManifestError(
+      `${url} returned ${res.status} ${res.statusText}`,
+      "unreachable",
+    );
   }
   try {
     return await res.json();
   } catch (err) {
-    throw new ManifestError(`malformed JSON from ${url}`, { cause: err });
+    throw new ManifestError(`malformed JSON from ${url}`, "malformed", {
+      cause: err,
+    });
   }
 }
 
 function parseAssetDigests(url: string, body: unknown): DigestMap {
   if (!body || typeof body !== "object") {
-    throw new ManifestError(`response from ${url} is not an object`);
+    throw new ManifestError(
+      `response from ${url} is not an object`,
+      "malformed",
+    );
   }
   const assets = (body as { assets?: unknown }).assets;
   if (!Array.isArray(assets)) {
-    throw new ManifestError(`response from ${url} has no \`assets\` array`);
+    throw new ManifestError(
+      `response from ${url} has no \`assets\` array`,
+      "malformed",
+    );
   }
   const out: DigestMap = {};
   for (const a of assets) {
@@ -140,7 +168,10 @@ export async function fetchReleaseDigests(): Promise<ReleaseDigests> {
 export function requireDigest(map: DigestMap, filename: string): string {
   const sha = map[filename];
   if (!sha || !HEX_64.test(sha)) {
-    throw new ManifestError(`no sha256 digest published for ${filename}`);
+    throw new ManifestError(
+      `no sha256 digest published for ${filename}`,
+      "missing_asset",
+    );
   }
   return sha;
 }

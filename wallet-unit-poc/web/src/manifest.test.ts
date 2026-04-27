@@ -106,8 +106,11 @@ describe("fetchReleaseDigests", () => {
 
       expect(calls.length).toBe(2);
       for (const call of calls) {
-        expect(call.url).toMatch(/[?&]t=\d+/);
-        expect(call.init?.cache).toBe("no-store");
+        expect(call.init?.cache).toBeUndefined();
+        const headers = call.init?.headers as
+          | Record<string, string>
+          | undefined;
+        expect(headers?.Accept).toBe("application/vnd.github+json");
       }
     } finally {
       restore();
@@ -178,6 +181,123 @@ describe("fetchReleaseDigests", () => {
       restore();
     }
   });
+
+  it("tags 403 responses with code=rate_limited", async () => {
+    const { restore } = mockFetch({
+      [KEYS_API]: () =>
+        new Response("rate limited", {
+          status: 403,
+          statusText: "Forbidden",
+        }),
+    });
+    try {
+      const err = (await fetchReleaseDigests().catch((e) => e)) as ManifestError;
+      expect(err).toBeInstanceOf(ManifestError);
+      expect(err.code).toBe("rate_limited");
+    } finally {
+      restore();
+    }
+  });
+
+  it("tags 429 responses with code=rate_limited", async () => {
+    const { restore } = mockFetch({
+      [SMT_API]: () =>
+        new Response("slow down", {
+          status: 429,
+          statusText: "Too Many Requests",
+        }),
+    });
+    try {
+      const err = (await fetchReleaseDigests().catch((e) => e)) as ManifestError;
+      expect(err).toBeInstanceOf(ManifestError);
+      expect(err.code).toBe("rate_limited");
+    } finally {
+      restore();
+    }
+  });
+
+  it("tags 5xx responses with code=unreachable", async () => {
+    const { restore } = mockFetch({
+      [KEYS_API]: () =>
+        new Response("boom", { status: 503, statusText: "unavailable" }),
+    });
+    try {
+      const err = (await fetchReleaseDigests().catch((e) => e)) as ManifestError;
+      expect(err).toBeInstanceOf(ManifestError);
+      expect(err.code).toBe("unreachable");
+    } finally {
+      restore();
+    }
+  });
+
+  it("tags non-JSON bodies with code=malformed", async () => {
+    const { restore } = mockFetch({
+      [KEYS_API]: () => new Response("not json", { status: 200 }),
+    });
+    try {
+      const err = (await fetchReleaseDigests().catch((e) => e)) as ManifestError;
+      expect(err).toBeInstanceOf(ManifestError);
+      expect(err.code).toBe("malformed");
+    } finally {
+      restore();
+    }
+  });
+
+  it("last-write-wins on duplicate asset names", async () => {
+    const first = "1".repeat(64);
+    const second = "2".repeat(64);
+    const assets: FakeAsset[] = [
+      { name: "dup.gz", digest: `sha256:${first}` },
+      { name: "dup.gz", digest: `sha256:${second}` },
+    ];
+    const { restore } = mockFetch({
+      [KEYS_API]: () => new Response(releaseBody(assets), { status: 200 }),
+    });
+    try {
+      const out = await fetchReleaseDigests();
+      expect(out.keys["dup.gz"]).toBe(second);
+    } finally {
+      restore();
+    }
+  });
+
+  it("drops assets entries with non-string name or digest", async () => {
+    const goodSha = "c".repeat(64);
+    const body = JSON.stringify({
+      assets: [
+        { name: "ok.gz", digest: `sha256:${goodSha}` },
+        { name: 42, digest: `sha256:${"d".repeat(64)}` },
+        { name: "bad.gz", digest: null },
+        { name: "bad2.gz" },
+      ],
+    });
+    const { restore } = mockFetch({
+      [KEYS_API]: () => new Response(body, { status: 200 }),
+    });
+    try {
+      const out = await fetchReleaseDigests();
+      expect(out.keys["ok.gz"]).toBe(goodSha);
+      expect(Object.keys(out.keys)).toEqual(["ok.gz"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("rejects uppercase hex inside the sha256: prefix (silently dropped)", async () => {
+    const upper = "A".repeat(64);
+    const body = JSON.stringify({
+      assets: [{ name: "x.gz", digest: `sha256:${upper}` }],
+    });
+    const { restore } = mockFetch({
+      [KEYS_API]: () => new Response(body, { status: 200 }),
+    });
+    try {
+      const out = await fetchReleaseDigests();
+      expect(out.keys["x.gz"]).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
 });
 
 describe("requireDigest", () => {
@@ -191,5 +311,24 @@ describe("requireDigest", () => {
 
   it("throws ManifestError on non-hex value", () => {
     expect(() => requireDigest({ "x.gz": "not-hex" }, "x.gz")).toThrow(ManifestError);
+  });
+
+  it("rejects uppercase 64-char hex (HEX_64 is case-sensitive)", () => {
+    expect(() =>
+      requireDigest({ "x.gz": "A".repeat(64) }, "x.gz"),
+    ).toThrow(ManifestError);
+  });
+
+  it("tags missing assets with code=missing_asset", () => {
+    const err = (() => {
+      try {
+        requireDigest({}, "x.gz");
+        return null;
+      } catch (e) {
+        return e as ManifestError;
+      }
+    })();
+    expect(err).toBeInstanceOf(ManifestError);
+    expect(err?.code).toBe("missing_asset");
   });
 });
