@@ -35,7 +35,7 @@ Circuit A and Circuit B are linked via `pk_commit`: the verifier checks
    in the revocation tree rooted at `smtRoot`.
 4. **Linking** — `pk_commit = ChunkedPoseidonP256(user_pk_limbs ‖ pk_blind)`,
    binding this proof to the same user key used in Circuit B.
-5. **Subject DN hash** — `PoseidonBytesWithField(subject_dn, app_id) → subject_dn_hash`
+5. **Nullifier** — `PoseidonBytesWithField(subject_dn, app_id) → nullifier`
    (public output). Binds the identity hash to a specific application so that a
    proof generated for one relying party cannot be replayed at another.
 
@@ -56,8 +56,8 @@ Circuit A and Circuit B are linked via `pk_commit`: the verifier checks
 | ----------------------- | ------------- | --------------------------------------------- |
 | `issuer_rsa_modulus[k]` | public input  | MOICA's RSA public key (trust anchor)         |
 | `smtRoot`               | public input  | Revocation SMT root                           |
-| `app_id`                | public input  | Application binding; `subject_dn_hash` commits to this value |
-| `subject_dn_hash`       | public output | `Poseidon(packed subject_dn, app_id)`         |
+| `app_id`                | public input  | Application binding; `nullifier` commits to this value |
+| `nullifier`             | public output | `Poseidon(packed subject_dn, app_id)`         |
 | `pk_commit`             | public output | Links to Circuit B                            |
 
 ### Circuit B — DeviceSig

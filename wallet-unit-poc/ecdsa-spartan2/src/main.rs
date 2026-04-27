@@ -270,7 +270,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
 
 /// `link-verify` CLI: verify both proofs and check pk_commit equality.
 ///
-/// CertChain public values: [subject_dn_hash, pk_commit, issuer_modulus..., smtRoot]
+/// CertChain public values: [nullifier, pk_commit, issuer_modulus..., smtRoot]
 /// DeviceSig public values: [pk_commit, packed_tbs]
 ///
 /// The verifier checks `pk_commit_A == pk_commit_B` to bind the two proofs
@@ -297,7 +297,7 @@ fn run_link_verify(command_args: &[String]) -> ! {
         path_config.key_path(DeviceSigRsa2048::VERIFYING_KEY),
     );
 
-    // pk_commit is at index 1 for cert-chain (after subject_dn_hash output)
+    // pk_commit is at index 1 for cert-chain (after nullifier output)
     // pk_commit is at index 0 for device-sig (first output)
     let pk_commit_a = &cc_public_values[1];
     let pk_commit_b = &ds_public_values[0];

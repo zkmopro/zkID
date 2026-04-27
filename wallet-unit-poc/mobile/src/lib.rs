@@ -369,7 +369,7 @@ pub fn link_verify(documents_path: String) -> Result<bool, ZkProofError> {
         config.key_path(DeviceSigRsa2048::VERIFYING_KEY),
     );
 
-    // pk_commit is at index 1 for cert-chain (after subject_dn_hash output)
+    // pk_commit is at index 1 for cert-chain (after nullifier output)
     // pk_commit is at index 0 for device-sig (first output)
     let pk_commit_a = &cc_public_values[1];
     let pk_commit_b = &ds_public_values[0];

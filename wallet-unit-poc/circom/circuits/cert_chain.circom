@@ -79,7 +79,7 @@ template CertChainRSA256(
     signal input app_id;
 
     // === Outputs ===
-    signal output subject_dn_hash;
+    signal output nullifier;
     signal output pk_commit;
 
     // --- Step 1: issuer_tbs is contained inside user_cert_zero_padded ---
@@ -105,7 +105,7 @@ template CertChainRSA256(
     );
 
     // --- Step 4: subject_dn + app_id → Poseidon hash (public output) ---
-    PoseidonBytesWithField(maxSubjectDNLength)(subject_dn, app_id) ==> subject_dn_hash;
+    PoseidonBytesWithField(maxSubjectDNLength)(subject_dn, app_id) ==> nullifier;
 
     // --- Step 5: extract user pk from cert SPKI — sized to k_user ---
     signal user_rsa_extracted_modulus[k_user];

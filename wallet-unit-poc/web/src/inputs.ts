@@ -25,7 +25,7 @@ export interface BuildInputsParams {
   /** TBS bytes the user's card just signed (= challenge bytes). */
   tbs: Uint8Array;
   smtInputs: SmtCircuitInputs | null;
-  /** Application identifier bound into subject_dn_hash (decimal string). */
+  /** Application identifier bound into nullifier (decimal string). */
   appId: string;
 }
 

@@ -131,7 +131,7 @@ RUST_LOG=info cargo run --release -- link-verify --cert-chain-4096
 | `--smt-server <URL>` | *(off)* | Fetch SMT non-membership proof for revocation |
 | `--hipki-server <URL>` | `http://localhost:61161` | HiPKI LocalSignServer endpoint |
 | `--challenge-server <URL>` | `http://localhost:8080` | go-zkid-verifier challenge endpoint |
-| `--app-id <DECIMAL>` | `0` | Application identifier bound into `subject_dn_hash`; must match the verifier's expected value |
+| `--app-id <DECIMAL>` | `0` | Application identifier bound into `nullifier`; must match the verifier's expected value |
 
 ## Benchmark
 
