@@ -1,27 +1,50 @@
 // Asset storage: OPFS primary, IndexedDB fallback.
 //
 // Cache keys embed the upstream SHA-256 — a key-hit implies the bytes were
-// verified at write-time, so no rehash on read. `listKeys(prefix)` lets
-// callers find and reap orphaned entries from prior releases.
+// verified at write-time, so no rehash on read. Writes stage to <key>.partial
+// and only commit (rename to <key>) after the caller verifies the SHA, so a
+// crash mid-stream cannot leave a poisoned committed key.
+
+export interface AssetWriter {
+  stream: WritableStream<Uint8Array>;
+  commit(): Promise<void>;
+  abort(): Promise<void>;
+}
 
 export interface AssetStore {
   get(key: string): Promise<Uint8Array | null>;
   put(key: string, bytes: Uint8Array): Promise<void>;
-  writer(key: string): Promise<WritableStream<Uint8Array>>;
+  writer(key: string): Promise<AssetWriter>;
   delete(key: string): Promise<void>;
   listKeys(prefix: string): Promise<string[]>;
+  purgePartials(): Promise<void>;
   clearAll(): Promise<void>;
 }
 
+export const PARTIAL_SUFFIX = ".partial";
+
 function hasOPFS(): boolean {
+  // The atomic `.partial`→canonical commit relies on FileSystemFileHandle.move()
+  // — landed in Chrome 110, Firefox 111, Safari 17.4. Fall back to IDB on
+  // older browsers rather than throwing at commit time.
   return (
     typeof navigator !== "undefined" &&
     "storage" in navigator &&
     navigator.storage != null &&
     typeof (navigator.storage as { getDirectory?: unknown }).getDirectory ===
+      "function" &&
+    typeof FileSystemFileHandle !== "undefined" &&
+    typeof (FileSystemFileHandle.prototype as unknown as Moveable).move ===
       "function"
   );
 }
+
+// OPFS APIs land in lib.dom over time; cast through these shapes until the
+// shipped TS lib catches up.
+type Moveable = { move(name: string): Promise<void> };
+type AsyncIterableDir = {
+  [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
+};
 
 // ---------------------------------------------------------------------------
 // OPFS backend
@@ -55,57 +78,67 @@ const opfsStore: AssetStore = {
     await writable.close();
   },
   async writer(key) {
-    await opfsStore.delete(key);
+    const partialKey = `${key}${PARTIAL_SUFFIX}`;
     const root = await opfsRoot();
-    const handle = await root.getFileHandle(key, { create: true });
-    return (await handle.createWritable()) as unknown as WritableStream<Uint8Array>;
+    await opfsRemove(root, partialKey);
+    const handle = await root.getFileHandle(partialKey, { create: true });
+    const writable = (await handle.createWritable()) as unknown as WritableStream<Uint8Array>;
+    return {
+      stream: writable,
+      async commit() {
+        // Overwrite-on-rename is browser-specific in OPFS — delete-then-move
+        // keeps behavior portable across Safari/Chrome/Firefox.
+        await opfsRemove(root, key);
+        await (handle as unknown as Moveable).move(key);
+      },
+      async abort() {
+        await opfsRemove(root, partialKey).catch(() => {});
+      },
+    };
   },
   async delete(key) {
-    try {
-      const root = await opfsRoot();
-      await root.removeEntry(key);
-    } catch (err) {
-      if ((err as DOMException).name !== "NotFoundError") throw err;
-    }
+    await opfsRemove(await opfsRoot(), key);
   },
   async listKeys(prefix) {
+    const all = await opfsListAll(await opfsRoot());
+    return all.filter((name) => name.startsWith(prefix));
+  },
+  async purgePartials() {
     const root = await opfsRoot();
-    const iter = (
-      root as unknown as {
-        [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
-      }
-    )[Symbol.asyncIterator]();
-    const names: string[] = [];
-    for (;;) {
-      const next = await iter.next();
-      if (next.done) break;
-      const name = next.value[0];
-      if (name.startsWith(prefix)) names.push(name);
+    for (const name of await opfsListAll(root)) {
+      if (name.endsWith(PARTIAL_SUFFIX)) await opfsRemove(root, name);
     }
-    return names;
   },
   async clearAll() {
     const root = await opfsRoot();
-    const iter = (
-      root as unknown as {
-        [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
-      }
-    )[Symbol.asyncIterator]();
-    const names: string[] = [];
-    for (;;) {
-      const next = await iter.next();
-      if (next.done) break;
-      names.push(next.value[0]);
-    }
-    for (const name of names) {
-      try {
-        await root.removeEntry(name, { recursive: true });
-      } catch (err) {
-        if ((err as DOMException).name !== "NotFoundError") throw err;
-      }
+    for (const name of await opfsListAll(root)) {
+      await opfsRemove(root, name, { recursive: true });
     }
   },
 };
+
+async function opfsRemove(
+  root: FileSystemDirectoryHandle,
+  name: string,
+  opts?: { recursive?: boolean },
+): Promise<void> {
+  try {
+    await root.removeEntry(name, opts);
+  } catch (err) {
+    if ((err as DOMException).name !== "NotFoundError") throw err;
+  }
+}
+
+async function opfsListAll(root: FileSystemDirectoryHandle): Promise<string[]> {
+  const iter = (root as unknown as AsyncIterableDir)[Symbol.asyncIterator]();
+  const names: string[] = [];
+  for (;;) {
+    const next = await iter.next();
+    if (next.done) break;
+    names.push(next.value[0]);
+  }
+  return names;
+}
 
 // ---------------------------------------------------------------------------
 // IndexedDB backend
@@ -170,23 +203,34 @@ const idbStore: AssetStore = {
     );
   },
   async writer(key) {
-    await idbStore.delete(key);
-    let chunks: Uint8Array[] = [];
-    return new WritableStream<Uint8Array>({
-      write(chunk) { chunks.push(chunk.slice()); },
-      async close() {
+    let chunks: Uint8Array[] | null = [];
+    const stream = new WritableStream<Uint8Array>({
+      write(chunk) { chunks?.push(chunk.slice()); },
+      abort() { chunks = null; },
+    });
+    return {
+      stream,
+      async commit() {
+        if (chunks === null) throw new Error(`commit after abort for ${key}`);
         let total = 0;
         for (const c of chunks) total += c.byteLength;
         const merged = new Uint8Array(total);
         let off = 0;
-        for (const c of chunks) { merged.set(c, off); off += c.byteLength; }
+        // Drop each chunk reference as we copy it so peak heap stays at ~1×
+        // the asset size during the merge instead of 2×.
+        for (let i = 0; i < chunks.length; i++) {
+          const c = chunks[i];
+          merged.set(c, off);
+          off += c.byteLength;
+          chunks[i] = new Uint8Array(0);
+        }
+        chunks = null;
         await idbStore.put(key, merged);
       },
-      abort(reason) {
-        chunks = [];
-        console.warn(`asset-store writer aborted for ${key}:`, reason);
+      async abort() {
+        chunks = null;
       },
-    });
+    };
   },
   delete: (key) =>
     idbRun(BYTES_STORE, "readwrite", (tx) => {
@@ -201,6 +245,10 @@ const idbStore: AssetStore = {
       );
       return keys.map(String);
     }),
+  async purgePartials() {
+    // IDB writers buffer in JS heap and only put() at commit() — there are no
+    // half-written rows in the store. No-op for parity with the OPFS backend.
+  },
   async clearAll() {
     await new Promise<void>((resolve, reject) => {
       const r = indexedDB.deleteDatabase(DB_NAME);

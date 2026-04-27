@@ -6,7 +6,7 @@
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { assetStore } from "./asset-store";
+import { assetStore, PARTIAL_SUFFIX } from "./asset-store";
 import { bytesToHex } from "./bytes";
 
 export interface DownloadProgress {
@@ -67,7 +67,7 @@ export async function ensureAsset(
   });
 
   const writer = await assetStore.writer(cacheKey);
-
+  let committed = false;
   try {
     let stream = response.body.pipeThrough(compressedTap);
     if (encoding === "gzip") {
@@ -78,28 +78,22 @@ export async function ensureAsset(
         >,
       );
     }
-    await stream.pipeTo(writer);
-  } catch (err) {
-    await assetStore
-      .delete(cacheKey)
-      .catch((delErr) =>
-        console.warn(`cleanup delete after pipeline failure failed for ${cacheKey}:`, delErr),
-      );
-    throw err;
-  }
+    await stream.pipeTo(writer.stream);
 
-  const actual = bytesToHex(hasher.digest());
-  if (actual !== expectedSha256) {
-    // Await delete before throwing so an immediate retry doesn't race
-    // assetStore.get() against the in-flight delete.
-    await assetStore
-      .delete(cacheKey)
-      .catch((delErr) =>
-        console.warn(`cleanup delete after hash mismatch failed for ${cacheKey}:`, delErr),
+    const actual = bytesToHex(hasher.digest());
+    if (actual !== expectedSha256) {
+      throw new Error(
+        `hash mismatch for ${cacheKey}: expected ${expectedSha256}, got ${actual}`,
       );
-    throw new Error(
-      `hash mismatch for ${cacheKey}: expected ${expectedSha256}, got ${actual}`,
-    );
+    }
+    await writer.commit();
+    committed = true;
+  } finally {
+    if (!committed) {
+      await writer.abort().catch((abortErr) =>
+        console.warn(`writer abort failed for ${cacheKey}:`, abortErr),
+      );
+    }
   }
 
   const stored = await assetStore.get(cacheKey);
@@ -112,8 +106,12 @@ export async function ensureAsset(
 }
 
 // Cache keys are <prefix>_<64-hex-sha>. Once the new SHA verifies, drop any
-// sibling under the same prefix so old releases don't accumulate in OPFS.
+// sibling under the same prefix so old releases don't accumulate in OPFS —
+// including stale `.partial` files from a crashed prior warmup.
 const KEY_SHA_SUFFIX = /^(.*)_[0-9a-f]{64}$/;
+const SIBLING_TAIL = new RegExp(
+  `_[0-9a-f]{64}(?:${PARTIAL_SUFFIX.replace(/\./g, "\\.")})?$`,
+);
 
 async function sweepStaleSiblings(currentKey: string): Promise<void> {
   const m = KEY_SHA_SUFFIX.exec(currentKey);
@@ -126,13 +124,15 @@ async function sweepStaleSiblings(currentKey: string): Promise<void> {
     console.warn(`sibling sweep listKeys failed for ${prefix}:`, err);
     return;
   }
-  for (const k of siblings) {
-    if (k === currentKey) continue;
-    if (!/_[0-9a-f]{64}$/.test(k)) continue;
-    await assetStore
-      .delete(k)
-      .catch((err) =>
-        console.warn(`sibling sweep delete failed for ${k}:`, err),
-      );
-  }
+  await Promise.all(
+    siblings
+      .filter((k) => k !== currentKey && SIBLING_TAIL.test(k))
+      .map((k) =>
+        assetStore
+          .delete(k)
+          .catch((err) =>
+            console.warn(`sibling sweep delete failed for ${k}:`, err),
+          ),
+      ),
+  );
 }

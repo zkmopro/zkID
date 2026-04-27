@@ -70,6 +70,8 @@ describe("ensureAsset", () => {
 
     const cached = await assetStore.get("cache-key-mismatch");
     expect(cached).toBeNull();
+    // No `.partial` orphan should leak — abort() must clean up.
+    expect(await assetStore.get("cache-key-mismatch.partial")).toBeNull();
   });
 
   it("returns cached bytes without fetching when the cache key is hit", async () => {
@@ -151,6 +153,30 @@ describe("ensureAsset", () => {
 
     const cached = await assetStore.get("cache-key-badgz");
     expect(cached).toBeNull();
+    expect(await assetStore.get("cache-key-badgz.partial")).toBeNull();
+  });
+
+  it("aborted writer leaves no committed key", async () => {
+    const w = await assetStore.writer("writer-abort-key");
+    const writer = w.stream.getWriter();
+    await writer.write(new Uint8Array([1, 2, 3]));
+    await writer.close();
+    await w.abort();
+    expect(await assetStore.get("writer-abort-key")).toBeNull();
+  });
+
+  it("committed writer makes bytes visible only after commit()", async () => {
+    const w = await assetStore.writer("writer-commit-key");
+    const writer = w.stream.getWriter();
+    await writer.write(new Uint8Array([4, 5, 6]));
+    await writer.close();
+    // pipeTo() closes the stream before the SHA check; bytes must NOT be
+    // visible at the canonical key yet.
+    expect(await assetStore.get("writer-commit-key")).toBeNull();
+    await w.commit();
+    expect(Array.from((await assetStore.get("writer-commit-key"))!)).toEqual([
+      4, 5, 6,
+    ]);
   });
 
   it("reaps stale siblings under the same prefix on successful verify", async () => {
@@ -158,6 +184,8 @@ describe("ensureAsset", () => {
     const otherOldSha = "b".repeat(64);
     await assetStore.put(`pkg_pk_${oldSha}`, new Uint8Array([1]));
     await assetStore.put(`pkg_pk_${otherOldSha}`, new Uint8Array([2]));
+    // A `.partial` orphan from a hypothetical prior crash — must be swept too.
+    await assetStore.put(`pkg_pk_${otherOldSha}.partial`, new Uint8Array([5]));
     // Same prefix family but different role → must NOT be swept.
     await assetStore.put(`pkg_wgen_${oldSha}`, new Uint8Array([3]));
     // No SHA suffix → must NOT be swept.
@@ -172,6 +200,7 @@ describe("ensureAsset", () => {
 
     expect(await assetStore.get(`pkg_pk_${oldSha}`)).toBeNull();
     expect(await assetStore.get(`pkg_pk_${otherOldSha}`)).toBeNull();
+    expect(await assetStore.get(`pkg_pk_${otherOldSha}.partial`)).toBeNull();
     expect(await assetStore.get(`pkg_wgen_${oldSha}`)).not.toBeNull();
     expect(await assetStore.get("pkg_pk_legacy")).not.toBeNull();
     expect(await assetStore.get(`pkg_pk_${sha}`)).not.toBeNull();

@@ -8,6 +8,7 @@ import init, {
 } from "./wasm/spartan2_wasm.js";
 
 import { ensureAsset } from "./asset-download";
+import { assetStore } from "./asset-store";
 import {
   basename,
   CIRCUITS,
@@ -254,6 +255,9 @@ async function runWarmup(): Promise<void> {
   try {
     post({ step: "warmup", status: "in_progress", phase: "init" });
     await init();
+    await assetStore.purgePartials().catch((err) =>
+      console.warn("purgePartials failed:", err),
+    );
     if (cancelled) return;
 
     const threads = clampThreads();
