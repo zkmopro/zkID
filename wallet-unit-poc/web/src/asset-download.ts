@@ -1,9 +1,8 @@
-// Streaming asset download + gzip decompress + SHA-256 verify.
+// Streaming asset download + (optional) gzip decompress + SHA-256 verify.
 //
-// v1 limitation: no resumable downloads (no Range header). A failed or aborted
-// fetch discards the partial write and re-downloads from scratch on retry.
-// Phase 2+ follow-up: persist `bytesWritten` via assetStore.setMeta(), send
-// `Range: bytes=<bytesWritten>-` on retry, and resume into the writer.
+// `expectedSha256` covers the **compressed** bytes (matches GitHub's
+// per-release `digest`). Cache keys must embed that SHA so a key-hit doubles
+// as proof of prior verification — no rehash on read.
 
 import { assetStore } from "./asset-store";
 import { bytesToHex } from "./bytes";
@@ -13,10 +12,27 @@ export interface DownloadProgress {
   bytesTotal: number;
 }
 
+export interface EnsureAssetOptions {
+  /** `"gzip"` (default) decompresses before storing; `"identity"` stores verbatim. */
+  encoding?: "gzip" | "identity";
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const buf = bytes.slice().buffer;
   const digest = await crypto.subtle.digest("SHA-256", buf);
   return bytesToHex(new Uint8Array(digest));
+}
+
+function concatChunks(chunks: Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const c of chunks) total += c.byteLength;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.byteLength;
+  }
+  return out;
 }
 
 export async function ensureAsset(
@@ -24,24 +40,17 @@ export async function ensureAsset(
   cacheKey: string,
   expectedSha256: string,
   onProgress: (p: DownloadProgress) => void,
+  options: EnsureAssetOptions = {},
 ): Promise<Uint8Array> {
-  // 1. Cache hit?
-  const cached = await assetStore.get(cacheKey);
-  if (cached) {
-    if (expectedSha256 === "") return cached;
-    const actual = await sha256Hex(cached);
-    if (actual === expectedSha256) return cached;
-    // Stale cache entry. Try to delete, but don't hard-fail if the delete itself
-    // errors — writer() below will delete again, and surfacing a cleanup error
-    // here would mask the actual re-download outcome.
-    try {
-      await assetStore.delete(cacheKey);
-    } catch (err) {
-      console.warn(`stale cache entry for ${cacheKey}; delete failed, overwriting via writer:`, err);
-    }
+  if (!expectedSha256) {
+    throw new Error(`ensureAsset called without expected hash for ${cacheKey}`);
   }
 
-  // 2. Download.
+  const cached = await assetStore.get(cacheKey);
+  if (cached) return cached;
+
+  const encoding = options.encoding ?? "gzip";
+
   let response: Response;
   try {
     response = await fetch(url);
@@ -58,28 +67,28 @@ export async function ensureAsset(
   }
 
   const lenHeader = response.headers.get("Content-Length");
-  // Content-Length reflects the compressed size. DecompressionStream makes the
-  // decompressed length unknown up front, so progress is reported in the
-  // compressed domain.
+  // Progress is reported in the compressed domain — DecompressionStream doesn't
+  // know the decompressed length up front.
   const bytesTotal = lenHeader ? parseInt(lenHeader, 10) : 0;
   let bytesDone = 0;
 
-  // Track compressed progress before decompression.
-  const progressTransform = new TransformStream<Uint8Array, Uint8Array>({
+  // SubtleCrypto.digest is one-shot, so accumulate compressed chunks for hashing.
+  const compressedChunks: Uint8Array[] = [];
+  const compressedTap = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       bytesDone += chunk.byteLength;
       onProgress({ bytesDone, bytesTotal });
+      compressedChunks.push(chunk.slice());
       controller.enqueue(chunk);
     },
   });
 
-  // Collect decompressed bytes into memory while simultaneously piping them
-  // to the asset-store writer. SubtleCrypto.digest is one-shot; the hash
-  // runs over the collected buffer at the end rather than streaming.
-  const collected: Uint8Array[] = [];
-  const collectTransform = new TransformStream<Uint8Array, Uint8Array>({
+  // Mirror the post-decompression bytes into memory so we can return them
+  // without re-reading from disk after the writer closes.
+  const decompressedChunks: Uint8Array[] = [];
+  const collectTap = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      collected.push(chunk.slice());
+      decompressedChunks.push(chunk.slice());
       controller.enqueue(chunk);
     },
   });
@@ -87,18 +96,16 @@ export async function ensureAsset(
   const writer = await assetStore.writer(cacheKey);
 
   try {
-    // DecompressionStream's writable side types as WritableStream<BufferSource>
-    // rather than WritableStream<Uint8Array>; cast to the concrete Uint8Array
-    // pair used by the surrounding pipeline. Runtime accepts Uint8Array chunks.
-    const gunzip = new DecompressionStream("gzip") as unknown as ReadableWritablePair<
-      Uint8Array,
-      Uint8Array
-    >;
-    await response.body
-      .pipeThrough(progressTransform)
-      .pipeThrough(gunzip)
-      .pipeThrough(collectTransform)
-      .pipeTo(writer);
+    let stream = response.body.pipeThrough(compressedTap);
+    if (encoding === "gzip") {
+      stream = stream.pipeThrough(
+        new DecompressionStream("gzip") as unknown as ReadableWritablePair<
+          Uint8Array,
+          Uint8Array
+        >,
+      );
+    }
+    await stream.pipeThrough(collectTap).pipeTo(writer);
   } catch (err) {
     await assetStore
       .delete(cacheKey)
@@ -108,33 +115,20 @@ export async function ensureAsset(
     throw err;
   }
 
-  let total = 0;
-  for (const c of collected) total += c.byteLength;
-  const bytes = new Uint8Array(total);
-  {
-    let off = 0;
-    for (const c of collected) {
-      bytes.set(c, off);
-      off += c.byteLength;
-    }
-  }
-
-  if (expectedSha256 !== "") {
-    const actual = await sha256Hex(bytes);
-    if (actual !== expectedSha256) {
-      // Await the delete before throwing. Without the await, a caller that
-      // retries immediately can race assetStore.get() against the in-flight
-      // delete and read the corrupted bytes.
-      await assetStore
-        .delete(cacheKey)
-        .catch((delErr) =>
-          console.warn(`cleanup delete after hash mismatch failed for ${cacheKey}:`, delErr),
-        );
-      throw new Error(
-        `hash mismatch for ${cacheKey}: expected ${expectedSha256}, got ${actual}`,
+  const compressed = concatChunks(compressedChunks);
+  const actual = await sha256Hex(compressed);
+  if (actual !== expectedSha256) {
+    // Await delete before throwing so an immediate retry doesn't race
+    // assetStore.get() against the in-flight delete.
+    await assetStore
+      .delete(cacheKey)
+      .catch((delErr) =>
+        console.warn(`cleanup delete after hash mismatch failed for ${cacheKey}:`, delErr),
       );
-    }
+    throw new Error(
+      `hash mismatch for ${cacheKey}: expected ${expectedSha256}, got ${actual}`,
+    );
   }
 
-  return bytes;
+  return concatChunks(decompressedChunks);
 }
