@@ -232,11 +232,26 @@ export function mountSetup(root: HTMLElement): () => void {
         assetsRetry.disabled = false;
         break;
       case "error":
-        assetsBody.textContent = `Error: ${state.message}`;
+        assetsBody.textContent = warmupErrorCopy(state);
         assetsRetry.hidden = false;
         assetsRetry.textContent = "Retry";
         assetsRetry.disabled = false;
         break;
+    }
+  }
+
+  function warmupErrorCopy(
+    state: Extract<WarmupState, { status: "error" }>,
+  ): string {
+    switch (state.kind) {
+      case "manifest_unreachable":
+        return "Cannot reach server manifest. Check your connection and retry.";
+      case "manifest_malformed":
+        return `Server manifest malformed. Contact support. (${state.message})`;
+      case "manifest_missing_asset":
+        return `Server manifest is missing a required entry. Contact support. (${state.message})`;
+      default:
+        return `Error: ${state.message}`;
     }
   }
 

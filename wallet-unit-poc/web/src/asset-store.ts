@@ -9,6 +9,9 @@
 export interface AssetMeta {
   bytesWritten: number;
   sha256?: string;
+  manifestSha256?: string;
+  manifestFetchedAt?: number;
+  authorizedAt?: number;
 }
 
 export interface AssetStore {

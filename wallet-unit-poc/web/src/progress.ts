@@ -4,8 +4,14 @@
 // the FSM packages into a ProvingRun for the Review screen.
 
 import { humanBytes } from "./format";
-import type { CircuitKind as Kind } from "./manifest";
-import { $smt, $warmup } from "./setup-state";
+import type { CircuitKind as Kind, ManifestErrorKind } from "./manifest";
+import { $smt, $warmup, type WarmupErrorKind } from "./setup-state";
+
+const MANIFEST_KIND_TO_WARMUP_KIND: Record<ManifestErrorKind, WarmupErrorKind> = {
+  unreachable: "manifest_unreachable",
+  malformed: "manifest_malformed",
+  missing_asset: "manifest_missing_asset",
+};
 import { dispatch } from "./store";
 import {
   STEP_ORDER,
@@ -156,10 +162,13 @@ export function applyProgress(p: Progress): void {
     }
     case "error": {
       const e = p as ErrorEvent;
-      // Warmup errors route to $warmup (Assets panel); SMT engine load errors
-      // route to $smt; proving errors land on whichever proving step is live.
+      if (e.where === "manifest") {
+        const kind = e.kind ? MANIFEST_KIND_TO_WARMUP_KIND[e.kind] : undefined;
+        $warmup.set({ status: "error", message: e.message, kind });
+        return;
+      }
       if (e.where === "warmup") {
-        $warmup.set({ status: "error", message: e.message });
+        $warmup.set({ status: "error", message: e.message, kind: "warmup" });
         return;
       }
       if (e.where === "smt_load") {

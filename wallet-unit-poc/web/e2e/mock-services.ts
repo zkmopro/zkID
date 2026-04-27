@@ -90,7 +90,8 @@ export async function installMockServices(
     },
   });
 
-  // Verifier -----------------------------------------------------------
+  // /keys/* served statically from the preview build (stage-keys-for-preview.sh).
+
   await page.route("**/challenge", async (route, req) => {
     if (req.method() !== "POST") return route.fallback();
     await route.fulfill({
@@ -153,12 +154,29 @@ export async function installMockServices(
     });
   });
 
-  // Fail any legacy SMT network path so regressions are loud.
+  // Catchall first so the specific snapshot-manifest.json route below wins
+  // (Playwright matches in reverse registration order).
   await page.route("**/smt-snapshot/**", async (route) => {
     await route.fulfill({
       status: 410,
       contentType: "text/plain",
       body: "snapshot download should be stubbed by __SMT_TEST_ENGINE__ in e2e",
+    });
+  });
+  // Dummy hashes — __SMT_TEST_PROOF__ short-circuits SMT engine load.
+  const DUMMY_HASH = "0".repeat(64);
+  await page.route("**/smt-snapshot/snapshot-manifest.json**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        assets: {
+          "g2-tree-snapshot.bin.gz": { sha256_decompressed: DUMMY_HASH },
+          "g3-tree-snapshot.bin.gz": { sha256_decompressed: DUMMY_HASH },
+          "smt.wasm": { sha256_decompressed: DUMMY_HASH },
+          "wasm_exec.js": { sha256_decompressed: DUMMY_HASH },
+        },
+      }),
     });
   });
   await page.route("**/proof/**", async (route) => {

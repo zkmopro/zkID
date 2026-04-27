@@ -1,6 +1,15 @@
 import { test, expect } from "@playwright/test";
 import { installMockServices } from "./mock-services";
 
+async function breakKeysManifest(
+  page: import("@playwright/test").Page,
+  body: { status: number; contentType: string; body: string },
+): Promise<void> {
+  await page.route("**/keys/manifest.json**", async (route) => {
+    await route.fulfill(body);
+  });
+}
+
 test("landing screen renders and Start is interactive", async ({ page }) => {
   await installMockServices(page);
   await page.goto("/");
@@ -70,6 +79,59 @@ test("full flow reaches result and holds proof on review gate", async ({ page })
     timeout: 60_000,
   });
   await expect(page.getByTestId("result-prove-again")).toBeVisible();
+});
+
+test("manifest 500 leaves Assets panel in an unreachable error state", async ({
+  page,
+}) => {
+  await installMockServices(page);
+  await breakKeysManifest(page, {
+    status: 500,
+    contentType: "text/plain",
+    body: "simulated manifest outage",
+  });
+  await page.goto("/");
+  await page.getByTestId("start-button").click();
+  await expect(page.getByTestId("assets-body")).toContainText(
+    /Cannot reach server manifest/i,
+    { timeout: 30_000 },
+  );
+  await expect(page.getByTestId("assets-retry")).toBeVisible();
+});
+
+test("malformed manifest surfaces a malformed error and blocks proving", async ({
+  page,
+}) => {
+  await installMockServices(page);
+  await breakKeysManifest(page, {
+    status: 200,
+    contentType: "application/json",
+    body: "this is not json",
+  });
+  await page.goto("/");
+  await page.getByTestId("start-button").click();
+  await expect(page.getByTestId("assets-body")).toContainText(
+    /manifest malformed/i,
+    { timeout: 30_000 },
+  );
+  await expect(page.getByTestId("continue-button")).toBeDisabled();
+});
+
+test("manifest missing a required asset entry surfaces missing_asset error", async ({
+  page,
+}) => {
+  await installMockServices(page);
+  await breakKeysManifest(page, {
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ assets: {} }),
+  });
+  await page.goto("/");
+  await page.getByTestId("start-button").click();
+  await expect(page.getByTestId("assets-body")).toContainText(
+    /missing a required entry/i,
+    { timeout: 30_000 },
+  );
 });
 
 test("retry from review routes through setup for PIN re-verify (no submit)", async ({ page }) => {

@@ -12,7 +12,10 @@ import { assetStore } from "./asset-store";
 import {
   CIRCUITS,
   hydrateManifest,
+  manifestErrorKind,
+  type AuthorizingManifest,
   type CircuitKind as Kind,
+  type ManifestErrorKind,
 } from "./manifest";
 import {
   convertSmtProofToCircuitInputs,
@@ -89,7 +92,13 @@ export type Progress =
       deviceProveMs: number;
       threads: number;
     }
-  | { step: "error"; where: string; message: string; retryable: boolean };
+  | {
+      step: "error";
+      where: string;
+      message: string;
+      retryable: boolean;
+      kind?: ManifestErrorKind;
+    };
 
 const KIND_ENUM: Record<Kind, CircuitKind> = {
   cert_chain_rs2048: CircuitKind.CertChainRs2048,
@@ -108,6 +117,9 @@ let warming = false;
 let proving = false;
 let warmed = false;
 let smtLoading = false;
+// SMT load can fire after warmup; reuse the warmup-time manifest digests.
+let keysAuthorizing: AuthorizingManifest | null = null;
+let smtAuthorizing: AuthorizingManifest | null = null;
 
 // Keep witness-wasm in memory after warmup.
 const witnessCache: Partial<Record<Kind, Uint8Array>> = {};
@@ -219,12 +231,17 @@ function errorMessage(err: unknown): string {
 }
 
 function postError(where: string, err: unknown): void {
-  post({
+  const msg: Extract<Progress, { step: "error" }> = {
     step: "error",
     where,
     message: errorMessage(err),
     retryable: true,
-  });
+  };
+  if (where === "manifest") {
+    const kind = manifestErrorKind(err);
+    if (kind) msg.kind = kind;
+  }
+  post(msg);
 }
 
 let activeThreads = 1;
@@ -242,7 +259,21 @@ async function runWarmup(): Promise<void> {
     if (cancelled) return;
 
     post({ step: "warmup", status: "in_progress", phase: "manifest" });
-    await hydrateManifest();
+    let hydration;
+    try {
+      hydration = await hydrateManifest();
+    } catch (err) {
+      postError("manifest", err);
+      return;
+    }
+    keysAuthorizing = {
+      manifestSha256: hydration.keysManifestSha256,
+      fetchedAt: hydration.fetchedAt,
+    };
+    smtAuthorizing = {
+      manifestSha256: hydration.smtManifestSha256,
+      fetchedAt: hydration.fetchedAt,
+    };
     if (cancelled) return;
 
     // Preload all PK + witness assets so proving starts without extra waits.
@@ -253,16 +284,21 @@ async function runWarmup(): Promise<void> {
     ];
     for (const kind of kinds) {
       const m = CIRCUITS[kind];
-      await ensureAsset(m.pkUrl, `${kind}_pk`, m.expected.pk, (p) =>
-        post({
-          step: "warmup",
-          status: "in_progress",
-          phase: "download",
-          asset: `${KIND_LABEL[kind]} pk`,
-          bytesDone: p.bytesDone,
-          bytesTotal: p.bytesTotal,
-          kind,
-        }),
+      await ensureAsset(
+        m.pkUrl,
+        `${kind}_pk`,
+        m.expected.pk,
+        (p) =>
+          post({
+            step: "warmup",
+            status: "in_progress",
+            phase: "download",
+            asset: `${KIND_LABEL[kind]} pk`,
+            bytesDone: p.bytesDone,
+            bytesTotal: p.bytesTotal,
+            kind,
+          }),
+        keysAuthorizing,
       );
       if (cancelled) return;
       await ensureAsset(
@@ -279,6 +315,7 @@ async function runWarmup(): Promise<void> {
             bytesTotal: p.bytesTotal,
             kind,
           }),
+        keysAuthorizing,
       );
       if (cancelled) return;
     }
@@ -305,15 +342,24 @@ async function runWarmup(): Promise<void> {
 
 async function runLoadSmt(issuer: SmtIssuer): Promise<void> {
   try {
-    const engine = await loadSmtEngine(issuer, (p) => {
-      post({
-        step: "smt_load",
-        phase: p.phase,
-        issuer,
-        bytesDone: p.bytesDone,
-        bytesTotal: p.bytesTotal,
-      });
-    });
+    if (!smtAuthorizing) {
+      throw new Error(
+        "SMT load requested before manifest hydration; warmup must complete first",
+      );
+    }
+    const engine = await loadSmtEngine(
+      issuer,
+      (p) => {
+        post({
+          step: "smt_load",
+          phase: p.phase,
+          issuer,
+          bytesDone: p.bytesDone,
+          bytesTotal: p.bytesTotal,
+        });
+      },
+      smtAuthorizing,
+    );
     smtEngines[issuer] = engine;
     post({
       step: "smt_ready",

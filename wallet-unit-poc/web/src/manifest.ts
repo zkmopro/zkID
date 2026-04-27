@@ -1,7 +1,9 @@
 // Asset manifest for proving keys, witness wasm, and SMT snapshots.
-// Hashes are filled from runtime manifests; empty hash means "skip verification".
-// Assets are expected to be served same-origin via /keys and /smt-snapshot.
+// Hydration is fail-closed: any unreachable / malformed / incomplete
+// manifest aborts warmup so cached bytes are never trusted without a
+// fresh authoritative hash.
 
+import { bytesToHex } from "./bytes";
 import type { SmtIssuer } from "./smt-client";
 
 export type CircuitKind =
@@ -69,103 +71,152 @@ export const SMT_WASM = { url: "/smt-snapshot/smt.wasm", expected: "" };
 /** Go wasm_exec.js loader (text). */
 export const SMT_WASM_EXEC = { url: "/smt-snapshot/wasm_exec.js", expected: "" };
 
+export const KEYS_MANIFEST_URL = "/keys/manifest.json";
+export const SMT_MANIFEST_URL = "/smt-snapshot/snapshot-manifest.json";
+
+export interface HydrationResult {
+  keysManifestSha256: string;
+  smtManifestSha256: string;
+  fetchedAt: number;
+}
+
+export interface AuthorizingManifest {
+  manifestSha256: string;
+  fetchedAt: number;
+}
+
+export class ManifestUnreachableError extends Error {
+  constructor(url: string, detail: string, options?: { cause?: unknown }) {
+    super(`manifest unreachable: ${url} (${detail})`, options);
+    this.name = "ManifestUnreachableError";
+  }
+}
+
+export class ManifestMalformedError extends Error {
+  constructor(url: string, reason: string, options?: { cause?: unknown }) {
+    super(`manifest malformed: ${url} (${reason})`, options);
+    this.name = "ManifestMalformedError";
+  }
+}
+
+export class ManifestMissingAssetError extends Error {
+  readonly assetName: string;
+  constructor(assetName: string) {
+    super(`manifest missing or invalid hash for asset: ${assetName}`);
+    this.name = "ManifestMissingAssetError";
+    this.assetName = assetName;
+  }
+}
+
+export type ManifestErrorKind = "unreachable" | "malformed" | "missing_asset";
+
+export function manifestErrorKind(err: unknown): ManifestErrorKind | undefined {
+  if (err instanceof ManifestUnreachableError) return "unreachable";
+  if (err instanceof ManifestMalformedError) return "malformed";
+  if (err instanceof ManifestMissingAssetError) return "missing_asset";
+  return undefined;
+}
+
+const HEX_64 = /^[0-9a-f]{64}$/;
+
 interface PublishedManifest {
   assets: Record<string, { sha256_decompressed: string }>;
 }
 
-function basename(url: string): string {
+export function basename(url: string): string {
   const q = url.indexOf("?");
   const clean = q === -1 ? url : url.slice(0, q);
   const slash = clean.lastIndexOf("/");
   return slash === -1 ? clean : clean.slice(slash + 1);
 }
 
-/** Overlay `/keys/manifest.json` hashes onto circuit entries; fail-open. */
-export async function hydrateManifest(): Promise<void> {
-  let body: PublishedManifest | null = null;
+async function fetchManifestText(url: string): Promise<string> {
+  // ?t= defeats intermediate reverse-proxy / CDN caches keyed on full URL.
+  const bust = `${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`;
+  let response: Response;
   try {
-    const r = await fetch("/keys/manifest.json", { method: "GET" });
-    if (!r.ok) {
-      console.warn(
-        `manifest.json fetch returned ${r.status} ${r.statusText}; hash verification disabled`,
-      );
-      return;
-    }
-    body = (await r.json()) as PublishedManifest;
+    response = await fetch(bust, {
+      cache: "no-store",
+      headers: { "cache-control": "no-cache" },
+    });
   } catch (err) {
-    console.warn("manifest.json fetch/parse failed; hash verification disabled:", err);
-    return;
+    throw new ManifestUnreachableError(url, "fetch failed", { cause: err });
   }
-  if (!body || typeof body !== "object" || !body.assets) {
-    console.warn("manifest.json malformed (no `assets` object); hash verification disabled");
-    return;
+  if (!response.ok) {
+    throw new ManifestUnreachableError(
+      url,
+      `HTTP ${response.status} ${response.statusText}`,
+    );
   }
-  for (const key of Object.keys(CIRCUITS) as CircuitKind[]) {
-    const m = CIRCUITS[key];
-    const pkName = basename(m.pkUrl);
-    const wgenName = basename(m.witnessWasmUrl);
-    const pkEntry = body.assets[pkName];
-    const wgenEntry = body.assets[wgenName];
-    if (pkEntry && typeof pkEntry.sha256_decompressed === "string") {
-      m.expected.pk = pkEntry.sha256_decompressed;
-    } else {
-      console.warn(`manifest.json missing entry for ${pkName}; PK hash verification disabled for ${key}`);
-    }
-    if (wgenEntry && typeof wgenEntry.sha256_decompressed === "string") {
-      m.expected.witnessWasm = wgenEntry.sha256_decompressed;
-    } else {
-      console.warn(`manifest.json missing entry for ${wgenName}; witness-wasm hash verification disabled for ${key}`);
-    }
+  try {
+    return await response.text();
+  } catch (err) {
+    throw new ManifestUnreachableError(url, "body read failed", { cause: err });
   }
-
-  await hydrateSmtManifest();
 }
 
-/** Overlay `/smt-snapshot/snapshot-manifest.json` hashes; also fail-open. */
-async function hydrateSmtManifest(): Promise<void> {
-  let body: PublishedManifest | null = null;
+function parseManifest(url: string, text: string): PublishedManifest {
+  let raw: unknown;
   try {
-    const r = await fetch("/smt-snapshot/snapshot-manifest.json", {
-      method: "GET",
-    });
-    if (!r.ok) {
-      console.warn(
-        `snapshot-manifest.json fetch returned ${r.status} ${r.statusText}; SMT hash verification disabled`,
-      );
-      return;
-    }
-    body = (await r.json()) as PublishedManifest;
+    raw = JSON.parse(text);
   } catch (err) {
-    console.warn(
-      "snapshot-manifest.json fetch/parse failed; SMT hash verification disabled:",
-      err,
-    );
-    return;
+    throw new ManifestMalformedError(url, "JSON parse failed", { cause: err });
   }
-  if (!body || typeof body !== "object" || !body.assets) {
-    console.warn(
-      "snapshot-manifest.json malformed (no `assets` object); SMT hash verification disabled",
-    );
-    return;
+  if (!raw || typeof raw !== "object") {
+    throw new ManifestMalformedError(url, "body is not an object");
   }
+  const assets = (raw as { assets?: unknown }).assets;
+  if (!assets || typeof assets !== "object" || Array.isArray(assets)) {
+    throw new ManifestMalformedError(url, "missing or non-object `assets`");
+  }
+  return { assets: assets as PublishedManifest["assets"] };
+}
+
+function requireHash(manifest: PublishedManifest, assetName: string): string {
+  const entry = manifest.assets[assetName] as
+    | { sha256_decompressed?: unknown }
+    | undefined;
+  const hash =
+    entry && typeof entry.sha256_decompressed === "string"
+      ? entry.sha256_decompressed
+      : undefined;
+  if (!hash || !HEX_64.test(hash)) {
+    throw new ManifestMissingAssetError(assetName);
+  }
+  return hash;
+}
+
+async function sha256HexOfText(text: string): Promise<string> {
+  const encoded = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  return bytesToHex(new Uint8Array(digest));
+}
+
+export async function hydrateManifest(): Promise<HydrationResult> {
+  const [keysText, smtText] = await Promise.all([
+    fetchManifestText(KEYS_MANIFEST_URL),
+    fetchManifestText(SMT_MANIFEST_URL),
+  ]);
+
+  const keysManifest = parseManifest(KEYS_MANIFEST_URL, keysText);
+  for (const key of Object.keys(CIRCUITS) as CircuitKind[]) {
+    const m = CIRCUITS[key];
+    m.expected.pk = requireHash(keysManifest, basename(m.pkUrl));
+    m.expected.witnessWasm = requireHash(keysManifest, basename(m.witnessWasmUrl));
+  }
+
+  const smtManifest = parseManifest(SMT_MANIFEST_URL, smtText);
   for (const issuer of Object.keys(SMT_SNAPSHOTS) as SmtIssuer[]) {
     const m = SMT_SNAPSHOTS[issuer];
-    const name = basename(m.snapshotUrl);
-    const entry = body.assets[name];
-    if (entry && typeof entry.sha256_decompressed === "string") {
-      m.expectedSnapshot = entry.sha256_decompressed;
-    } else {
-      console.warn(
-        `snapshot-manifest.json missing entry for ${name}; snapshot hash verification disabled for ${issuer}`,
-      );
-    }
+    m.expectedSnapshot = requireHash(smtManifest, basename(m.snapshotUrl));
   }
-  const wasmEntry = body.assets[basename(SMT_WASM.url)];
-  if (wasmEntry && typeof wasmEntry.sha256_decompressed === "string") {
-    SMT_WASM.expected = wasmEntry.sha256_decompressed;
-  }
-  const execEntry = body.assets[basename(SMT_WASM_EXEC.url)];
-  if (execEntry && typeof execEntry.sha256_decompressed === "string") {
-    SMT_WASM_EXEC.expected = execEntry.sha256_decompressed;
-  }
+  SMT_WASM.expected = requireHash(smtManifest, basename(SMT_WASM.url));
+  SMT_WASM_EXEC.expected = requireHash(smtManifest, basename(SMT_WASM_EXEC.url));
+
+  const [keysManifestSha256, smtManifestSha256] = await Promise.all([
+    sha256HexOfText(keysText),
+    sha256HexOfText(smtText),
+  ]);
+
+  return { keysManifestSha256, smtManifestSha256, fetchedAt: Date.now() };
 }

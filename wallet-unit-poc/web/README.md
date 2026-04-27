@@ -125,7 +125,7 @@ On click, the Worker resolves these URLs (all gzipped on the server):
 - `/keys/device_sig_rs2048_proving.key.gz`
 - `/keys/cert_chain_rs2048.wasm.gz` (circom witness-gen)
 - `/keys/device_sig_rs2048.wasm.gz`
-- `/keys/manifest.json` (optional; adds SHA-256 verification when present)
+- `/keys/manifest.json` (**required** — see "Cache freshness" below)
 
 Revocation-tree assets (downloaded after the user reads their card, because the
 per-issuer snapshot is only known at that point):
@@ -135,7 +135,7 @@ per-issuer snapshot is only known at that point):
 - `/smt-snapshot/g2-tree-snapshot.bin.gz` (~73 MB gzipped; only fetched when
   the card was issued by MOICA-G2)
 - `/smt-snapshot/g3-tree-snapshot.bin.gz` (~21 MB gzipped; MOICA-G3 only)
-- `/smt-snapshot/snapshot-manifest.json` (optional; adds SHA-256 verification)
+- `/smt-snapshot/snapshot-manifest.json` (**required** — see "Cache freshness" below)
 
 In dev, `/keys/*` is proxied to `https://github.com/zkmopro/zkID/releases/download/latest/<asset>`
 and `/smt-snapshot/*` is proxied to
@@ -274,12 +274,37 @@ Cached assets live in:
 
 - **OPFS**: DevTools → Application → Storage → Origin Private File System.
   Each asset is stored at its cache key (e.g. `cert_chain_rs2048_pk`); meta
-  lives at `.meta/<key>.json`.
-- **IndexedDB fallback**: database `zkid-web-assets`, object stores `assets`
+  lives at `.meta/<key>.json` and now records `manifestSha256`,
+  `manifestFetchedAt`, and `authorizedAt` alongside the asset hash.
+- **IndexedDB fallback**: database `zkid-assets`, object stores `assets`
   and `meta`.
 
 To force a re-download, delete the corresponding entry (or run
 `navigator.storage.getDirectory().then(d => d.remove(...))` in the console).
+
+## Cache freshness
+
+The app treats `manifest.json` + `snapshot-manifest.json` as the authoritative
+source for which bytes each cached asset must hash to. The model:
+
+- **Manifest is required.** On each warmup, the client fetches both manifest
+  URLs with `cache: "no-store"` and a `?t=<epoch>` query. Any unreachable /
+  malformed / incomplete response aborts warmup with a distinguishable error
+  (`unreachable` / `malformed` / `missing_asset`) — cached assets are **not**
+  used without a fresh matching hash. There is no fail-open fallback.
+- **Cached entries revalidate on every warmup.** `ensureAsset` hashes cached
+  bytes against the freshly-fetched expected hash; a mismatch deletes the
+  cached entry and re-downloads. On success, `manifestSha256` +
+  `manifestFetchedAt` + `authorizedAt` are recorded in meta.
+- **Server-side contract.** Publishers of the release pipeline must regenerate
+  `manifest.json` atomically with the asset set — a manifest must never
+  reference a hash for an asset version it was not uploaded with. Between
+  upload and manifest refresh, the client will see a mismatch and re-download;
+  once the manifest catches up, the next warmup converges.
+- **Why `?t=` plus `cache: "no-store"`.** The header defeats the browser HTTP
+  cache. The query defeats intermediate reverse-proxy / CDN caches that key on
+  the full URL — some operators of the required reverse proxy ignore
+  `Cache-Control` on the response.
 
 ## Tests
 
@@ -311,7 +336,12 @@ Install browsers before first run: `pnpm exec playwright install --with-deps chr
   re-downloads from scratch. See `src/asset-download.ts` header comment.
 - No `.partial` rename on writer commit — a crash mid-write can leave a
   truncated cache entry. The SHA-256 check on the next read catches this
-  *only if* `manifest.json` was hydrated.
+  against the authoritative manifest.
+- No TTL / ETag on the manifest itself: every warmup re-fetches. Cheap (the
+  manifest is tiny) but noisy for operators reading access logs.
+- Client↔verifier SMT-root agreement is not pinned in `/challenge`; the
+  verifier accepts whichever root its own trust anchor expects. Stale-SMT
+  detection described here is client-side only.
 - `link_verify` runs server-side only; the WASM crate's `link_verify` export
   exists for the drift test but is not called from the production pipeline.
 - The HiPKI popup bridge is single-shot per operation: every probe needs a
