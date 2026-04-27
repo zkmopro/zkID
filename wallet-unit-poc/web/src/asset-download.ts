@@ -4,6 +4,8 @@
 // per-release `digest`). Cache keys must embed that SHA so a key-hit doubles
 // as proof of prior verification — no rehash on read.
 
+import { sha256 } from "@noble/hashes/sha2.js";
+
 import { assetStore } from "./asset-store";
 import { bytesToHex } from "./bytes";
 
@@ -15,24 +17,6 @@ export interface DownloadProgress {
 export interface EnsureAssetOptions {
   /** `"gzip"` (default) decompresses before storing; `"identity"` stores verbatim. */
   encoding?: "gzip" | "identity";
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const buf = bytes.slice().buffer;
-  const digest = await crypto.subtle.digest("SHA-256", buf);
-  return bytesToHex(new Uint8Array(digest));
-}
-
-function concatChunks(chunks: Uint8Array[]): Uint8Array {
-  let total = 0;
-  for (const c of chunks) total += c.byteLength;
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    out.set(c, off);
-    off += c.byteLength;
-  }
-  return out;
 }
 
 export async function ensureAsset(
@@ -72,23 +56,12 @@ export async function ensureAsset(
   const bytesTotal = lenHeader ? parseInt(lenHeader, 10) : 0;
   let bytesDone = 0;
 
-  // SubtleCrypto.digest is one-shot, so accumulate compressed chunks for hashing.
-  const compressedChunks: Uint8Array[] = [];
+  const hasher = sha256.create();
   const compressedTap = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       bytesDone += chunk.byteLength;
       onProgress({ bytesDone, bytesTotal });
-      compressedChunks.push(chunk.slice());
-      controller.enqueue(chunk);
-    },
-  });
-
-  // Mirror the post-decompression bytes into memory so we can return them
-  // without re-reading from disk after the writer closes.
-  const decompressedChunks: Uint8Array[] = [];
-  const collectTap = new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      decompressedChunks.push(chunk.slice());
+      hasher.update(chunk);
       controller.enqueue(chunk);
     },
   });
@@ -105,7 +78,7 @@ export async function ensureAsset(
         >,
       );
     }
-    await stream.pipeThrough(collectTap).pipeTo(writer);
+    await stream.pipeTo(writer);
   } catch (err) {
     await assetStore
       .delete(cacheKey)
@@ -115,8 +88,7 @@ export async function ensureAsset(
     throw err;
   }
 
-  const compressed = concatChunks(compressedChunks);
-  const actual = await sha256Hex(compressed);
+  const actual = bytesToHex(hasher.digest());
   if (actual !== expectedSha256) {
     // Await delete before throwing so an immediate retry doesn't race
     // assetStore.get() against the in-flight delete.
@@ -130,5 +102,9 @@ export async function ensureAsset(
     );
   }
 
-  return concatChunks(decompressedChunks);
+  const stored = await assetStore.get(cacheKey);
+  if (!stored) {
+    throw new Error(`asset disappeared after write for ${cacheKey}`);
+  }
+  return stored;
 }

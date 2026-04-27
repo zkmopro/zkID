@@ -32,17 +32,7 @@ describe("ensureAsset", () => {
   const testUrl = "/keys/test-asset.bin.gz";
 
   beforeEach(async () => {
-    for (const k of [
-      "cache-key-happy",
-      "cache-key-mismatch",
-      "cache-key-cached",
-      "cache-key-empty",
-      "cache-key-500",
-      "cache-key-badgz",
-      "cache-key-identity",
-    ]) {
-      await assetStore.delete(k).catch(() => {});
-    }
+    await clearAllAssets().catch(() => {});
   });
 
   afterEach(() => {
@@ -162,6 +152,7 @@ describe("ensureAsset", () => {
     const cached = await assetStore.get("cache-key-badgz");
     expect(cached).toBeNull();
   });
+
 });
 
 describe("clearAllAssets", () => {
