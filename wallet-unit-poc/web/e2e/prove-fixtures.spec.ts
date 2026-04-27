@@ -79,6 +79,10 @@ test("full flow reaches result and holds proof on review gate", async ({ page })
     timeout: 60_000,
   });
   await expect(page.getByTestId("result-prove-again")).toBeVisible();
+
+  await expect(page.getByTestId("result-clear-cache")).toBeVisible();
+  await page.getByTestId("result-clear-cache").click();
+  await expect(page.getByTestId("start-button")).toBeVisible({ timeout: 30_000 });
 });
 
 test("manifest 500 leaves Assets panel in an unreachable error state", async ({

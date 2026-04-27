@@ -279,8 +279,11 @@ Cached assets live in:
 - **IndexedDB fallback**: database `zkid-assets`, object stores `assets`
   and `meta`.
 
-To force a re-download, delete the corresponding entry (or run
-`navigator.storage.getDirectory().then(d => d.remove(...))` in the console).
+To force a re-download, delete the corresponding entry, run
+`navigator.storage.getDirectory().then(d => d.remove(...))` in the console, or
+click **Clear all cached assets** on the result screen after a successful
+verification. The button wipes OPFS + IndexedDB and reloads the page so the
+Worker's in-memory state drops in lockstep with disk.
 
 ## Cache freshness
 

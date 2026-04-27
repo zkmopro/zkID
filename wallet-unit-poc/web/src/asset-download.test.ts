@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureAsset } from "./asset-download";
-import { assetStore } from "./asset-store";
+import { assetStore, clearAllAssets } from "./asset-store";
 import type { AuthorizingManifest } from "./manifest";
 
 function sha256HexOf(bytes: Uint8Array): string {
@@ -260,5 +260,24 @@ describe("ensureAsset", () => {
 
     const cached = await assetStore.get("cache-key-badgz");
     expect(cached).toBeNull();
+  });
+});
+
+describe("clearAllAssets", () => {
+  it("empties every known cache entry across repeated calls", async () => {
+    const a = new Uint8Array([1, 2, 3]);
+    const b = new Uint8Array([4, 5, 6]);
+    await assetStore.put("clear-a", a);
+    await assetStore.put("clear-b", b);
+    await assetStore.setMeta("clear-a", { bytesWritten: a.byteLength });
+
+    await clearAllAssets();
+
+    expect(await assetStore.get("clear-a")).toBeNull();
+    expect(await assetStore.get("clear-b")).toBeNull();
+    expect(await assetStore.getMeta("clear-a")).toBeNull();
+
+    // A second clear on an empty store must not throw.
+    await clearAllAssets();
   });
 });

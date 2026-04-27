@@ -21,6 +21,7 @@ export interface AssetStore {
   delete(key: string): Promise<void>;
   getMeta(key: string): Promise<AssetMeta | null>;
   setMeta(key: string, meta: AssetMeta): Promise<void>;
+  clearAll(): Promise<void>;
 }
 
 function hasOPFS(): boolean {
@@ -110,6 +111,27 @@ const opfsStore: AssetStore = {
     const writable = await handle.createWritable();
     await writable.write(JSON.stringify(value));
     await writable.close();
+  },
+  async clearAll() {
+    const root = await opfsRoot();
+    const iter = (
+      root as unknown as {
+        [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
+      }
+    )[Symbol.asyncIterator]();
+    const names: string[] = [];
+    for (;;) {
+      const next = await iter.next();
+      if (next.done) break;
+      names.push(next.value[0]);
+    }
+    for (const name of names) {
+      try {
+        await root.removeEntry(name, { recursive: true });
+      } catch (err) {
+        if ((err as DOMException).name !== "NotFoundError") throw err;
+      }
+    }
   },
 };
 
@@ -217,6 +239,20 @@ const idbStore: AssetStore = {
       req(tx.objectStore(META_STORE).put({ key, meta })),
     );
   },
+  async clearAll() {
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      // Surface blocked rather than hang; asset-store opens/closes per call.
+      req.onblocked = () =>
+        reject(new Error(`deleteDatabase blocked for ${DB_NAME}`));
+    });
+  },
 };
 
 export const assetStore: AssetStore = hasOPFS() ? opfsStore : idbStore;
+
+export async function clearAllAssets(): Promise<void> {
+  await assetStore.clearAll();
+}
