@@ -106,5 +106,33 @@ export async function ensureAsset(
   if (!stored) {
     throw new Error(`asset disappeared after write for ${cacheKey}`);
   }
+
+  await sweepStaleSiblings(cacheKey);
   return stored;
+}
+
+// Cache keys are <prefix>_<64-hex-sha>. Once the new SHA verifies, drop any
+// sibling under the same prefix so old releases don't accumulate in OPFS.
+const KEY_SHA_SUFFIX = /^(.*)_[0-9a-f]{64}$/;
+
+async function sweepStaleSiblings(currentKey: string): Promise<void> {
+  const m = KEY_SHA_SUFFIX.exec(currentKey);
+  if (!m) return;
+  const prefix = `${m[1]}_`;
+  let siblings: string[];
+  try {
+    siblings = await assetStore.listKeys(prefix);
+  } catch (err) {
+    console.warn(`sibling sweep listKeys failed for ${prefix}:`, err);
+    return;
+  }
+  for (const k of siblings) {
+    if (k === currentKey) continue;
+    if (!/_[0-9a-f]{64}$/.test(k)) continue;
+    await assetStore
+      .delete(k)
+      .catch((err) =>
+        console.warn(`sibling sweep delete failed for ${k}:`, err),
+      );
+  }
 }

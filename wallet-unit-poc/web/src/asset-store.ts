@@ -1,14 +1,15 @@
 // Asset storage: OPFS primary, IndexedDB fallback.
 //
 // Cache keys embed the upstream SHA-256 — a key-hit implies the bytes were
-// verified at write-time, so no rehash on read. Stale entries from prior
-// releases linger until clearAll() runs.
+// verified at write-time, so no rehash on read. `listKeys(prefix)` lets
+// callers find and reap orphaned entries from prior releases.
 
 export interface AssetStore {
   get(key: string): Promise<Uint8Array | null>;
   put(key: string, bytes: Uint8Array): Promise<void>;
   writer(key: string): Promise<WritableStream<Uint8Array>>;
   delete(key: string): Promise<void>;
+  listKeys(prefix: string): Promise<string[]>;
   clearAll(): Promise<void>;
 }
 
@@ -66,6 +67,22 @@ const opfsStore: AssetStore = {
     } catch (err) {
       if ((err as DOMException).name !== "NotFoundError") throw err;
     }
+  },
+  async listKeys(prefix) {
+    const root = await opfsRoot();
+    const iter = (
+      root as unknown as {
+        [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
+      }
+    )[Symbol.asyncIterator]();
+    const names: string[] = [];
+    for (;;) {
+      const next = await iter.next();
+      if (next.done) break;
+      const name = next.value[0];
+      if (name.startsWith(prefix)) names.push(name);
+    }
+    return names;
   },
   async clearAll() {
     const root = await opfsRoot();
@@ -174,6 +191,15 @@ const idbStore: AssetStore = {
   delete: (key) =>
     idbRun(BYTES_STORE, "readwrite", (tx) => {
       tx.objectStore(BYTES_STORE).delete(key);
+    }),
+  listKeys: (prefix) =>
+    idbRun(BYTES_STORE, "readonly", async (tx) => {
+      // U+FFFF is the highest BMP code point — bounds every prefix-extending key.
+      const range = IDBKeyRange.bound(prefix, prefix + "￿", false, false);
+      const keys = await req<IDBValidKey[]>(
+        tx.objectStore(BYTES_STORE).getAllKeys(range),
+      );
+      return keys.map(String);
     }),
   async clearAll() {
     await new Promise<void>((resolve, reject) => {

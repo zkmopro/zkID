@@ -153,6 +153,29 @@ describe("ensureAsset", () => {
     expect(cached).toBeNull();
   });
 
+  it("reaps stale siblings under the same prefix on successful verify", async () => {
+    const oldSha = "a".repeat(64);
+    const otherOldSha = "b".repeat(64);
+    await assetStore.put(`pkg_pk_${oldSha}`, new Uint8Array([1]));
+    await assetStore.put(`pkg_pk_${otherOldSha}`, new Uint8Array([2]));
+    // Same prefix family but different role → must NOT be swept.
+    await assetStore.put(`pkg_wgen_${oldSha}`, new Uint8Array([3]));
+    // No SHA suffix → must NOT be swept.
+    await assetStore.put("pkg_pk_legacy", new Uint8Array([4]));
+
+    const raw = new Uint8Array([7, 7, 7]);
+    const { gz, sha } = gzipped(raw);
+    globalThis.fetch = vi.fn(async () => gzippedResponse(gz)) as typeof fetch;
+
+    const out = await ensureAsset(testUrl, `pkg_pk_${sha}`, sha, () => {});
+    expect(Array.from(out)).toEqual(Array.from(raw));
+
+    expect(await assetStore.get(`pkg_pk_${oldSha}`)).toBeNull();
+    expect(await assetStore.get(`pkg_pk_${otherOldSha}`)).toBeNull();
+    expect(await assetStore.get(`pkg_wgen_${oldSha}`)).not.toBeNull();
+    expect(await assetStore.get("pkg_pk_legacy")).not.toBeNull();
+    expect(await assetStore.get(`pkg_pk_${sha}`)).not.toBeNull();
+  });
 });
 
 describe("clearAllAssets", () => {
