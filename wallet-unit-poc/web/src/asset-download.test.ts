@@ -70,7 +70,6 @@ describe("ensureAsset", () => {
 
     const cached = await assetStore.get("cache-key-mismatch");
     expect(cached).toBeNull();
-    // No `.partial` orphan should leak — abort() must clean up.
     expect(await assetStore.get("cache-key-mismatch.partial")).toBeNull();
   });
 
@@ -170,8 +169,6 @@ describe("ensureAsset", () => {
     const writer = w.stream.getWriter();
     await writer.write(new Uint8Array([4, 5, 6]));
     await writer.close();
-    // pipeTo() closes the stream before the SHA check; bytes must NOT be
-    // visible at the canonical key yet.
     expect(await assetStore.get("writer-commit-key")).toBeNull();
     await w.commit();
     expect(Array.from((await assetStore.get("writer-commit-key"))!)).toEqual([
@@ -184,7 +181,6 @@ describe("ensureAsset", () => {
     const otherOldSha = "b".repeat(64);
     await assetStore.put(`pkg_pk_${oldSha}`, new Uint8Array([1]));
     await assetStore.put(`pkg_pk_${otherOldSha}`, new Uint8Array([2]));
-    // A `.partial` orphan from a hypothetical prior crash — must be swept too.
     await assetStore.put(`pkg_pk_${otherOldSha}.partial`, new Uint8Array([5]));
     // Same prefix family but different role → must NOT be swept.
     await assetStore.put(`pkg_wgen_${oldSha}`, new Uint8Array([3]));

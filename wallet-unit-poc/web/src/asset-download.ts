@@ -105,9 +105,8 @@ export async function ensureAsset(
   return stored;
 }
 
-// Cache keys are <prefix>_<64-hex-sha>. Once the new SHA verifies, drop any
-// sibling under the same prefix so old releases don't accumulate in OPFS —
-// including stale `.partial` files from a crashed prior warmup.
+// Cache keys are `<prefix>_<sha>` (or `<prefix>_<sha>.partial` mid-write); the
+// reaper drops both on each successful verify under the same prefix.
 const KEY_SHA_SUFFIX = /^(.*)_[0-9a-f]{64}$/;
 const SIBLING_TAIL = new RegExp(
   `_[0-9a-f]{64}(?:${PARTIAL_SUFFIX.replace(/\./g, "\\.")})?$`,

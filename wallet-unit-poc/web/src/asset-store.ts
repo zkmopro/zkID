@@ -1,9 +1,7 @@
-// Asset storage: OPFS primary, IndexedDB fallback.
-//
-// Cache keys embed the upstream SHA-256 — a key-hit implies the bytes were
-// verified at write-time, so no rehash on read. Writes stage to <key>.partial
-// and only commit (rename to <key>) after the caller verifies the SHA, so a
-// crash mid-stream cannot leave a poisoned committed key.
+// Asset storage: OPFS primary, IndexedDB fallback. Cache keys embed the
+// upstream SHA-256 (a key-hit implies prior verification). Writes stage at
+// `<key>.partial` and rename atomically on commit — a crash mid-stream
+// cannot leave a poisoned committed key.
 
 export interface AssetWriter {
   stream: WritableStream<Uint8Array>;
@@ -24,9 +22,8 @@ export interface AssetStore {
 export const PARTIAL_SUFFIX = ".partial";
 
 function hasOPFS(): boolean {
-  // The atomic `.partial`→canonical commit relies on FileSystemFileHandle.move()
-  // — landed in Chrome 110, Firefox 111, Safari 17.4. Fall back to IDB on
-  // older browsers rather than throwing at commit time.
+  // Atomic commit needs `FileSystemFileHandle.move()` — Chrome 110, Firefox 111,
+  // Safari 17.4. Older browsers fall back to IDB.
   return (
     typeof navigator !== "undefined" &&
     "storage" in navigator &&
@@ -39,8 +36,6 @@ function hasOPFS(): boolean {
   );
 }
 
-// OPFS APIs land in lib.dom over time; cast through these shapes until the
-// shipped TS lib catches up.
 type Moveable = { move(name: string): Promise<void> };
 type AsyncIterableDir = {
   [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
@@ -86,8 +81,8 @@ const opfsStore: AssetStore = {
     return {
       stream: writable,
       async commit() {
-        // Overwrite-on-rename is browser-specific in OPFS — delete-then-move
-        // keeps behavior portable across Safari/Chrome/Firefox.
+        // Overwrite-on-rename is browser-specific in OPFS; delete-then-move
+        // keeps behavior portable.
         await opfsRemove(root, key);
         await (handle as unknown as Moveable).move(key);
       },
@@ -216,8 +211,7 @@ const idbStore: AssetStore = {
         for (const c of chunks) total += c.byteLength;
         const merged = new Uint8Array(total);
         let off = 0;
-        // Drop each chunk reference as we copy it so peak heap stays at ~1×
-        // the asset size during the merge instead of 2×.
+        // Drop each chunk as we copy so peak heap stays ~1× the asset size.
         for (let i = 0; i < chunks.length; i++) {
           const c = chunks[i];
           merged.set(c, off);
@@ -246,8 +240,7 @@ const idbStore: AssetStore = {
       return keys.map(String);
     }),
   async purgePartials() {
-    // IDB writers buffer in JS heap and only put() at commit() — there are no
-    // half-written rows in the store. No-op for parity with the OPFS backend.
+    // IDB writers buffer in JS heap; no .partial state to purge.
   },
   async clearAll() {
     await new Promise<void>((resolve, reject) => {

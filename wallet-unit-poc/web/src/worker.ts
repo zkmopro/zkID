@@ -328,10 +328,8 @@ async function runWarmup(): Promise<void> {
 
     const pkBytes: Partial<Record<Kind, Uint8Array>> = {};
     const ROLE_LABEL: Record<Role, string> = { pk: "pk", wgen: "witness-wasm" };
-    // Concurrency 2: caps peak JS-heap on the IDB fallback path (each writer
-    // buffers full decompressed bytes — RS4096 PK is ~500 MB) while still
-    // overlapping network for ~2× warmup speedup. OPFS is heap-light but
-    // gains the same throughput because per-asset speed is network-bound.
+    // 2 caps IDB-fallback heap (each writer buffers full decompressed bytes;
+    // RS4096 PK ≈ 500 MB).
     const WARMUP_CONCURRENCY = 2;
     await mapWithConcurrency(jobs, WARMUP_CONCURRENCY, async (job) => {
       if (cancelled) return;
