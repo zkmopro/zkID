@@ -235,6 +235,25 @@ function errorMessage(err: unknown): string {
   }
 }
 
+async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (true) {
+        const i = next++;
+        if (i >= items.length) return;
+        await fn(items[i]);
+      }
+    },
+  );
+  await Promise.all(workers);
+}
+
 function postError(where: string, err: unknown): void {
   const msg: Extract<Progress, { step: "error" }> = {
     step: "error",
@@ -282,40 +301,55 @@ async function runWarmup(): Promise<void> {
       "cert_chain_rs4096",
       "device_sig_rs2048",
     ];
-    const pkBytes: Partial<Record<Kind, Uint8Array>> = {};
-    for (const kind of kinds) {
+
+    type Role = "pk" | "wgen";
+    interface Job {
+      kind: Kind;
+      role: Role;
+      url: string;
+      key: string;
+      sha: string;
+    }
+    const jobs: Job[] = kinds.flatMap((kind) => {
       const m = CIRCUITS[kind];
       const pkSha = requireDigest(digests.keys, basename(m.pkUrl));
       const wgenSha = requireDigest(digests.keys, basename(m.witnessWasmUrl));
-      pkBytes[kind] = await ensureAsset(m.pkUrl, `${kind}_pk_${pkSha}`, pkSha, (p) =>
+      return [
+        { kind, role: "pk" as const, url: m.pkUrl, key: `${kind}_pk_${pkSha}`, sha: pkSha },
+        {
+          kind,
+          role: "wgen" as const,
+          url: m.witnessWasmUrl,
+          key: `${kind}_wgen_${wgenSha}`,
+          sha: wgenSha,
+        },
+      ];
+    });
+
+    const pkBytes: Partial<Record<Kind, Uint8Array>> = {};
+    const ROLE_LABEL: Record<Role, string> = { pk: "pk", wgen: "witness-wasm" };
+    // Concurrency 2: caps peak JS-heap on the IDB fallback path (each writer
+    // buffers full decompressed bytes — RS4096 PK is ~500 MB) while still
+    // overlapping network for ~2× warmup speedup. OPFS is heap-light but
+    // gains the same throughput because per-asset speed is network-bound.
+    const WARMUP_CONCURRENCY = 2;
+    await mapWithConcurrency(jobs, WARMUP_CONCURRENCY, async (job) => {
+      if (cancelled) return;
+      const bytes = await ensureAsset(job.url, job.key, job.sha, (p) =>
         post({
           step: "warmup",
           status: "in_progress",
           phase: "download",
-          asset: `${KIND_LABEL[kind]} pk`,
+          asset: `${KIND_LABEL[job.kind]} ${ROLE_LABEL[job.role]}`,
           bytesDone: p.bytesDone,
           bytesTotal: p.bytesTotal,
-          kind,
+          kind: job.kind,
         }),
       );
-      if (cancelled) return;
-      witnessCache[kind] = await ensureAsset(
-        m.witnessWasmUrl,
-        `${kind}_wgen_${wgenSha}`,
-        wgenSha,
-        (p) =>
-          post({
-            step: "warmup",
-            status: "in_progress",
-            phase: "download",
-            asset: `${KIND_LABEL[kind]} witness-wasm`,
-            bytesDone: p.bytesDone,
-            bytesTotal: p.bytesTotal,
-            kind,
-          }),
-      );
-      if (cancelled) return;
-    }
+      if (job.role === "pk") pkBytes[job.kind] = bytes;
+      else witnessCache[job.kind] = bytes;
+    });
+    if (cancelled) return;
 
     for (const kind of kinds) {
       post({ step: "warmup", status: "in_progress", phase: "load", kind });
