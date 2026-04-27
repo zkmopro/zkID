@@ -166,6 +166,29 @@ jobs:
                     gzip -k "$f"
                   done
 
+            - name: Generate web /keys manifest.json
+              run: |
+                  set -euo pipefail
+                  OUT="$GITHUB_WORKSPACE/wallet-unit-poc/ecdsa-spartan2/keys/manifest.json"
+                  KEYS_DIR="$GITHUB_WORKSPACE/wallet-unit-poc/ecdsa-spartan2/keys"
+                  BUILD_DIR="$GITHUB_WORKSPACE/wallet-unit-poc/circom/build"
+                  sha() { sha256sum "$1" | awk '{print $1}'; }
+                  printf '{\n  "assets": {\n' > "$OUT"
+                  first=1
+                  emit() {
+                    local published_name="$1" decompressed_src="$2"
+                    if [ "$first" -eq 1 ]; then first=0; else printf ',\n' >> "$OUT"; fi
+                    printf '    "%s": { "sha256_decompressed": "%s" }' \
+                      "$published_name" "$(sha "$decompressed_src")" >> "$OUT"
+                  }
+                  for circuit in cert_chain_rs2048 cert_chain_rs4096 device_sig_rs2048; do
+                    emit "${circuit}_proving.key.gz" "${KEYS_DIR}/${circuit}_proving.key"
+                    emit "${circuit}.wasm.gz" \
+                      "${BUILD_DIR}/${circuit}/${circuit}_js/${circuit}.wasm"
+                  done
+                  printf '\n  }\n}\n' >> "$OUT"
+                  cat "$OUT"
+
             - name: Upload artifacts to GitHub Release
               if: github.event_name == 'push' && github.ref == 'refs/heads/main'
               uses: softprops/action-gh-release@v2
@@ -178,6 +201,7 @@ jobs:
                       wallet-unit-poc/ecdsa-spartan2/keys/cert_chain_rs4096_verifying.key.gz
                       wallet-unit-poc/ecdsa-spartan2/keys/device_sig_rs2048_proving.key.gz
                       wallet-unit-poc/ecdsa-spartan2/keys/device_sig_rs2048_verifying.key.gz
+                      wallet-unit-poc/ecdsa-spartan2/keys/manifest.json
                       wallet-unit-poc/circom/build/cert_chain_rs2048/cert_chain_rs2048_js/cert_chain_rs2048.r1cs.gz
                       wallet-unit-poc/circom/build/cert_chain_rs4096/cert_chain_rs4096_js/cert_chain_rs4096.r1cs.gz
                       wallet-unit-poc/circom/build/device_sig_rs2048/device_sig_rs2048_js/device_sig_rs2048.r1cs.gz
