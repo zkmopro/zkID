@@ -156,10 +156,15 @@ export function applyProgress(p: Progress): void {
     }
     case "error": {
       const e = p as ErrorEvent;
-      // Warmup errors route to $warmup (Assets panel); SMT engine load errors
-      // route to $smt; proving errors land on whichever proving step is live.
+      // Warmup / manifest errors route to $warmup (Assets panel); SMT engine
+      // load errors route to $smt; proving errors land on whichever proving
+      // step is live.
+      if (e.where === "manifest") {
+        $warmup.set({ status: "error", message: e.message, kind: "manifest" });
+        return;
+      }
       if (e.where === "warmup") {
-        $warmup.set({ status: "error", message: e.message });
+        $warmup.set({ status: "error", message: e.message, kind: "warmup" });
         return;
       }
       if (e.where === "smt_load") {

@@ -61,7 +61,7 @@ export type WarmupState =
   | { status: "idle" }
   | { status: "running"; sublabel: string; bytesDone?: number; bytesTotal?: number }
   | { status: "ready" }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; kind?: "warmup" | "manifest" };
 
 /** Revocation-tree load status. Triggered by HiPKI reaching `card_ready`
  *  (because the issuer is only known after the card is parsed) and gates

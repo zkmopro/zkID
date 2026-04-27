@@ -232,7 +232,10 @@ export function mountSetup(root: HTMLElement): () => void {
         assetsRetry.disabled = false;
         break;
       case "error":
-        assetsBody.textContent = `Error: ${state.message}`;
+        assetsBody.textContent =
+          state.kind === "manifest"
+            ? "Cannot reach release manifest. Check connection and retry."
+            : `Error: ${state.message}`;
         assetsRetry.hidden = false;
         assetsRetry.textContent = "Retry";
         assetsRetry.disabled = false;
