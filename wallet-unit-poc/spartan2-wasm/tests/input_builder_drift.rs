@@ -17,6 +17,11 @@ use x509_cert::{
     Certificate,
 };
 
+/// Same constant as ecdsa-spartan2/tests/split_input_generation.rs so all
+/// committed test JSONs use the same blind.
+const TEST_PK_BLIND: &str =
+    "452312848583266388373324160190187140051835877600158453279131187530910662655";
+
 const SIGN_RESPONSE_PATH: &str = "../ecdsa-spartan2/tests/testdata/response_sign_test.json";
 const PKCS11_RESPONSE_PATH: &str = "../ecdsa-spartan2/tests/testdata/pkcs11info_test.json";
 const RS4096_SIGN_RESPONSE_PATH: &str =
@@ -84,12 +89,14 @@ fn assert_split_inputs_match(
     let (native_cert, native_device) = generate_split_inputs(
         &user_cert, &issuer_cert, sig_b64, DEFAULT_TBS, serial_hex,
         smt_inputs, k_issuer, 17, MAX_CERT_CHAIN_LENGTH,
+        TEST_PK_BLIND,
     )
     .expect("native generate_split_inputs");
 
     let wasm_out = build_split_inputs_native_for_test(
         user_der, issuer_der, sig_b64, DEFAULT_TBS, serial_hex,
         smt_inputs, k_issuer, 17, MAX_CERT_CHAIN_LENGTH,
+        TEST_PK_BLIND,
     )
     .expect("wasm crate build_split_inputs");
 

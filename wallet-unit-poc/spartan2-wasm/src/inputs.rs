@@ -8,8 +8,8 @@ use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::prelude::*;
 use x509_cert::{der::{Decode, Encode}, Certificate};
 use zkid_input_builder::{
-    cert::serial_bytes_to_hex_trimmed, generate_split_inputs, types::SmtCircuitInputs, APP_ID_LEN,
-    MAX_CERT_CHAIN_LENGTH,
+    cert::serial_bytes_to_hex_trimmed, generate_split_inputs, random_pk_blind,
+    types::SmtCircuitInputs, APP_ID_LEN, MAX_CERT_CHAIN_LENGTH,
 };
 
 /// Two-JSON return shape. `cert_chain` + `device_sig` match the keys the
@@ -30,6 +30,7 @@ fn build_split_inputs_core(
     k_issuer: usize,
     k_user: usize,
     max_cert_length: usize,
+    pk_blind: &str,
 ) -> Result<SplitInputsJs, String> {
     let user_cert = Certificate::from_der(user_cert_der)
         .map_err(|e| format!("user cert DER parse: {e}"))?;
@@ -46,6 +47,7 @@ fn build_split_inputs_core(
         k_issuer,
         k_user,
         max_cert_length,
+        pk_blind,
     )
     .map_err(|e| format!("generate_split_inputs: {e}"))?;
 
@@ -95,6 +97,7 @@ pub fn build_split_inputs(
         )
     };
 
+    let pk_blind = random_pk_blind();
     let out = build_split_inputs_core(
         user_cert_der,
         issuer_cert_der,
@@ -105,6 +108,7 @@ pub fn build_split_inputs(
         k_issuer as usize,
         k_user as usize,
         MAX_CERT_CHAIN_LENGTH,
+        &pk_blind,
     )
     .map_err(|e| JsError::new(&e))?;
 
@@ -144,22 +148,6 @@ pub fn cert_serial_hex(cert_der: &[u8]) -> Result<String, JsError> {
     ))
 }
 
-/// Compute `pk_blind = SHA-256(user_pk_be || app_id_bytes || "zkID/pk-commit/v1")`.
-/// Exposed for debugging and UI consistency checks; the main wasm entry
-/// point `build_split_inputs` computes this internally.
-#[wasm_bindgen]
-pub fn compute_pk_blind(user_pk_be: &[u8], app_id_bytes: &[u8]) -> String {
-    use num_bigint::BigUint;
-    use sha2::{Digest, Sha256};
-
-    let mut hasher = Sha256::new();
-    hasher.update(user_pk_be);
-    hasher.update(app_id_bytes);
-    hasher.update(b"zkID/pk-commit/v1");
-    let digest = hasher.finalize();
-    BigUint::from_bytes_be(&digest).to_string()
-}
-
 /// Native-target entry for the drift integration test. Never compiled for
 /// wasm32 — the public `build_split_inputs` is the only exported surface.
 #[cfg(not(target_arch = "wasm32"))]
@@ -173,6 +161,7 @@ pub fn build_split_inputs_native_for_test(
     k_issuer: usize,
     k_user: usize,
     max_cert_length: usize,
+    pk_blind: &str,
 ) -> Result<SplitInputsJs, String> {
     build_split_inputs_core(
         user_cert_der,
@@ -184,5 +173,6 @@ pub fn build_split_inputs_native_for_test(
         k_issuer,
         k_user,
         max_cert_length,
+        pk_blind,
     )
 }
