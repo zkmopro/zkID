@@ -4,9 +4,11 @@ Spartan2-based proving tooling for the zkID wallet proof of concept.
 
 Two linked circuits prove certificate ownership without revealing personal data:
 - **cert-chain** (Circuit A): certificate chain verification + SMT revocation + pk_commit
-- **device-sig** (Circuit B): device signature verification + pk_commit + packed_tbs
+- **device-sig** (Circuit B): device signature verification + pk_commit + nullifier + app_id binding
 
 Proofs are bound via `pk_commit = ChunkedPoseidonP256(user_pk_limbs ‖ pk_blind)` — computed identically in both circuits so the verifier can check `pk_commit_A == pk_commit_B`.
+
+The `nullifier = ChunkedPoseidonP256(user_rsa_signature)` is emitted by Circuit B. Because the signature is private to the cardholder and PKCS#1 v1.5 is deterministic, the nullifier is per-(card, app_id) deterministic and unforgeable without the private key.
 
 ## Prerequisites
 
@@ -126,12 +128,11 @@ RUST_LOG=info cargo run --release -- link-verify --cert-chain-4096
 
 | Flag | Default | Description |
 |---|---|---|
-| `--pin <PIN>` | *(off)* | Enables live mode — signs TBS via HiPKI card |
+| `--pin <PIN>` | *(off)* | Enables live mode — signs the 31-byte `app_id` via HiPKI card |
 | `--cert-chain-4096` / `-4` | rs2048 | Use RSA-4096 issuer (MOICA-G3) |
 | `--smt-server <URL>` | *(off)* | Fetch SMT non-membership proof for revocation |
 | `--hipki-server <URL>` | `http://localhost:61161` | HiPKI LocalSignServer endpoint |
 | `--challenge-server <URL>` | `http://localhost:8080` | go-zkid-verifier challenge endpoint |
-| `--app-id <DECIMAL>` | `0` | Application identifier bound into `nullifier`; must match the verifier's expected value |
 
 ## Benchmark
 

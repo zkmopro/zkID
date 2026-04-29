@@ -107,7 +107,6 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     let mut challenge_server = ecdsa_spartan2::challenge_client::default_server_url().to_string();
     let mut cert_chain_output = "../circom/inputs/cert_chain_rs2048/input.json".to_string();
     let mut device_sig_output = "../circom/inputs/device_sig_rs2048/input.json".to_string();
-    let mut app_id = "0".to_string();
 
     let mut i = 1;
     while i < command_args.len() {
@@ -126,7 +125,6 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             "--challenge-server" => {
                 challenge_server = require_arg(command_args, &mut i, "--challenge-server")
             }
-            "--app-id" => app_id = require_arg(command_args, &mut i, "--app-id"),
             _ => {}
         }
         i += 1;
@@ -245,7 +243,6 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         k_issuer,
         k_user,
         max_cert_length,
-        &app_id,
     )
     .unwrap_or_else(|e| {
         eprintln!("Error generating split inputs: {}", e);
@@ -268,13 +265,11 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     process::exit(0);
 }
 
-/// `link-verify` CLI: verify both proofs and check pk_commit equality.
+/// Verify both proofs and check `pk_commit_A == pk_commit_B` to bind them to
+/// the same user key.
 ///
-/// CertChain public values: [nullifier, pk_commit, issuer_modulus..., smtRoot]
-/// DeviceSig public values: [pk_commit, packed_tbs]
-///
-/// The verifier checks `pk_commit_A == pk_commit_B` to bind the two proofs
-/// and prevent proof-mixing attacks.
+/// CertChain public values: [pk_commit, issuer_modulus..., smtRoot]
+/// DeviceSig public values: [pk_commit, nullifier, app_id_bytes[31]]
 fn run_link_verify(command_args: &[String]) -> ! {
     let rs4096 = command_args.contains(&"--cert-chain-4096".to_string())
         || command_args.contains(&"-4".to_string());
@@ -297,10 +292,10 @@ fn run_link_verify(command_args: &[String]) -> ! {
         path_config.key_path(DeviceSigRsa2048::VERIFYING_KEY),
     );
 
-    // pk_commit is at index 1 for cert-chain (after nullifier output)
-    // pk_commit is at index 0 for device-sig (first output)
-    let pk_commit_a = &cc_public_values[1];
+    let pk_commit_a = &cc_public_values[0];
     let pk_commit_b = &ds_public_values[0];
+    let nullifier = &ds_public_values[1];
+    let app_id_field_elements = &ds_public_values[2..2 + 31];
 
     use ff::PrimeField;
     use subtle::ConstantTimeEq;
@@ -310,8 +305,15 @@ fn run_link_verify(command_args: &[String]) -> ! {
         .ct_eq(pk_commit_b.to_repr().as_ref())
         .into();
     if commits_match {
+        // Each field element holds one byte (0..256) at the LSB of its LE repr.
+        let app_id_hex: String = app_id_field_elements
+            .iter()
+            .map(|fe| format!("{:02x}", fe.to_repr().as_ref()[0]))
+            .collect();
         info!(
             pk_commit = ?pk_commit_a,
+            nullifier = ?nullifier,
+            app_id = %app_id_hex,
             "Link verification PASSED: pk_commit_A == pk_commit_B"
         );
         process::exit(0);
