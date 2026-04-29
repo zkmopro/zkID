@@ -6,9 +6,9 @@ Two linked circuits prove certificate ownership without revealing personal data:
 - **cert-chain** (Circuit A): certificate chain verification + SMT revocation + pk_commit
 - **device-sig** (Circuit B): device signature verification + pk_commit + nullifier + app_id binding
 
-Proofs are bound via `pk_commit = ChunkedPoseidonP256(user_pk_limbs ‖ pk_blind)` — computed identically in both circuits so the verifier can check `pk_commit_A == pk_commit_B`. `pk_blind` is a per-session 248-bit uniform sample (see `circom/SPEC.md` §"Why per-session randomness for `pk_blind`"), ensuring `pk_commit` hides the user key even against an adversary holding the full MOICA cert directory.
+Proofs are bound via `pk_commit = ChunkedPoseidonP256(user_pk_limbs ‖ pk_blind)` — computed identically in both circuits so the verifier can check `pk_commit_A == pk_commit_B`. `pk_blind` is a per-session 248-bit uniform sample; see [`circom/SPEC.md`](../circom/SPEC.md#why-per-session-randomness-for-pk_blind) for the threat model.
 
-The `nullifier = ChunkedPoseidonP256(user_rsa_signature)` is emitted by Circuit B. Because the signature is private to the cardholder and PKCS#1 v1.5 is deterministic, the nullifier is per-(card, app_id) deterministic and unforgeable without the private key.
+Circuit B also emits `nullifier = ChunkedPoseidonP256(user_rsa_signature)`, which is deterministic per `(card, app_id)` and unforgeable without the card's private key.
 
 ## Prerequisites
 

@@ -48,12 +48,10 @@ Circuit A and Circuit B are linked via `pk_commit`: the verifier checks
    over `tbs`. Proves the holder of the user's private key signed `app_id_bytes`.
 3. **Linking** — same `pk_commit` formula as Circuit A, using the same
    `pk_blind` value.
-4. **Nullifier** — `nullifier = ChunkedPoseidonP256(user_rsa_signature)` (public
-   output). Because PKCS#1 v1.5 signing is deterministic and the signature is
-   never disclosed off-card, the nullifier is per-(card, app_id) deterministic
-   and unforgeable without the private key — replacing the previous
-   `Poseidon(subject_dn ‖ app_id)` formula, which was vulnerable to dictionary
-   attacks because both inputs were observable.
+4. **Nullifier** — `nullifier = ChunkedPoseidonP256(user_rsa_signature)`
+   (public output). PKCS#1 v1.5 signing is deterministic and the signature
+   never leaves the card, so the nullifier is deterministic per
+   `(card, app_id)` and unforgeable without the card's private key.
 
 ## Public inputs / outputs
 
@@ -92,25 +90,20 @@ the tree rooted at `smtRoot`.
 
 ## Why per-session randomness for `pk_blind`
 
-`pk_commit` must hide the user's RSA modulus from any party who only sees
+`pk_commit` must hide the user's RSA modulus from anyone who sees only the
 public proof outputs (`pk_commit`, `nullifier`, `app_id_bytes`,
-`issuer_rsa_modulus`, `smtRoot`). The threat model includes an adversary
-holding the full MOICA cert directory — i.e. every citizen's `user_pk`.
-Under that model, **any deterministic derivation of `pk_blind` from
-public-or-leaked inputs falls to a dictionary attack**: the adversary
-recomputes the candidate `pk_commit` for each `user_pk` they hold and
-matches against the observed value.
+`issuer_rsa_modulus`, `smtRoot`). The assumed adversary holds the full MOICA
+cert directory — every citizen's `user_pk`. Any deterministic derivation of
+`pk_blind` from public or leaked inputs lets that adversary recompute
+`pk_commit` for each `user_pk` and match against the observed value.
 
-The fix is structural — `pk_blind` must be unknown to the adversary.
-Per-session uniform randomness achieves this with information-theoretic
-hiding: every `user_pk` candidate is equally consistent with the observed
-`pk_commit`.
+A per-session uniform 248-bit `pk_blind` removes that attack: every `user_pk`
+candidate is equally consistent with the observed `pk_commit`.
 
-Sybil resistance per `(card, app_id)` is unaffected because it is now
-carried by `nullifier = ChunkedPoseidonP256(user_rsa_signature)`, whose
-secrecy rests on the RSA private key never leaving the card. `pk_commit`
-only needs to link Circuits A and B within a single proof submission, so
-fresh randomness is the simplest construction that meets the requirement.
+`pk_commit` only needs to link Circuits A and B within a single submission,
+so it doesn't need to be reproducible. Sybil resistance per `(card, app_id)`
+is carried by `nullifier = ChunkedPoseidonP256(user_rsa_signature)` instead,
+whose secrecy rests on the RSA private key never leaving the card.
 
 ## See also
 

@@ -29,15 +29,16 @@ CI runs this under `.github/workflows/web-tests.yaml` alongside the drift guard.
 ## Public surface
 
 - `generate_split_inputs(user_cert, issuer_cert, user_signature_b64, app_id_bytes, serial_hex, smt_inputs, k_issuer, k_user, max_cert_length, pk_blind)`
-  — returns `(cert_chain_json, device_sig_json)`. Caller supplies `pk_blind`
-  (a decimal-string field element) and the function threads it into both
-  circuits — the verifier checks `pk_commit_A == pk_commit_B`. Use
-  `random_pk_blind()` for fresh per-session sampling, or pass a fixed test
-  constant for reproducible inputs (drift tests, committed circuit fixtures).
-  The `nullifier` (Circuit B output) is
-  `ChunkedPoseidonP256(user_rsa_signature)` — deterministic per (card,
-  app_id_bytes), unforgeable without the private key.
-- `APP_ID_LEN = 31` — re-exported constant; pass exactly this many bytes.
+  — returns `(cert_chain_json, device_sig_json)`. The caller supplies
+  `pk_blind` as a decimal-string field element; it is threaded into both
+  circuits so the verifier can check `pk_commit_A == pk_commit_B`. Use
+  `random_pk_blind()` for fresh per-session sampling in production; pass a
+  fixed value when reproducibility matters (drift tests, committed circuit
+  fixtures). Circuit B also emits
+  `nullifier = ChunkedPoseidonP256(user_rsa_signature)`, deterministic per
+  `(card, app_id_bytes)`.
+- `APP_ID_LEN = 31` — re-exported constant; `app_id_bytes` must be exactly
+  this length.
 - `SmtCircuitInputs` — decimal-string field struct matching the Rust/TS
   interchange format used by both provers.
 - `parse_cert_offsets` — DER offset helpers for the cert-chain circuit's

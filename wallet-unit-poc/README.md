@@ -5,10 +5,9 @@ Given a MOICA user certificate (RSA-SHA256 / RS256) and a device signature over
 the relying-party `app_id`, the prover emits two Spartan2 proofs that together
 attest to (a) a valid cert chain to a known issuer, (b) non-revocation of the
 user cert against an SMT root, and (c) possession of the user private key —
-without revealing personal data from the cert. The `nullifier` is derived from
-the RSA signature itself (`Poseidon(user_rsa_signature)`), so a proof issued
-for one relying party cannot be replayed at another, and an observer cannot
-precompute nullifiers from public inputs alone.
+without revealing personal data from the cert. The `nullifier` is
+`Poseidon(user_rsa_signature)`: deterministic per `(card, app_id)`, and
+unforgeable without the card's private key.
 
 Three proving surfaces share the same circuits, input builder, and proving engine:
 
