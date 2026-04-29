@@ -12,7 +12,6 @@ use base64::Engine as _;
 use der::Encode;
 use num_bigint::BigUint;
 use rsa::{pkcs8::DecodePublicKey, traits::PublicKeyParts, RsaPublicKey};
-use sha2::{Digest, Sha256};
 use x509_cert::Certificate;
 
 const RSA_N: usize = 121;
@@ -22,9 +21,14 @@ const MAX_SUBJECT_DN_LENGTH: usize = 128;
 const SMT_DEPTH: usize = 128;
 pub const APP_ID_LEN: usize = 31;
 
-/// `pk_blind = SHA-256(user_pk_bytes || app_id_bytes || "zkID/pk-commit/v1")`
-/// — derives per-session freshness from the signed payload, no fresh entropy
-/// needed on the wire.
+/// Build the cert-chain + device-sig circuit input JSONs.
+///
+/// `pk_blind` is the per-session linking blind shared between Circuits A and B.
+/// Caller is responsible for sampling it (typically via
+/// [`crate::random::random_pk_blind`]) and using the **same** value for both
+/// circuits — the verifier checks `pk_commit_A == pk_commit_B`.
+///
+/// See `circom/SPEC.md` §Linking for the security rationale.
 pub fn generate_split_inputs(
     user_cert: &Certificate,
     issuer_cert: &Certificate,
@@ -35,6 +39,7 @@ pub fn generate_split_inputs(
     k_issuer: usize,
     k_user: usize,
     max_cert_length: usize,
+    pk_blind: &str,
 ) -> Result<(serde_json::Value, serde_json::Value), Box<dyn std::error::Error>> {
     if app_id_bytes.len() != APP_ID_LEN {
         return Err(format!(
@@ -87,14 +92,6 @@ pub fn generate_split_inputs(
             .collect();
     let issuer_tbs_padded_len = sha256_padded_length(user_cert_tbs_der.len());
 
-    let user_pk_bytes = user_rsa_pub.n().to_bytes_be();
-    let mut hasher = Sha256::new();
-    hasher.update(&user_pk_bytes);
-    hasher.update(app_id_bytes);
-    hasher.update(b"zkID/pk-commit/v1");
-    let pk_blind_hash = hasher.finalize();
-    let pk_blind = BigUint::from_bytes_be(&pk_blind_hash).to_string();
-
     let serial_decimal = BigUint::parse_bytes(serial_hex.as_bytes(), 16)
         .ok_or_else(|| format!("serial_hex is not valid hex: {serial_hex:?}"))?
         .to_string();
@@ -122,7 +119,7 @@ pub fn generate_split_inputs(
         "smtOldKey": smt_old_key,
         "smtOldValue": smt_old_value,
         "smtIsOld0": smt_is_old0,
-        "pk_blind": &pk_blind,
+        "pk_blind": pk_blind,
     });
 
     let device_sig_json = serde_json::json!({
