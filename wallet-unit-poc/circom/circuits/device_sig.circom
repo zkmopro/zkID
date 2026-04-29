@@ -4,45 +4,40 @@ include "rs256.circom";
 include "components/pk_commit.circom";
 
 /// @title DeviceSigRSA256
-/// @notice Phase 2 split — Circuit B of the CertChain + DeviceSig pair.
-///         Proves: "I just signed `tbs` with the RSA private key whose public
-///         key (combined with pk_blind) hashes to pk_commit."
+/// @notice Circuit B of the CertChain + DeviceSig pair. Verifies an RSA
+///         signature over `app_id_bytes`, emits `pk_commit` (matched against
+///         CertChainRSA256) and `nullifier = ChunkedPoseidonP256(signature)`.
+///         Determinism of PKCS#1 v1.5 over a fixed payload makes the nullifier
+///         per-(card, app_id) stable; signature stays private to the card, so
+///         it cannot be precomputed from public inputs.
 ///
-///         Replaces the user-device-signature half of the legacy
-///         FullCertRSA256VerifyWithRevocation. Pairs with CertChainRSA256 in
-///         cert_chain.circom; the verifier checks pk_commit_A == pk_commit_B
-///         to bind the two proofs to the same user.
+///         The card signs the SHA-256-padded `tbs`, not the raw 31 bytes;
+///         binding `tbs[0..31] === app_id_bytes` is sufficient because any
+///         tamper to the padding region changes the digest and breaks RSA verify.
 ///
-///         `tbs` is the arbitrary byte string the HiPKI card signs via its
-///         /sign endpoint — semantically a server challenge. The circuit
-///         outputs a PackBytes commitment to it (`packed_tbs`) so the verifier
-///         can confirm what was signed.
-///
-/// @param maxMessageLength  Max byte length of `tbs` (e.g. 1536; Phase 3 will
-///                          tighten this to ~256 once HiPKI payload bound is
-///                          confirmed)
+/// @param maxMessageLength  Max byte length of `tbs` (1536)
 /// @param n                 RSA limb bits (e.g. 121)
 /// @param k                 RSA limb count (17 for 2048-bit, 34 for 4096-bit)
 template DeviceSigRSA256(maxMessageLength, n, k) {
-    // === User-signed payload ===
+    signal input app_id_bytes[31];
+
+    // SHA-256-padded form of app_id_bytes; produced by the input builder.
     signal input tbs[maxMessageLength];
     signal input tbs_length;
 
-    // === User's RSA public key + signature (private) ===
     signal input user_pk_limbs[k];
     signal input user_rsa_signature[k];
 
-    // === Linking (private; must match CertChainRSA256's pk_blind) ===
+    // Must match CertChainRSA256's pk_blind.
     signal input pk_blind;
 
-    // === Outputs ===
-    var BYTES_PER_FIELD = 31;
-    var N_FIELDS = (maxMessageLength + BYTES_PER_FIELD - 1) \ BYTES_PER_FIELD;
-
     signal output pk_commit;
-    signal output packed_tbs;
+    signal output nullifier;
 
-    // --- Step 1: device-signature verify (user_pk verifies sig over tbs) ---
+    for (var i = 0; i < 31; i++) {
+        tbs[i] === app_id_bytes[i];
+    }
+
     CertRSA256Verify(maxMessageLength, n, k)(
         tbs,
         tbs_length,
@@ -50,8 +45,6 @@ template DeviceSigRSA256(maxMessageLength, n, k) {
         user_rsa_signature
     );
 
-    // --- Step 2: pk_commit = ChunkedPoseidonP256(user_pk_limbs ‖ pk_blind) ---
-    //     Same construction as CertChainRSA256 — verifier asserts equality.
     component pkCommit = ChunkedPoseidonP256(k + 1);
     for (var i = 0; i < k; i++) {
         pkCommit.inputs[i] <== user_pk_limbs[i];
@@ -59,9 +52,9 @@ template DeviceSigRSA256(maxMessageLength, n, k) {
     pkCommit.inputs[k] <== pk_blind;
     pk_commit <== pkCommit.out;
 
-    // --- Step 3: packed_tbs commits to what was signed (public output) ---
-    var MAX_TBS_BYTES = 31;
-    signal packed_tbs_fields[1];
-    PackBytes(MAX_TBS_BYTES, maxMessageLength)(tbs) ==> packed_tbs_fields;
-    packed_tbs <== packed_tbs_fields[0];
+    component nullifierHash = ChunkedPoseidonP256(k);
+    for (var i = 0; i < k; i++) {
+        nullifierHash.inputs[i] <== user_rsa_signature[i];
+    }
+    nullifier <== nullifierHash.out;
 }

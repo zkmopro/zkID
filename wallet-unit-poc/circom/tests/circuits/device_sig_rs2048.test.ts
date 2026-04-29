@@ -4,8 +4,8 @@ import { loadInput } from "../common/fixtures";
 
 describe("DeviceSigRSA256 (rs2048)", function () {
   let circuit: WitnessTester<
-    ["tbs", "tbs_length", "user_pk_limbs", "user_rsa_signature", "pk_blind"],
-    ["pk_commit", "packed_tbs"]
+    ["app_id_bytes", "tbs", "tbs_length", "user_pk_limbs", "user_rsa_signature", "pk_blind"],
+    ["pk_commit", "nullifier"]
   >;
   let input: Record<string, any>;
 
