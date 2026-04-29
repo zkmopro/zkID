@@ -40,7 +40,7 @@ use ecdsa_spartan2::{
     save_keys, serial_bytes_to_hex_trimmed, setup_circuit_keys, setup_circuit_keys_no_save,
     verify_circuit, verify_circuit_with_loaded_data, CertChainCircuit, CertChainRs4096Circuit,
     CertChainRsa2048, CertChainRsa4096, DeviceSigRsa2048, PathConfig, RsaKeySize,
-    Sha256RsaCircuit, MAX_CERT_CHAIN_LENGTH,
+    Sha256RsaCircuit, APP_ID_LEN, MAX_CERT_CHAIN_LENGTH,
 };
 use std::{
     env::args,
@@ -147,8 +147,8 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     let (k_issuer, k_user) = if rs4096 { (34, 17) } else { (17, 17) };
     let max_cert_length = MAX_CERT_CHAIN_LENGTH;
 
-    let (user_cert, user_sig_b64, issuer_cert, serial_hex, tbs_bytes) = if let Some(ref pin) = pin {
-        info!(server = %challenge_server, "Fetching TBS challenge from verifier");
+    let (user_cert, user_sig_b64, issuer_cert, serial_hex, app_id_bytes) = if let Some(ref pin) = pin {
+        info!(server = %challenge_server, "Fetching challenge from verifier");
         let challenge_resp = ecdsa_spartan2::challenge_client::create_challenge(&challenge_server)
             .unwrap_or_else(|e| {
                 eprintln!("Failed to fetch challenge from {}: {}", challenge_server, e);
@@ -159,7 +159,25 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             expires_at = %challenge_resp.expires_at,
             "Challenge received"
         );
-        let tbs_hex = challenge_resp.challenge_bytes;
+        let app_id_hex = challenge_resp.app_id;
+        let app_id_bytes = hex::decode(&app_id_hex).unwrap_or_else(|e| {
+            eprintln!("Verifier returned non-hex app_id ({}): {}", app_id_hex, e);
+            process::exit(1);
+        });
+        if app_id_bytes.len() != APP_ID_LEN {
+            eprintln!(
+                "Verifier app_id decodes to {} bytes, expected {}",
+                app_id_bytes.len(),
+                APP_ID_LEN
+            );
+            process::exit(1);
+        }
+        let app_id_str = String::from_utf8(app_id_bytes.clone()).unwrap_or_else(|_| {
+            eprintln!(
+                "app_id from verifier is not valid UTF-8; APP_ID must hex-decode to a UTF-8-safe value (HiPKI /sign takes string tbs)"
+            );
+            process::exit(1);
+        });
 
         info!(server = %hipki_server, "Fetching certificate chain from HiPKI");
         let pkcs11info = ecdsa_spartan2::hipki_client::fetch_pkcs11info(&hipki_server)
@@ -173,8 +191,8 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
                 process::exit(1);
             });
 
-        info!(tbs = %tbs_hex, "Signing TBS via HiPKI card");
-        let sign_response = ecdsa_spartan2::hipki_client::sign_tbs(&hipki_server, &tbs_hex, pin)
+        info!(app_id = %app_id_hex, "Signing app_id via HiPKI card");
+        let sign_response = ecdsa_spartan2::hipki_client::sign_tbs(&hipki_server, &app_id_str, pin)
             .unwrap_or_else(|e| {
                 eprintln!("Failed to sign via HiPKI: {}", e);
                 process::exit(1);
@@ -194,7 +212,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             "Live input ready — save challenge_id for /verify"
         );
 
-        (user_cert, sign_response.signature, issuer_cert, serial_hex, tbs_hex.into_bytes())
+        (user_cert, sign_response.signature, issuer_cert, serial_hex, app_id_bytes)
     } else if rs4096 {
         let response_path = Path::new("tests/testdata/rs4096_response_sign.json");
         let issuer_cert = CertChainRs4096Circuit::fetch_cert_from_file("tests/testdata/test_ca_rs4096.der")
@@ -260,7 +278,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         &user_cert,
         &issuer_cert,
         &user_sig_b64,
-        &tbs_bytes,
+        &app_id_bytes,
         &serial_hex,
         smt_inputs.as_ref(),
         k_issuer,
