@@ -34,7 +34,10 @@ Circuit A and Circuit B are linked via `pk_commit`: the verifier checks
 3. **Revocation** — `SMTNonMembershipVerifier` proves `serialNumber` is **not**
    in the revocation tree rooted at `smtRoot`.
 4. **Linking** — `pk_commit = ChunkedPoseidonP256(user_pk_limbs ‖ pk_blind)`,
-   binding this proof to the same user key used in Circuit B.
+   where `pk_blind` is a per-session uniform 248-bit value sampled by the
+   prover. The same value is used in Circuit B; the verifier checks
+   `pk_commit_A == pk_commit_B`. See §"Why per-session randomness for `pk_blind`"
+   below.
 
 ### Circuit B — DeviceSig (`DeviceSigRSA256`)
 
@@ -86,6 +89,28 @@ maintained by the
 [`moica-revocation-smt`](https://github.com/moven0831/moica-revocation-smt)
 service. Circuit A verifies that the cert's `serialNumber` is not present in
 the tree rooted at `smtRoot`.
+
+## Why per-session randomness for `pk_blind`
+
+`pk_commit` must hide the user's RSA modulus from any party who only sees
+public proof outputs (`pk_commit`, `nullifier`, `app_id_bytes`,
+`issuer_rsa_modulus`, `smtRoot`). The threat model includes an adversary
+holding the full MOICA cert directory — i.e. every citizen's `user_pk`.
+Under that model, **any deterministic derivation of `pk_blind` from
+public-or-leaked inputs falls to a dictionary attack**: the adversary
+recomputes the candidate `pk_commit` for each `user_pk` they hold and
+matches against the observed value.
+
+The fix is structural — `pk_blind` must be unknown to the adversary.
+Per-session uniform randomness achieves this with information-theoretic
+hiding: every `user_pk` candidate is equally consistent with the observed
+`pk_commit`.
+
+Sybil resistance per `(card, app_id)` is unaffected because it is now
+carried by `nullifier = ChunkedPoseidonP256(user_rsa_signature)`, whose
+secrecy rests on the RSA private key never leaving the card. `pk_commit`
+only needs to link Circuits A and B within a single proof submission, so
+fresh randomness is the simplest construction that meets the requirement.
 
 ## See also
 

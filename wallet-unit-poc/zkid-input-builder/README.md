@@ -28,11 +28,13 @@ CI runs this under `.github/workflows/web-tests.yaml` alongside the drift guard.
 
 ## Public surface
 
-- `generate_split_inputs(user_cert, issuer_cert, user_signature_b64, app_id_bytes, serial_hex, smt_inputs, k_issuer, k_user, max_cert_length)`
-  — returns `(cert_chain_json, device_sig_json)`. `app_id_bytes` is the 31-byte
-  relying-party identifier the cardholder signed; it is exposed as a public
-  input on Circuit B and used (along with `user_pk_bytes`) to derive the
-  per-session `pk_blind`. The `nullifier` (Circuit B output) is
+- `generate_split_inputs(user_cert, issuer_cert, user_signature_b64, app_id_bytes, serial_hex, smt_inputs, k_issuer, k_user, max_cert_length, pk_blind)`
+  — returns `(cert_chain_json, device_sig_json)`. Caller supplies `pk_blind`
+  (a decimal-string field element) and the function threads it into both
+  circuits — the verifier checks `pk_commit_A == pk_commit_B`. Use
+  `random_pk_blind()` for fresh per-session sampling, or pass a fixed test
+  constant for reproducible inputs (drift tests, committed circuit fixtures).
+  The `nullifier` (Circuit B output) is
   `ChunkedPoseidonP256(user_rsa_signature)` — deterministic per (card,
   app_id_bytes), unforgeable without the private key.
 - `APP_ID_LEN = 31` — re-exported constant; pass exactly this many bytes.

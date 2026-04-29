@@ -74,11 +74,11 @@ All exports come from the generated `pkg/spartan2_wasm.js`.
   relying-party identifier the cardholder signed (length must equal 31).
   `smtInputs` accepts `null` (zero defaults) or a snake_case `SmtCircuitInputs`
   object. `kIssuer` is `17` for RSA-2048 issuers and `34` for RSA-4096.
-  Delegates to the shared [`zkid-input-builder`](../zkid-input-builder) crate
-  so the browser produces byte-identical JSON to `ecdsa-spartan2`'s
-  `generate_split_inputs`. Parity is pinned by `tests/input_builder_drift.rs`.
-- `compute_pk_blind(userPkBe, appIdBytes)` → decimal string. Exposed for UI
-  consistency checks; `build_split_inputs` already computes this internally.
+  `pk_blind` is sampled internally per call via `random_pk_blind()` — the
+  caller has no responsibility for it. Delegates to the shared
+  [`zkid-input-builder`](../zkid-input-builder) crate so the browser produces
+  byte-identical JSON to `ecdsa-spartan2`'s `generate_split_inputs`. Parity is
+  pinned by `tests/input_builder_drift.rs`.
 
 ## Separation from `ecdsa-spartan2`
 
