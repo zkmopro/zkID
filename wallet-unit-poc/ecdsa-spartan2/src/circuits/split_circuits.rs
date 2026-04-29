@@ -6,7 +6,7 @@
 
 use super::circuit::{RsaKeySize, Sha256RsaCircuit};
 
-pub use zkid_input_builder::{generate_split_inputs, MAX_CERT_CHAIN_LENGTH};
+pub use zkid_input_builder::{generate_split_inputs, random_pk_blind, MAX_CERT_CHAIN_LENGTH};
 
 #[cfg(feature = "cert_chain_rs2048")]
 witnesscalc_adapter::witness!(cert_chain_rs2048);

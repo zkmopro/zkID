@@ -9,6 +9,11 @@ use ecdsa_spartan2::{
     MAX_CERT_CHAIN_LENGTH,
 };
 
+/// Fixed 248-bit constant ((1 << 248) - 1) so split-input tests stay
+/// byte-deterministic across runs and across native/wasm builders.
+const TEST_PK_BLIND: &str =
+    "452312848583266388373324160190187140051835877600158453279131187530910662655";
+
 fn load_rs2048_fixtures() -> (x509_cert::Certificate, String, x509_cert::Certificate, String) {
     let response_str = std::fs::read_to_string("tests/testdata/response_sign_test.json")
         .expect("response_sign_test.json not found — run `cargo run --example generate_fixtures`");
@@ -63,6 +68,7 @@ fn split_inputs_have_expected_structure() {
         17,
         17,
         MAX_CERT_CHAIN_LENGTH,
+        TEST_PK_BLIND,
     )
     .expect("generate_split_inputs failed");
 
@@ -161,6 +167,7 @@ fn split_inputs_reject_wrong_length_app_id() {
         17,
         17,
         MAX_CERT_CHAIN_LENGTH,
+        TEST_PK_BLIND,
     );
     assert!(result.is_err(), "30-byte app_id should be rejected");
 }
@@ -179,6 +186,7 @@ fn split_inputs_share_pk_blind() {
         17,
         17,
         MAX_CERT_CHAIN_LENGTH,
+        TEST_PK_BLIND,
     )
     .expect("generate_split_inputs failed");
 
@@ -204,6 +212,7 @@ fn split_inputs_rs4096_have_expected_structure() {
         34,
         17,
         MAX_CERT_CHAIN_LENGTH,
+        TEST_PK_BLIND,
     )
     .expect("generate_split_inputs failed for RS4096");
 
@@ -306,6 +315,7 @@ fn split_inputs_rs4096_share_pk_blind() {
         34,
         17,
         MAX_CERT_CHAIN_LENGTH,
+        TEST_PK_BLIND,
     )
     .expect("generate_split_inputs failed for RS4096");
 

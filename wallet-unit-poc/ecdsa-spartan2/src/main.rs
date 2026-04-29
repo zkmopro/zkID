@@ -49,7 +49,8 @@ use std::{
     process,
 };
 use web_time::Instant;
-use tracing::info;
+use num_bigint::BigUint;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 fn get_file_size(path: &Path) -> u64 {
@@ -107,6 +108,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     let mut challenge_server = ecdsa_spartan2::challenge_client::default_server_url().to_string();
     let mut cert_chain_output = "../circom/inputs/cert_chain_rs2048/input.json".to_string();
     let mut device_sig_output = "../circom/inputs/device_sig_rs2048/input.json".to_string();
+    let mut pk_blind_override: Option<String> = None;
 
     let mut i = 1;
     while i < command_args.len() {
@@ -124,6 +126,18 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             "--hipki-server" => hipki_server = require_arg(command_args, &mut i, "--hipki-server"),
             "--challenge-server" => {
                 challenge_server = require_arg(command_args, &mut i, "--challenge-server")
+            }
+            "--pk-blind" => {
+                let raw = require_arg(command_args, &mut i, "--pk-blind");
+                let parsed = BigUint::parse_bytes(raw.as_bytes(), 10).unwrap_or_else(|| {
+                    eprintln!("Error: --pk-blind must be a non-negative decimal integer");
+                    process::exit(1);
+                });
+                if parsed.bits() > 248 {
+                    eprintln!("Error: --pk-blind must be < 2^248 (got {} bits)", parsed.bits());
+                    process::exit(1);
+                }
+                pk_blind_override = Some(raw);
             }
             _ => {}
         }
@@ -232,6 +246,15 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             .expect("Failed to fetch SMT proof")
     });
 
+    let from_override = pk_blind_override.is_some();
+    let pk_blind = pk_blind_override.unwrap_or_else(ecdsa_spartan2::random_pk_blind);
+    let prefix = &pk_blind[..pk_blind.len().min(8)];
+    if from_override {
+        warn!(pk_blind_prefix = prefix, "Using pk_blind from --pk-blind override — only safe for fixture/test runs; reusing across submissions defeats hiding");
+    } else {
+        info!(pk_blind_prefix = prefix, "Sampled pk_blind");
+    }
+
     info!("Generating split inputs (cert_chain + device_sig)...");
     let (cert_chain_json, device_sig_json) = generate_split_inputs(
         &user_cert,
@@ -243,6 +266,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         k_issuer,
         k_user,
         max_cert_length,
+        &pk_blind,
     )
     .unwrap_or_else(|e| {
         eprintln!("Error generating split inputs: {}", e);
@@ -647,6 +671,8 @@ Live mode options (for generate-split-input):
   --challenge-server <url>   Challenge server URL (default: http://localhost:8080)
   --smt-server <url>         SMT server URL for revocation proof (optional)
   --issuer <id>              Issuer identifier (default: g2, or g3 with -4)
+  --pk-blind <decimal>       Override the per-session pk_blind with a fixed
+                             decimal field element (for reproducible fixtures)
 
 Examples:
   cargo run --release -- generate-split-input
