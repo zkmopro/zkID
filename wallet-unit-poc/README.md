@@ -2,12 +2,13 @@
 
 Privacy-preserving X.509 certificate verification using zero-knowledge proofs.
 Given a MOICA user certificate (RSA-SHA256 / RS256) and a device signature over
-a fresh challenge, the prover emits two Spartan2 proofs that together attest to
-(a) a valid cert chain to a known issuer, (b) non-revocation of the user cert
-against an SMT root, and (c) possession of the user private key — without
-revealing personal data from the cert. The identity hash (`nullifier`) is
-bound to an application-specific `app_id`, so a proof issued for one relying
-party cannot be replayed at another.
+the relying-party `app_id`, the prover emits two Spartan2 proofs that together
+attest to (a) a valid cert chain to a known issuer, (b) non-revocation of the
+user cert against an SMT root, and (c) possession of the user private key —
+without revealing personal data from the cert. The `nullifier` is derived from
+the RSA signature itself (`Poseidon(user_rsa_signature)`), so a proof issued
+for one relying party cannot be replayed at another, and an observer cannot
+precompute nullifiers from public inputs alone.
 
 Three proving surfaces share the same circuits, input builder, and proving engine:
 
