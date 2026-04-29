@@ -41,11 +41,7 @@ RUST_LOG=info cargo run --release --features cert_chain_rs2048 -- cert-chain pro
 RUST_LOG=info cargo run --release -- device-sig prove \
   --input ../circom/inputs/device_sig_rs2048/input.json
 
-# 4. Verify proofs independently
-RUST_LOG=info cargo run --release --features cert_chain_rs2048 -- cert-chain verify
-RUST_LOG=info cargo run --release -- device-sig verify
-
-# 5. Link-verify: check pk_commit equality across both proofs
+# 4. Link-verify: check pk_commit equality across both proofs
 RUST_LOG=info cargo run --release -- link-verify
 ```
 
@@ -99,9 +95,7 @@ RUST_LOG=info cargo run --release --features cert_chain_rs2048 -- cert-chain pro
 RUST_LOG=info cargo run --release -- device-sig prove \
   --input ../circom/inputs/device_sig_rs2048/input.json
 
-# 4. Verify + link-verify
-RUST_LOG=info cargo run --release --features cert_chain_rs2048 -- cert-chain verify
-RUST_LOG=info cargo run --release -- device-sig verify
+# 4. link-verify
 RUST_LOG=info cargo run --release -- link-verify
 ```
 
@@ -119,8 +113,6 @@ RUST_LOG=info cargo run --release --features cert_chain_rs4096 -- cert-chain pro
 RUST_LOG=info cargo run --release -- device-sig prove \
   --input ../circom/inputs/device_sig_rs2048_chain_rs4096/input.json
 
-RUST_LOG=info cargo run --release --features cert_chain_rs4096 -- cert-chain verify --cert-chain-4096
-RUST_LOG=info cargo run --release -- device-sig verify
 RUST_LOG=info cargo run --release -- link-verify --cert-chain-4096
 ```
 
