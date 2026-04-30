@@ -43,7 +43,8 @@ impl CircuitKind {
         match self {
             CircuitKind::CertChainRs2048 => 19,
             CircuitKind::CertChainRs4096 => 36,
-            CircuitKind::DeviceSigRs2048 => 33,
+            // pk_commit, nullifier, app_id_packed, challenge.
+            CircuitKind::DeviceSigRs2048 => 4,
         }
     }
 
@@ -307,7 +308,7 @@ mod tests {
     #[test] fn num_public_matches_spec() {
         assert_eq!(CircuitKind::CertChainRs2048.num_public(), 19);
         assert_eq!(CircuitKind::CertChainRs4096.num_public(), 36);
-        assert_eq!(CircuitKind::DeviceSigRs2048.num_public(), 33);
+        assert_eq!(CircuitKind::DeviceSigRs2048.num_public(), 4);
     }
 
     /// Regression: oversized section lengths must return Err, not panic.

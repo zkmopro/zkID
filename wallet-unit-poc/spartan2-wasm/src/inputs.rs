@@ -20,6 +20,7 @@ pub struct SplitInputsJs {
     pub device_sig: serde_json::Value,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_split_inputs_core(
     user_cert_der: &[u8],
     issuer_cert_der: &[u8],
@@ -31,6 +32,7 @@ fn build_split_inputs_core(
     k_user: usize,
     max_cert_length: usize,
     pk_blind: &str,
+    challenge: &str,
 ) -> Result<SplitInputsJs, String> {
     let user_cert = Certificate::from_der(user_cert_der)
         .map_err(|e| format!("user cert DER parse: {e}"))?;
@@ -48,6 +50,7 @@ fn build_split_inputs_core(
         k_user,
         max_cert_length,
         pk_blind,
+        challenge,
     )
     .map_err(|e| format!("generate_split_inputs: {e}"))?;
 
@@ -59,8 +62,10 @@ fn build_split_inputs_core(
 
 /// `smt_inputs`: `null`/`undefined` fills zero defaults; otherwise a snake_case
 /// `SmtCircuitInputs` object. `k_issuer` is 17 (RSA-2048) or 34 (RSA-4096);
-/// `k_user` must be 17.
+/// `k_user` must be 17. `challenge` is the verifier-issued per-session field
+/// element (decimal string) bound into the device-sig proof.
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub fn build_split_inputs(
     user_cert_der: &[u8],
     issuer_cert_der: &[u8],
@@ -70,6 +75,7 @@ pub fn build_split_inputs(
     smt_inputs: JsValue,
     k_issuer: u32,
     k_user: u32,
+    challenge: &str,
 ) -> Result<JsValue, JsError> {
     if k_issuer != 17 && k_issuer != 34 {
         return Err(JsError::new(&format!(
@@ -109,6 +115,7 @@ pub fn build_split_inputs(
         k_user as usize,
         MAX_CERT_CHAIN_LENGTH,
         &pk_blind,
+        challenge,
     )
     .map_err(|e| JsError::new(&e))?;
 
@@ -151,6 +158,7 @@ pub fn cert_serial_hex(cert_der: &[u8]) -> Result<String, JsError> {
 /// Native-target entry for the drift integration test. Never compiled for
 /// wasm32 — the public `build_split_inputs` is the only exported surface.
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
 pub fn build_split_inputs_native_for_test(
     user_cert_der: &[u8],
     issuer_cert_der: &[u8],
@@ -162,6 +170,7 @@ pub fn build_split_inputs_native_for_test(
     k_user: usize,
     max_cert_length: usize,
     pk_blind: &str,
+    challenge: &str,
 ) -> Result<SplitInputsJs, String> {
     build_split_inputs_core(
         user_cert_der,
@@ -174,5 +183,6 @@ pub fn build_split_inputs_native_for_test(
         k_user,
         max_cert_length,
         pk_blind,
+        challenge,
     )
 }
