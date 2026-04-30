@@ -11,6 +11,11 @@ pub type Scalar = <E as Engine>::Scalar;
 /// Default TBS challenge used by test fixtures and CLI defaults.
 pub const DEFAULT_TBS: &[u8] = b"e775f2805fb993e05a208dbff15d1c1";
 
+/// Default per-session challenge field element for fixture / non-live runs;
+/// keeps committed input JSONs byte-deterministic. Live runs replace it with
+/// the verifier's value.
+pub const DEFAULT_CHALLENGE: &str = "1339673755198158349044581307228491536";
+
 pub mod challenge_client;
 pub mod circuits;
 pub mod hipki_client;

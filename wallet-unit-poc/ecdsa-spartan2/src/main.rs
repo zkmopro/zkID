@@ -147,7 +147,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     let (k_issuer, k_user) = if rs4096 { (34, 17) } else { (17, 17) };
     let max_cert_length = MAX_CERT_CHAIN_LENGTH;
 
-    let (user_cert, user_sig_b64, issuer_cert, serial_hex, app_id_bytes) = if let Some(ref pin) = pin {
+    let (user_cert, user_sig_b64, issuer_cert, serial_hex, app_id_bytes, challenge) = if let Some(ref pin) = pin {
         info!(server = %challenge_server, "Fetching challenge from verifier");
         let challenge_resp = ecdsa_spartan2::challenge_client::create_challenge(&challenge_server)
             .unwrap_or_else(|e| {
@@ -155,7 +155,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
                 process::exit(1);
             });
         info!(
-            challenge_id = %challenge_resp.challenge_id,
+            challenge = %challenge_resp.challenge,
             expires_at = %challenge_resp.expires_at,
             "Challenge received"
         );
@@ -207,12 +207,19 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         );
 
         info!(
-            challenge_id = %challenge_resp.challenge_id,
+            challenge = %challenge_resp.challenge,
             serial = %serial_hex,
-            "Live input ready — save challenge_id for /verify"
+            "Live input ready — save challenge for /link-verify"
         );
 
-        (user_cert, sign_response.signature, issuer_cert, serial_hex, app_id_bytes)
+        (
+            user_cert,
+            sign_response.signature,
+            issuer_cert,
+            serial_hex,
+            app_id_bytes,
+            challenge_resp.challenge,
+        )
     } else if rs4096 {
         let response_path = Path::new("tests/testdata/rs4096_response_sign.json");
         let issuer_cert = CertChainRs4096Circuit::fetch_cert_from_file("tests/testdata/test_ca_rs4096.der")
@@ -232,6 +239,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             issuer_cert,
             serial_hex,
             ecdsa_spartan2::DEFAULT_TBS.to_vec(),
+            ecdsa_spartan2::DEFAULT_CHALLENGE.to_string(),
         )
     } else {
         let response_path = Path::new("tests/testdata/response_sign_test.json");
@@ -256,6 +264,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
             issuer_cert,
             serial_hex,
             ecdsa_spartan2::DEFAULT_TBS.to_vec(),
+            ecdsa_spartan2::DEFAULT_CHALLENGE.to_string(),
         )
     };
 
@@ -285,6 +294,7 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
         k_user,
         max_cert_length,
         &pk_blind,
+        &challenge,
     )
     .unwrap_or_else(|e| {
         eprintln!("Error generating split inputs: {}", e);
@@ -337,7 +347,8 @@ fn run_link_verify(command_args: &[String]) -> ! {
     let pk_commit_a = &cc_public_values[0];
     let pk_commit_b = &ds_public_values[0];
     let nullifier = &ds_public_values[1];
-    let app_id_field_elements = &ds_public_values[2..2 + 31];
+    let app_id_packed = &ds_public_values[2];
+    let challenge = &ds_public_values[3];
 
     use ff::PrimeField;
     use subtle::ConstantTimeEq;
@@ -347,15 +358,16 @@ fn run_link_verify(command_args: &[String]) -> ! {
         .ct_eq(pk_commit_b.to_repr().as_ref())
         .into();
     if commits_match {
-        // Each field element holds one byte (0..256) at the LSB of its LE repr.
-        let app_id_hex: String = app_id_field_elements
+        let bytes = app_id_packed.to_repr();
+        let app_id_hex: String = bytes.as_ref()[..31]
             .iter()
-            .map(|fe| format!("{:02x}", fe.to_repr().as_ref()[0]))
+            .map(|b| format!("{:02x}", b))
             .collect();
         info!(
             pk_commit = ?pk_commit_a,
             nullifier = ?nullifier,
             app_id = %app_id_hex,
+            challenge = ?challenge,
             "Link verification PASSED: pk_commit_A == pk_commit_B"
         );
         process::exit(0);
