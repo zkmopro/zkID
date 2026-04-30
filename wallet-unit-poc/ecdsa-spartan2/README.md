@@ -8,7 +8,9 @@ Two linked circuits prove certificate ownership without revealing personal data:
 
 Proofs are bound via `pk_commit = ChunkedPoseidonP256(user_pk_limbs ‖ pk_blind)` — computed identically in both circuits so the verifier can check `pk_commit_A == pk_commit_B`. `pk_blind` is a per-session 248-bit uniform sample; see [`circom/SPEC.md`](../circom/SPEC.md#why-per-session-randomness-for-pk_blind) for the threat model.
 
-Circuit B also emits `nullifier = ChunkedPoseidonP256(user_rsa_signature)`, which is deterministic per `(card, app_id)` and unforgeable without the card's private key.
+Circuit B also emits `nullifier = ChunkedPoseidonP256(user_rsa_signature)`, which is deterministic per `(card, app_id)` and unforgeable without the card's private key. A per-session `challenge` field element from the verifier's `/challenge` endpoint is bound into the proof via a Semaphore-style dummy square so a precomputed proof cannot be replayed against a different session.
+
+Device-sig public-output layout: `[pk_commit, nullifier, app_id_packed, challenge]` (4 signals). `app_id_packed` is `tbs[0..31]` packed little-endian into one field element; the verifier matches it against the configured `APP_ID` after the same packing.
 
 ## Prerequisites
 

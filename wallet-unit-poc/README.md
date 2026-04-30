@@ -7,7 +7,10 @@ attest to (a) a valid cert chain to a known issuer, (b) non-revocation of the
 user cert against an SMT root, and (c) possession of the user private key —
 without revealing personal data from the cert. The `nullifier` is
 `Poseidon(user_rsa_signature)`: deterministic per `(card, app_id)`, and
-unforgeable without the card's private key.
+unforgeable without the card's private key. A per-session `challenge` field
+element from the verifier is bound into the device-sig proof via a
+Semaphore-style dummy square (`challengeSquared <== challenge * challenge`),
+so a precomputed proof cannot be replayed against a different session.
 
 Three proving surfaces share the same circuits, input builder, and proving engine:
 
