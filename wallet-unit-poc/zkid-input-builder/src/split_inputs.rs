@@ -24,11 +24,9 @@ pub const APP_ID_LEN: usize = 31;
 /// Build the cert-chain + device-sig circuit input JSONs.
 ///
 /// `pk_blind` is the per-session linking blind shared between Circuits A and B.
-/// Caller is responsible for sampling it (typically via
-/// [`crate::random::random_pk_blind`]) and using the **same** value for both
-/// circuits — the verifier checks `pk_commit_A == pk_commit_B`.
-///
-/// See `circom/SPEC.md` §Linking for the security rationale.
+/// `challenge` is the per-session field element from the verifier's
+/// `/challenge` endpoint, bound into the device-sig proof via a Semaphore-style
+/// dummy square. Both are decimal field-element strings.
 pub fn generate_split_inputs(
     user_cert: &Certificate,
     issuer_cert: &Certificate,
@@ -40,6 +38,7 @@ pub fn generate_split_inputs(
     k_user: usize,
     max_cert_length: usize,
     pk_blind: &str,
+    challenge: &str,
 ) -> Result<(serde_json::Value, serde_json::Value), Box<dyn std::error::Error>> {
     if app_id_bytes.len() != APP_ID_LEN {
         return Err(format!(
@@ -83,8 +82,6 @@ pub fn generate_split_inputs(
         .map(|b| b.to_string())
         .collect();
     let tbs_padded_len = sha256_padded_length(app_id_bytes.len());
-    let app_id_bytes_json: Vec<String> =
-        app_id_bytes.iter().map(|b| b.to_string()).collect();
     let issuer_tbs_padded: Vec<String> =
         sha256_pad(&user_cert_tbs_der, max_cert_length)
             .iter()
@@ -123,12 +120,12 @@ pub fn generate_split_inputs(
     });
 
     let device_sig_json = serde_json::json!({
-        "app_id_bytes": app_id_bytes_json,
         "tbs": tbs_padded,
         "tbs_length": tbs_padded_len,
         "user_pk_limbs": user_pk_limbs,
         "user_rsa_signature": user_rsa_signature,
         "pk_blind": pk_blind,
+        "challenge": challenge,
     });
 
     Ok((cert_chain_json, device_sig_json))
