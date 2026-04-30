@@ -15,6 +15,6 @@
     "file": "device_sig",
     "template": "DeviceSigRSA256",
     "params": [1536, 121, 17],
-    "pubs": ["app_id_bytes"]
+    "pubs": ["challenge"]
   }
 }
