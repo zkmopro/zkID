@@ -54,7 +54,7 @@ export interface LinkVerifyParams {
 /** Default request timeout; can be overridden by VITE_VERIFIER_TIMEOUT_MS. */
 const VERIFIER_TIMEOUT_MS = parsePositiveInt(
   import.meta.env.VITE_VERIFIER_TIMEOUT_MS,
-  15_000,
+  60_000,
 );
 
 export interface CreateChallengeOptions {

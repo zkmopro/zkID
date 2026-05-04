@@ -175,8 +175,7 @@ The app now downloads snapshots once, rebuilds the tree in-browser via
 `smt.wasm`, and queries locally.
 
 Per-request timeouts are configurable via `VITE_VERIFIER_TIMEOUT_MS`
-(default 15000) — a hung verifier aborts cleanly instead of leaving the UI
-spinning.
+(default 60000).
 
 ### HiPKI CORS + mixed-content (why we use the popup bridge)
 
