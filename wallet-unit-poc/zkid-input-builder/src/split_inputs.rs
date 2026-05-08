@@ -20,7 +20,6 @@ pub const MAX_CERT_CHAIN_LENGTH: usize = 1536;
 // All tbs_* offsets fed to the circuit are relative to issuer_tbs[0] = user_cert[4].
 const TBS_OFFSET: usize = 4;
 const MAX_MESSAGE_LENGTH: usize = 1536;
-const MAX_SUBJECT_DN_LENGTH: usize = 128;
 const SMT_DEPTH: usize = 128;
 pub const APP_ID_LEN: usize = 31;
 
@@ -53,8 +52,6 @@ pub fn generate_split_inputs(
     let user_cert_der = user_cert.to_der()?;
     let user_cert_tbs_der = user_cert.tbs_certificate.to_der()?;
     let user_offsets = parse_cert_offsets(&user_cert_der)?;
-    let user_subject_der = user_cert.tbs_certificate.subject.to_der()?;
-
     let user_spki_der = user_cert
         .tbs_certificate
         .subject_public_key_info
@@ -104,9 +101,6 @@ pub fn generate_split_inputs(
         "actual_user_cert_length": user_cert_der.len(),
         "tbs_modulus_offset": user_offsets.modulus_offset - TBS_OFFSET,
         "tbs_modulus_tag_offset": user_offsets.modulus_tag_offset - TBS_OFFSET,
-        "subject_dn": zero_pad_to_u64(&user_subject_der, MAX_SUBJECT_DN_LENGTH),
-        "tbs_subject_dn_offset": user_offsets.subject_dn_offset - TBS_OFFSET,
-        "subject_dn_length": user_offsets.subject_dn_length,
         "tbs_serial_number_offset": user_offsets.serial_number_offset - TBS_OFFSET,
         "issuer_tbs": issuer_tbs_padded,
         "issuer_tbs_length": issuer_tbs_padded_len,

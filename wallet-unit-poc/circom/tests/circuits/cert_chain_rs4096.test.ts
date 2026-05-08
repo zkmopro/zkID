@@ -9,9 +9,6 @@ describe("CertChainRSA256 (rs4096)", function () {
       "actual_user_cert_length",
       "tbs_modulus_offset",
       "tbs_modulus_tag_offset",
-      "subject_dn",
-      "tbs_subject_dn_offset",
-      "subject_dn_length",
       "tbs_serial_number_offset",
       "issuer_tbs",
       "issuer_tbs_length",
@@ -36,7 +33,7 @@ describe("CertChainRSA256 (rs4096)", function () {
     circuit = await circomkit.WitnessTester("cert_chain_rs4096", {
       file: "cert_chain",
       template: "CertChainRSA256",
-      params: [1536, 121, 34, 4096, 17, 2048, 128, 128, 20],
+      params: [1536, 121, 34, 4096, 17, 2048, 128, 20],
     });
   });
 

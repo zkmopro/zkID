@@ -28,9 +28,9 @@ Circuit A and Circuit B are linked via `pk_commit`: the verifier checks
 1. **Cert chain verify** — `issuer_rsa_modulus` (MOICA) verifies
    `issuer_rsa_signature` over `issuer_tbs` (the TBS portion of the user's
    cert). Proves that MOICA certified the user's public key.
-2. **DER parsing** — `VerifyTBSinCert`, `VerifySubjectDN`, `VerifySerialNumber`
-   check that the user cert contains the claimed TBS, subject DN, and serial
-   number at the prover-supplied offsets.
+2. **DER parsing** — `VerifyTBSinCert`, `VerifySerialNumber`
+   check that the user cert contains the claimed TBS and serial number at the
+   prover-supplied offsets.
 3. **Revocation** — `SMTNonMembershipVerifier` proves `serialNumber` is **not**
    in the revocation tree rooted at `smtRoot`.
 4. **Linking** — `pk_commit = ChunkedPoseidonP256(user_pk_limbs ‖ pk_blind)`,
@@ -78,7 +78,7 @@ Public-value vector layout (in declaration order, outputs first):
 Public-value vector layout: `[pk_commit, nullifier, app_id_bytes[31]]` — 33 elements.
 
 All other signals (user cert bytes, RSA signatures, SMT proof path,
-`subject_dn`, `tbs`, `pk_blind`) are private.
+`tbs`, `pk_blind`) are private.
 
 ## Revocation
 
@@ -111,4 +111,4 @@ whose secrecy rests on the RSA private key never leaving the card.
 - `circuits/components/smt-nonmembership.circom` — SMT verification template
 - `circuits/components/poseidon_p256.circom` — Poseidon hash over secq256r1
 - `circuits/components/pk_commit.circom` — `ChunkedPoseidonP256` for pk_commit
-- `circuits/utils/utils.circom` — cert parsing helpers (`VerifyTBSinCert`, `VerifySubjectDN`, `VerifySerialNumber`, `ExtractModulus`, `PackBytes`, `PoseidonBytes`)
+- `circuits/utils/utils.circom` — cert parsing helpers (`VerifyTBSinCert`, `VerifySerialNumber`, `ExtractModulus`, `PackBytes`, `PoseidonBytes`)
