@@ -35,11 +35,15 @@ template DeviceSigRSA256(maxMessageLength, n, k) {
     signal output nullifier;
     signal output app_id_packed;
 
-    // Canonicalize the signing payload to exactly 31 bytes (app_id prefix).
-    // Rejects any proof whose TBS has a different length, preventing a
-    // malleable-length attack where a longer valid TBS would still produce
-    // an app_id_packed that looks correct.
-    tbs_length === 31;
+    // Range-check tbs_length to 7 bits before the comparator so a
+    // field-sized input cannot wrap around LessEqThan's internal arithmetic.
+    component tlBits = Num2Bits(7);
+    tlBits.in <== tbs_length;
+
+    component tlBound = LessEqThan(7);
+    tlBound.in[0] <== tbs_length;
+    tlBound.in[1] <== 64;
+    tlBound.out === 1;
 
     CertRSA256Verify(maxMessageLength, n, k)(
         tbs,

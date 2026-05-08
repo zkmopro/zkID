@@ -76,6 +76,7 @@ fn split_inputs_have_expected_structure() {
     // cert_chain JSON must have all expected keys
     for key in [
         "user_cert_zero_padded",
+        "actual_user_cert_length",
         "tbs_modulus_offset",
         "tbs_modulus_tag_offset",
         "subject_dn",
@@ -227,6 +228,7 @@ fn split_inputs_rs4096_have_expected_structure() {
     // cert_chain JSON must have all expected keys
     for key in [
         "user_cert_zero_padded",
+        "actual_user_cert_length",
         "tbs_modulus_offset",
         "tbs_modulus_tag_offset",
         "subject_dn",

@@ -101,6 +101,7 @@ pub fn generate_split_inputs(
 
     let cert_chain_json = serde_json::json!({
         "user_cert_zero_padded": zero_pad_to_u64(&user_cert_der, max_cert_length),
+        "actual_user_cert_length": user_cert_der.len(),
         "tbs_modulus_offset": user_offsets.modulus_offset - TBS_OFFSET,
         "tbs_modulus_tag_offset": user_offsets.modulus_tag_offset - TBS_OFFSET,
         "subject_dn": zero_pad_to_u64(&user_subject_der, MAX_SUBJECT_DN_LENGTH),

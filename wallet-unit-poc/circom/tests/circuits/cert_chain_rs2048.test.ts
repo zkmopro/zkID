@@ -6,6 +6,7 @@ describe("CertChainRSA256 (rs2048)", function () {
   let circuit: WitnessTester<
     [
       "user_cert_zero_padded",
+      "actual_user_cert_length",
       "tbs_modulus_offset",
       "tbs_modulus_tag_offset",
       "subject_dn",

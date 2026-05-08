@@ -34,6 +34,7 @@ template CertChainRSA256(
 ) {
     // === User cert (outer DER wrapper — TBS starts at byte 4) ===
     signal input user_cert_zero_padded[maxMessageLength];
+    signal input actual_user_cert_length;
 
     // All offsets are relative to issuer_tbs[0] (i.e. user_cert[4]).
     // The circuit enforces each offset lies within [0, actual_issuer_tbs_length)
@@ -79,6 +80,10 @@ template CertChainRSA256(
         issuer_tbs,
         actual_issuer_tbs_length
     );
+
+    // Enforce zero-padding on user_cert_zero_padded beyond its actual length,
+    // preventing a prover from stuffing arbitrary bytes in the padding region.
+    AssertZeroPadding(maxMessageLength)(user_cert_zero_padded, actual_user_cert_length);
 
     // ── Step 2: Bound actual_issuer_tbs_length to 13 bits ─────────────────
     // AssertSliceInTBS requires this; see its doc in utils/utils.circom.
