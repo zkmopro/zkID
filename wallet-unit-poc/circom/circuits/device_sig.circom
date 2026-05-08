@@ -35,6 +35,12 @@ template DeviceSigRSA256(maxMessageLength, n, k) {
     signal output nullifier;
     signal output app_id_packed;
 
+    // Canonicalize the signing payload to exactly 31 bytes (app_id prefix).
+    // Rejects any proof whose TBS has a different length, preventing a
+    // malleable-length attack where a longer valid TBS would still produce
+    // an app_id_packed that looks correct.
+    tbs_length === 31;
+
     CertRSA256Verify(maxMessageLength, n, k)(
         tbs,
         tbs_length,
