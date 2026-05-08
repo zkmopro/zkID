@@ -16,6 +16,9 @@ use x509_cert::Certificate;
 
 const RSA_N: usize = 121;
 pub const MAX_CERT_CHAIN_LENGTH: usize = 1536;
+// TBSCertificate starts at byte 4 of the outer cert DER (SEQUENCE tag + 0x82 LL LL).
+// All tbs_* offsets fed to the circuit are relative to issuer_tbs[0] = user_cert[4].
+const TBS_OFFSET: usize = 4;
 const MAX_MESSAGE_LENGTH: usize = 1536;
 const MAX_SUBJECT_DN_LENGTH: usize = 128;
 const SMT_DEPTH: usize = 128;
@@ -98,13 +101,12 @@ pub fn generate_split_inputs(
 
     let cert_chain_json = serde_json::json!({
         "user_cert_zero_padded": zero_pad_to_u64(&user_cert_der, max_cert_length),
-        "actual_user_cert_length": user_cert_der.len(),
-        "user_modulus_offset": user_offsets.modulus_offset,
-        "user_modulus_tag_offset": user_offsets.modulus_tag_offset,
+        "tbs_modulus_offset": user_offsets.modulus_offset - TBS_OFFSET,
+        "tbs_modulus_tag_offset": user_offsets.modulus_tag_offset - TBS_OFFSET,
         "subject_dn": zero_pad_to_u64(&user_subject_der, MAX_SUBJECT_DN_LENGTH),
-        "subject_dn_offset": user_offsets.subject_dn_offset,
+        "tbs_subject_dn_offset": user_offsets.subject_dn_offset - TBS_OFFSET,
         "subject_dn_length": user_offsets.subject_dn_length,
-        "serial_number_offset": user_offsets.serial_number_offset,
+        "tbs_serial_number_offset": user_offsets.serial_number_offset - TBS_OFFSET,
         "issuer_tbs": issuer_tbs_padded,
         "issuer_tbs_length": issuer_tbs_padded_len,
         "actual_issuer_tbs_length": user_cert_tbs_der.len(),

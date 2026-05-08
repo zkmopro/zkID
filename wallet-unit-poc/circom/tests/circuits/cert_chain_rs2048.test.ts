@@ -6,13 +6,12 @@ describe("CertChainRSA256 (rs2048)", function () {
   let circuit: WitnessTester<
     [
       "user_cert_zero_padded",
-      "actual_user_cert_length",
-      "user_modulus_offset",
-      "user_modulus_tag_offset",
+      "tbs_modulus_offset",
+      "tbs_modulus_tag_offset",
       "subject_dn",
-      "subject_dn_offset",
+      "tbs_subject_dn_offset",
       "subject_dn_length",
-      "serial_number_offset",
+      "tbs_serial_number_offset",
       "issuer_tbs",
       "issuer_tbs_length",
       "actual_issuer_tbs_length",
@@ -42,7 +41,7 @@ describe("CertChainRSA256 (rs2048)", function () {
 
   it("should accept valid cert chain inputs", async function () {
     this.timeout(900_000);
-    const witness = await circuit.calculateWitness(input);
+    const witness = await circuit.calculateWitness(input as any);
     await circuit.expectConstraintPass(witness);
   });
 });

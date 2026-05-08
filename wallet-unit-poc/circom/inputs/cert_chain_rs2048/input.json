@@ -1,6 +1,5 @@
 {
   "actual_issuer_tbs_length": 613,
-  "actual_user_cert_length": 893,
   "issuer_rsa_modulus": [
     "1364574990019209354585670293191861219",
     "1551552957626682073405560431627509856",
@@ -1578,9 +1577,8 @@
     "0"
   ],
   "issuer_tbs_length": 640,
-  "pk_blind": "452312848583266388373324160190187140051835877600158453279131187530910662655",
+  "pk_blind": "191639494749166569695568831083851926356055678864773957249818502160014237109",
   "serialNumber": "538421965321809317787525307687845558446490054026",
-  "serial_number_offset": 15,
   "smtIsOld0": "1",
   "smtOldKey": "0",
   "smtOldValue": "0",
@@ -1846,7 +1844,10 @@
     0
   ],
   "subject_dn_length": 62,
-  "subject_dn_offset": 163,
+  "tbs_modulus_offset": 254,
+  "tbs_modulus_tag_offset": 249,
+  "tbs_serial_number_offset": 11,
+  "tbs_subject_dn_offset": 159,
   "user_cert_zero_padded": [
     48,
     130,
@@ -3384,7 +3385,5 @@
     0,
     0,
     0
-  ],
-  "user_modulus_offset": 258,
-  "user_modulus_tag_offset": 253
+  ]
 }

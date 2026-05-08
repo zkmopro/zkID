@@ -32,19 +32,23 @@ template CertChainRSA256(
     smtDepth,
     maxSerialNumberLength
 ) {
-    // === User cert ===
+    // === User cert (outer DER wrapper — TBS starts at byte 4) ===
     signal input user_cert_zero_padded[maxMessageLength];
-    signal input actual_user_cert_length;
-    signal input user_modulus_offset;
-    signal input user_modulus_tag_offset;
+
+    // All offsets are relative to issuer_tbs[0] (i.e. user_cert[4]).
+    // The circuit enforces each offset lies within [0, actual_issuer_tbs_length)
+    // before use, so the prover cannot point outside the MOICA-signed region.
+    signal input tbs_modulus_offset;
+    signal input tbs_modulus_tag_offset;
 
     // === Subject DN extraction ===
     signal input subject_dn[maxSubjectDNLength];
-    signal input subject_dn_offset;
+    signal input tbs_subject_dn_offset;
     signal input subject_dn_length;
 
     // === Serial extraction ===
-    signal input serial_number_offset;
+    // Points to first serial byte in issuer_tbs; tag is at offset-2, length at offset-1.
+    signal input tbs_serial_number_offset;
 
     // === Issuer (cert chain) — sized to k_issuer ===
     signal input issuer_tbs[maxMessageLength];
@@ -67,32 +71,77 @@ template CertChainRSA256(
     // === Outputs ===
     signal output pk_commit;
 
+    // ── Step 1: Prove user cert embeds the MOICA-signed TBS ───────────────
+    // After this, issuer_tbs[0..actual_issuer_tbs_length) is identical to
+    // user_cert_zero_padded[4..4+actual_issuer_tbs_length).
     VerifyTBSinCert(maxMessageLength, maxMessageLength)(
         user_cert_zero_padded,
         issuer_tbs,
         actual_issuer_tbs_length
     );
 
+    // ── Step 2: Bound actual_issuer_tbs_length to 13 bits ─────────────────
+    // AssertSliceInTBS requires this; see its doc in utils/utils.circom.
+    component tlRange = Num2Bits(13);
+    tlRange.in <== actual_issuer_tbs_length;
+
+    var modulusBytes = modulusBitsUser \ 8;  // e.g. 2048/8 = 256
+
+    // ── Steps 3–6: Enforce every offset lies inside the signed TBS ────────
+
+    component moTagBnd = AssertSliceInTBS();
+    moTagBnd.offset <== tbs_modulus_tag_offset;
+    moTagBnd.length <== 1;
+    moTagBnd.tbsLen <== actual_issuer_tbs_length;
+
+    component moBnd = AssertSliceInTBS();
+    moBnd.offset <== tbs_modulus_offset;
+    moBnd.length <== modulusBytes;
+    moBnd.tbsLen <== actual_issuer_tbs_length;
+
+    component sdnBnd = AssertSliceInTBS();
+    sdnBnd.offset <== tbs_subject_dn_offset;
+    sdnBnd.length <== subject_dn_length;
+    sdnBnd.tbsLen <== actual_issuer_tbs_length;
+
+    // Serial: VerifySerialNumber reads tag at (offset-2) and len at (offset-1),
+    // so offset must be >= 2 in addition to the upper-bound check.
+    component snLow = GreaterEqThan(13);
+    snLow.in[0] <== tbs_serial_number_offset;
+    snLow.in[1] <== 2;
+    snLow.out === 1;
+
+    component snBnd = AssertSliceInTBS();
+    snBnd.offset <== tbs_serial_number_offset;
+    snBnd.length <== maxSerialNumberLength;
+    snBnd.tbsLen <== actual_issuer_tbs_length;
+
+    // ── Step 7: Extract subject DN from issuer_tbs ────────────────────────
+    // Reading from issuer_tbs (not user_cert_zero_padded) ensures the bytes
+    // are covered by the MOICA signature verified in Step 1.
     VerifySubjectDN(maxMessageLength, maxSubjectDNLength)(
-        user_cert_zero_padded,
+        issuer_tbs,
         subject_dn,
-        subject_dn_offset,
+        tbs_subject_dn_offset,
         subject_dn_length
     );
 
+    // ── Step 8: Extract and verify serial number from issuer_tbs ─────────
     VerifySerialNumber(maxMessageLength, maxSerialNumberLength)(
-        user_cert_zero_padded,
-        serial_number_offset,
+        issuer_tbs,
+        tbs_serial_number_offset,
         serialNumber
     );
 
+    // ── Step 9: Extract RSA modulus from issuer_tbs ───────────────────────
     signal user_rsa_extracted_modulus[k_user];
     ExtractModulus(maxMessageLength, n, k_user, modulusBitsUser)(
-        in               <== user_cert_zero_padded,
-        modulusOffset    <== user_modulus_offset,
-        modulusTagOffset <== user_modulus_tag_offset
+        in               <== issuer_tbs,
+        modulusOffset    <== tbs_modulus_offset,
+        modulusTagOffset <== tbs_modulus_tag_offset
     ) ==> user_rsa_extracted_modulus;
 
+    // ── Step 10: Verify issuer RSA-SHA256 signature over issuer_tbs ──────
     CertRSA256Verify(maxMessageLength, n, k_issuer)(
         issuer_tbs,
         issuer_tbs_length,
@@ -100,6 +149,7 @@ template CertChainRSA256(
         issuer_rsa_signature
     );
 
+    // ── Step 11: Revocation check (SMT non-membership) ───────────────────
     SMTNonMembershipVerifier(smtDepth)(
         smtRoot,
         serialNumber,
@@ -109,6 +159,7 @@ template CertChainRSA256(
         smtIsOld0
     );
 
+    // ── Step 12: Commit to the user RSA public key ────────────────────────
     // Sized to k_user so pk_commit byte-matches DeviceSigRSA256's output.
     component pkCommit = ChunkedPoseidonP256(k_user + 1);
     for (var i = 0; i < k_user; i++) {
