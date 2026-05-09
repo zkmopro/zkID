@@ -83,6 +83,24 @@ template CertChainRSA256(
     component tlRange = Num2Bits(13);
     tlRange.in <== actualIssuerTbsLength;
 
+    // ── Step 2b: Bind issuerTbsLength to actualIssuerTbsLength ──────────
+    // issuerTbsLength is the SHA-256-padded length; actualIssuerTbsLength
+    // is the raw DER length. Without bounding their difference, the prover
+    // could set issuerTbsLength >> actualIssuerTbsLength and hide arbitrary
+    // bytes in issuerTbs[actual..padded) — bytes the MOICA signature covers
+    // but VerifyTBSinCert does not bind to userCertZeroPadded.
+    // The padded length exceeds the actual length by at most 64 bytes
+    // (one SHA-256 block), so bound: actual <= padded <= actual + 64.
+    component tbsLenLB = LessEqThan(13);
+    tbsLenLB.in[0] <== actualIssuerTbsLength;
+    tbsLenLB.in[1] <== issuerTbsLength;
+    tbsLenLB.out === 1;
+
+    component tbsLenUB = LessEqThan(14);
+    tbsLenUB.in[0] <== issuerTbsLength;
+    tbsLenUB.in[1] <== actualIssuerTbsLength + 64;
+    tbsLenUB.out === 1;
+
     var modulusBytes = modulusBitsUser \ 8;  // e.g. 2048/8 = 256
 
     // ── Steps 3–6: Enforce every offset lies inside the signed TBS ────────
