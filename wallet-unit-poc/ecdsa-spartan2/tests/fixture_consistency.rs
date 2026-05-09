@@ -106,9 +106,9 @@ fn fixture_user_sig_input_is_valid_json() {
     for key in [
         "tbs",
         "tbsLength",
-        "user_pk_limbs",
-        "user_rsa_signature",
-        "pk_blind",
+        "userPkLimbs",
+        "userRsaSignature",
+        "pkBlind",
     ] {
         assert!(
             input.get(key).is_some(),
@@ -122,14 +122,14 @@ fn fixture_user_sig_input_is_valid_json() {
         "tbs array must have maxMessageLength=1536 elements"
     );
     assert_eq!(
-        input["user_pk_limbs"].as_array().unwrap().len(),
+        input["userPkLimbs"].as_array().unwrap().len(),
         17,
-        "user_pk_limbs must have k=17 limbs for RSA-2048"
+        "userPkLimbs must have k=17 limbs for RSA-2048"
     );
     assert_eq!(
-        input["user_rsa_signature"].as_array().unwrap().len(),
+        input["userRsaSignature"].as_array().unwrap().len(),
         17,
-        "user_rsa_signature must have k=17 limbs for RSA-2048"
+        "userRsaSignature must have k=17 limbs for RSA-2048"
     );
 }
 
@@ -143,15 +143,15 @@ fn fixture_pk_blind_matches_across_inputs() {
     let cc: serde_json::Value = serde_json::from_str(&cc_str).unwrap();
     let ds: serde_json::Value = serde_json::from_str(&ds_str).unwrap();
 
-    let cc_blind = cc["pk_blind"]
+    let cc_blind = cc["pkBlind"]
         .as_str()
-        .expect("cert_chain pk_blind not a string");
-    let ds_blind = ds["pk_blind"]
+        .expect("cert_chain pkBlind not a string");
+    let ds_blind = ds["pkBlind"]
         .as_str()
-        .expect("user_sig pk_blind not a string");
+        .expect("user_sig pkBlind not a string");
 
     assert_eq!(
         cc_blind, ds_blind,
-        "pk_blind must match between cert_chain_rs2048 and user_sig_rs2048 fixtures"
+        "pkBlind must match between cert_chain_rs2048 and user_sig_rs2048 fixtures"
     );
 }
