@@ -1,7 +1,7 @@
 {
-  "actual_issuer_tbs_length": 613,
-  "actual_user_cert_length": 893,
-  "issuer_rsa_modulus": [
+  "actualIssuerTbsLength": 613,
+  "actualUserCertLength": 893,
+  "issuerRsaModulus": [
     "1364574990019209354585670293191861219",
     "1551552957626682073405560431627509856",
     "2563434707543337222531626325283120120",
@@ -20,7 +20,7 @@
     "2075289430802063194883039775705601250",
     "3430304916791620673087680459632420"
   ],
-  "issuer_rsa_signature": [
+  "issuerRsaSignature": [
     "803173786893312851995821030358690099",
     "431988692718649674449869618841953764",
     "581952843877374787630550411651500870",
@@ -39,7 +39,7 @@
     "632583115794808349679691952022032044",
     "1625627767707887268187448755230528"
   ],
-  "issuer_tbs": [
+  "issuerTbs": [
     "48",
     "130",
     "2",
@@ -1577,8 +1577,8 @@
     "0",
     "0"
   ],
-  "issuer_tbs_length": 640,
-  "pk_blind": "383171260117798819662075416194011426462204966620509759016096495198064840685",
+  "issuerTbsLength": 640,
+  "pkBlind": "413848833528180895099275439476406436706120280308700177893960110203930021966",
   "serialNumber": "538421965321809317787525307687845558446490054026",
   "smtIsOld0": "1",
   "smtOldKey": "0",
@@ -1714,10 +1714,10 @@
     "0",
     "0"
   ],
-  "tbs_modulus_offset": 254,
-  "tbs_modulus_tag_offset": 249,
-  "tbs_serial_number_offset": 11,
-  "user_cert_zero_padded": [
+  "tbsModulusOffset": 254,
+  "tbsModulusTagOffset": 249,
+  "tbsSerialNumberOffset": 11,
+  "userCertZeroPadded": [
     48,
     130,
     3,

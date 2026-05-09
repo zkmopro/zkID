@@ -2,38 +2,38 @@ import { WitnessTester } from "circomkit";
 import { circomkit } from "../common";
 import { loadInput } from "../common/fixtures";
 
-describe("CertChainRSA256 (rs2048)", function () {
+describe("CertChainRSA256 (rs4096)", function () {
   let circuit: WitnessTester<
     [
-      "user_cert_zero_padded",
-      "actual_user_cert_length",
-      "tbs_modulus_offset",
-      "tbs_modulus_tag_offset",
-      "tbs_serial_number_offset",
-      "issuer_tbs",
-      "issuer_tbs_length",
-      "actual_issuer_tbs_length",
-      "issuer_rsa_modulus",
-      "issuer_rsa_signature",
+      "userCertZeroPadded",
+      "actualUserCertLength",
+      "tbsModulusOffset",
+      "tbsModulusTagOffset",
+      "tbsSerialNumberOffset",
+      "issuerTbs",
+      "issuerTbsLength",
+      "actualIssuerTbsLength",
+      "issuerRsaModulus",
+      "issuerRsaSignature",
       "smtRoot",
       "serialNumber",
       "smtSiblings",
       "smtOldKey",
       "smtOldValue",
       "smtIsOld0",
-      "pk_blind",
+      "pkBlind",
     ],
-    ["pk_commit"]
+    ["pkCommit"]
   >;
   let input: Record<string, any>;
 
   before(async function () {
     this.timeout(900_000);
-    input = loadInput("cert_chain_rs2048");
-    circuit = await circomkit.WitnessTester("cert_chain_rs2048", {
-      file: "cert_chain",
+    input = loadInput("cert_chain_rs4096");
+    circuit = await circomkit.WitnessTester("certChainRS4096", {
+      file: "certChain",
       template: "CertChainRSA256",
-      params: [1536, 121, 17, 2048, 17, 2048, 128, 20],
+      params: [1536, 121, 34, 4096, 17, 2048, 128, 20],
     });
   });
 

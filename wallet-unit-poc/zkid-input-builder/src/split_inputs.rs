@@ -17,7 +17,7 @@ use x509_cert::Certificate;
 const RSA_N: usize = 121;
 pub const MAX_CERT_CHAIN_LENGTH: usize = 1536;
 // TBSCertificate starts at byte 4 of the outer cert DER (SEQUENCE tag + 0x82 LL LL).
-// All tbs_* offsets fed to the circuit are relative to issuer_tbs[0] = user_cert[4].
+// All tbs_* offsets fed to the circuit are relative to issuerTbs[0] = user_cert[4].
 const TBS_OFFSET: usize = 4;
 const MAX_MESSAGE_LENGTH: usize = 1536;
 const SMT_DEPTH: usize = 128;
@@ -97,31 +97,31 @@ pub fn generate_split_inputs(
         smt_fields_from_option(smt_inputs, serial_decimal, SMT_DEPTH);
 
     let cert_chain_json = serde_json::json!({
-        "user_cert_zero_padded": zero_pad_to_u64(&user_cert_der, max_cert_length),
-        "actual_user_cert_length": user_cert_der.len(),
-        "tbs_modulus_offset": user_offsets.modulus_offset - TBS_OFFSET,
-        "tbs_modulus_tag_offset": user_offsets.modulus_tag_offset - TBS_OFFSET,
-        "tbs_serial_number_offset": user_offsets.serial_number_offset - TBS_OFFSET,
-        "issuer_tbs": issuer_tbs_padded,
-        "issuer_tbs_length": issuer_tbs_padded_len,
-        "actual_issuer_tbs_length": user_cert_tbs_der.len(),
-        "issuer_rsa_modulus": issuer_rsa_modulus,
-        "issuer_rsa_signature": issuer_rsa_signature,
+        "userCertZeroPadded": zero_pad_to_u64(&user_cert_der, max_cert_length),
+        "actualUserCertLength": user_cert_der.len(),
+        "tbsModulusOffset": user_offsets.modulus_offset - TBS_OFFSET,
+        "tbsModulusTagOffset": user_offsets.modulus_tag_offset - TBS_OFFSET,
+        "tbsSerialNumberOffset": user_offsets.serial_number_offset - TBS_OFFSET,
+        "issuerTbs": issuer_tbs_padded,
+        "issuerTbsLength": issuer_tbs_padded_len,
+        "actualIssuerTbsLength": user_cert_tbs_der.len(),
+        "issuerRsaModulus": issuer_rsa_modulus,
+        "issuerRsaSignature": issuer_rsa_signature,
         "smtRoot": smt_root,
         "serialNumber": smt_serial,
         "smtSiblings": smt_siblings,
         "smtOldKey": smt_old_key,
         "smtOldValue": smt_old_value,
         "smtIsOld0": smt_is_old0,
-        "pk_blind": pk_blind,
+        "pkBlind": pk_blind,
     });
 
     let device_sig_json = serde_json::json!({
         "tbs": tbs_padded,
-        "tbs_length": tbs_padded_len,
-        "user_pk_limbs": user_pk_limbs,
-        "user_rsa_signature": user_rsa_signature,
-        "pk_blind": pk_blind,
+        "tbsLength": tbs_padded_len,
+        "userPkLimbs": user_pk_limbs,
+        "userRsaSignature": user_rsa_signature,
+        "pkBlind": pk_blind,
         "challenge": challenge,
     });
 

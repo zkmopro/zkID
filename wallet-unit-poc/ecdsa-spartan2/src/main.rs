@@ -269,9 +269,9 @@ fn run_generate_split_input(command_args: &[String]) -> ! {
     let pk_blind = pk_blind_override.unwrap_or_else(ecdsa_spartan2::random_pk_blind);
     let prefix = &pk_blind[..pk_blind.len().min(8)];
     if from_override {
-        warn!(pk_blind_prefix = prefix, "Using pk_blind from --pk-blind override — only safe for fixture/test runs; reusing across submissions defeats hiding");
+        warn!(pk_blind_prefix = prefix, "Using pkBlind from --pk-blind override — only safe for fixture/test runs; reusing across submissions defeats hiding");
     } else {
-        info!(pk_blind_prefix = prefix, "Sampled pk_blind");
+        info!(pk_blind_prefix = prefix, "Sampled pkBlind");
     }
 
     info!("Generating split inputs (cert_chain + device_sig)...");

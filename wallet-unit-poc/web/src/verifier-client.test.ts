@@ -116,10 +116,10 @@ describe("verifier-client", () => {
             },
             parsed_inputs: {
               challenge: "0xdead",
-              pk_commit: "0x2",
+              pkCommit: "0x2",
               nullifier: "0xabc",
               smt_root: "0xbeef",
-              issuer_rsa_modulus: ["0xaaaa", "0xbbbb"],
+              issuerRsaModulus: ["0xaaaa", "0xbbbb"],
             },
           }),
           { status: 200 },
@@ -134,7 +134,7 @@ describe("verifier-client", () => {
     });
     expect(res.public_signals?.cert_chain).toEqual(["0x1", "0x2"]);
     expect(res.parsed_inputs?.nullifier).toBe("0xabc");
-    expect(res.parsed_inputs?.issuer_rsa_modulus).toEqual(["0xaaaa", "0xbbbb"]);
+    expect(res.parsed_inputs?.issuerRsaModulus).toEqual(["0xaaaa", "0xbbbb"]);
   });
 
   it("tolerates verified=false without a nullifier", async () => {

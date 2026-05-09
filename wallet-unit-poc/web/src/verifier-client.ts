@@ -29,10 +29,10 @@ export interface PublicSignals {
 /** Named parse of public signals from the verifier response. */
 export interface ParsedInputs {
   challenge: string;
-  pk_commit: string;
+  pkCommit: string;
   nullifier: string;
   smt_root: string;
-  issuer_rsa_modulus: string[];
+  issuerRsaModulus: string[];
 }
 
 export interface LinkVerifyResult {

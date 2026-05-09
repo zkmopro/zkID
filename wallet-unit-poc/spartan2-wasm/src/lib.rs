@@ -261,9 +261,9 @@ pub fn verify(proof_bytes: &[u8], vk_bytes: &[u8]) -> Result<JsValue, JsError> {
 #[wasm_bindgen]
 pub fn link_verify(cert_pubs: Vec<String>, device_pubs: Vec<String>) -> Result<JsValue, JsError> {
     let cert_pk = cert_pubs.get(CircuitKind::CertChainRs2048.pk_commit_index())
-        .ok_or_else(|| JsError::new("cert public values missing pk_commit"))?;
+        .ok_or_else(|| JsError::new("cert public values missing pkCommit"))?;
     let device_pk = device_pubs.get(CircuitKind::DeviceSigRs2048.pk_commit_index())
-        .ok_or_else(|| JsError::new("device public values missing pk_commit"))?;
+        .ok_or_else(|| JsError::new("device public values missing pkCommit"))?;
     let ok = cert_pk == device_pk;
     #[derive(Serialize)]
     struct LinkJs { ok: bool, cert_pk_commit: String, device_pk_commit: String }
