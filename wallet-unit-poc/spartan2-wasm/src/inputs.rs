@@ -79,12 +79,12 @@ pub fn build_split_inputs(
 ) -> Result<JsValue, JsError> {
     if k_issuer != 17 && k_issuer != 34 {
         return Err(JsError::new(&format!(
-            "unsupported kIssuer {kIssuer}; expected 17 (RSA-2048) or 34 (RSA-4096)"
+            "unsupported k_issuer {k_issuer}; expected 17 (RSA-2048) or 34 (RSA-4096)"
         )));
     }
     if k_user != 17 {
         return Err(JsError::new(&format!(
-            "unsupported kUser {kUser}; MOICA user keys are RSA-2048 (kUser=17)"
+            "unsupported k_user {k_user}; MOICA user keys are RSA-2048 (k_user=17)"
         )));
     }
     if app_id_bytes.len() != APP_ID_LEN {
