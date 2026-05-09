@@ -4,12 +4,12 @@ include "rs256.circom";
 include "components/pkCommit.circom";
 
 /// @title CertChainRSA256
-/// @notice Circuit A of the CertChain + DeviceSig pair. Proves: "I hold a
+/// @notice Circuit A of the CertChain + UserSig pair. Proves: "I hold a
 ///         non-revoked, MOICA-issued cert whose RSA public key hashes (with
 ///         pkBlind) to pkCommit." Issuer RSA params are separate from user
 ///         params so MOICA-G3's 4096-bit CA can certify a 2048-bit user key.
 ///         pkCommit is computed over kUser limbs so it byte-matches
-///         DeviceSigRSA256's; the verifier checks `pk_commit_A == pk_commit_B`
+///         UserSigRSA256's; the verifier checks `pk_commit_A == pk_commit_B`
 ///         to prevent proof-mixing.
 ///
 /// @param maxMessageLength    Max TBS / cert byte length (1536)
@@ -59,7 +59,7 @@ template CertChainRSA256(
     signal input smtOldValue;
     signal input smtIsOld0;
 
-    // === Linking (private; same value used in DeviceSigRSA256) ===
+    // === Linking (private; same value used in UserSigRSA256) ===
     signal input pkBlind;
 
     // === Outputs ===
@@ -133,7 +133,7 @@ template CertChainRSA256(
     );
 
     // ── Step 11: Commit to the user RSA public key ────────────────────────
-    // Sized to kUser so pkCommit byte-matches DeviceSigRSA256's output.
+    // Sized to kUser so pkCommit byte-matches UserSigRSA256's output.
     component pkHash = ChunkedPoseidonP256(kUser + 1);
     for (var i = 0; i < kUser; i++) {
         pkHash.inputs[i] <== userRsaExtractedModulus[i];

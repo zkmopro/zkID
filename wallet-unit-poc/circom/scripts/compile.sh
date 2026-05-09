@@ -1,10 +1,10 @@
 #!/bin/bash
 
 usage() {
-    echo "Usage: $0 {certChainRS2048|certChainRS4096|deviceSigRS2048|all}"
+    echo "Usage: $0 {certChainRS2048|certChainRS4096|userSigRS2048|all}"
     echo "  certChainRS2048: Phase 2 split — Circuit A (cert chain + revocation) for MOICA-G2."
     echo "  certChainRS4096: Phase 2 split — Circuit A for MOICA-G3 (4096-bit issuer, 2048-bit user)."
-    echo "  deviceSigRS2048: Phase 2 split — Circuit B (device signature); always RSA-2048 (user keys are always 2048-bit)."
+    echo "  userSigRS2048: Phase 2 split — Circuit B (device signature); always RSA-2048 (user keys are always 2048-bit)."
     echo "  all:               Compile all circuits."
     exit 1
 }
@@ -34,13 +34,13 @@ case "$1" in
     certChainRS4096)
         compile certChainRS4096
     ;;
-    deviceSigRS2048)
-        compile deviceSigRS2048
+    userSigRS2048)
+        compile userSigRS2048
     ;;
     all)
         compile certChainRS2048
         compile certChainRS4096
-        compile deviceSigRS2048
+        compile userSigRS2048
     ;;
     *)
         echo "Error: Invalid option '$1'."

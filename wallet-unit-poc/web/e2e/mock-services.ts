@@ -128,9 +128,9 @@ export async function installMockServices(
     const body = req.postDataJSON();
     const shapeOk =
       typeof body?.cert_chain_proof === "string" &&
-      typeof body?.device_sig_proof === "string" &&
+      typeof body?.user_sig_proof === "string" &&
       body.cert_chain_proof.length > 0 &&
-      body.device_sig_proof.length > 0 &&
+      body.user_sig_proof.length > 0 &&
       ["rs2048", "rs4096"].includes(body?.cert_chain_type) &&
       // Server extracts these from the proof's public signals; the client
       // must not include them in the request envelope.
@@ -150,7 +150,7 @@ export async function installMockServices(
                 persisted: true,
                 public_signals: {
                   cert_chain: ["0xmocksubjectdnhash", "0xmockpkcommit"],
-                  device_sig: ["0xmockpkcommit", "0xmockpackedtbs"],
+                  user_sig: ["0xmockpkcommit", "0xmockpackedtbs"],
                 },
                 parsed_inputs: {
                   challenge: "0xdeadbeef",
@@ -193,8 +193,8 @@ const KEYS_FIXTURE_FILES = [
   "certChainRS2048.wasm.gz",
   "certChainRS4096_proving.key.gz",
   "certChainRS4096.wasm.gz",
-  "deviceSigRS2048_proving.key.gz",
-  "deviceSigRS2048.wasm.gz",
+  "userSigRS2048_proving.key.gz",
+  "userSigRS2048.wasm.gz",
 ];
 
 const SMT_FIXTURE_FILES = [

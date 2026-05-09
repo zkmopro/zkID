@@ -11,9 +11,9 @@
     "params": [1536, 121, 34, 4096, 17, 2048, 128, 20],
     "pubs": ["issuerRsaModulus", "smtRoot"]
   },
-  "deviceSigRS2048": {
-    "file": "deviceSig",
-    "template": "DeviceSigRSA256",
+  "userSigRS2048": {
+    "file": "userSig",
+    "template": "UserSigRSA256",
     "params": [1536, 121, 17],
     "pubs": ["challenge"]
   }

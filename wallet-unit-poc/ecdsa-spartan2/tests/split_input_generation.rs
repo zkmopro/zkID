@@ -58,7 +58,7 @@ fn load_rs4096_fixtures() -> (x509_cert::Certificate, String, x509_cert::Certifi
 fn split_inputs_have_expected_structure() {
     let (user_cert, user_sig_b64, issuer_cert, serial_hex) = load_rs2048_fixtures();
 
-    let (cert_chain, device_sig) = generate_split_inputs(
+    let (cert_chain, user_sig) = generate_split_inputs(
         &user_cert,
         &issuer_cert,
         &user_sig_b64,
@@ -99,20 +99,20 @@ fn split_inputs_have_expected_structure() {
         );
     }
 
-    // device_sig JSON must have all expected keys; app_id_bytes is gone
+    // user_sig JSON must have all expected keys; app_id_bytes is gone
     // (recovered in-circuit by packing tbs[0..31]).
     for key in ["tbs", "tbsLength", "userPkLimbs", "userRsaSignature", "pkBlind", "challenge"] {
         assert!(
-            device_sig.get(key).is_some(),
-            "device_sig missing key: {key}"
+            user_sig.get(key).is_some(),
+            "user_sig missing key: {key}"
         );
     }
     assert!(
-        device_sig.get("app_id_bytes").is_none(),
-        "device_sig should no longer expose app_id_bytes"
+        user_sig.get("app_id_bytes").is_none(),
+        "user_sig should no longer expose app_id_bytes"
     );
     assert_eq!(
-        device_sig["challenge"].as_str().expect("challenge string"),
+        user_sig["challenge"].as_str().expect("challenge string"),
         DEFAULT_CHALLENGE,
         "challenge passthrough"
     );
@@ -139,17 +139,17 @@ fn split_inputs_have_expected_structure() {
         "smtSiblings length (smtDepth=128)"
     );
     assert_eq!(
-        device_sig["tbs"].as_array().unwrap().len(),
+        user_sig["tbs"].as_array().unwrap().len(),
         1536,
         "tbs length (maxMessageLength=1536)"
     );
     assert_eq!(
-        device_sig["userPkLimbs"].as_array().unwrap().len(),
+        user_sig["userPkLimbs"].as_array().unwrap().len(),
         17,
         "userPkLimbs length (kUser=17)"
     );
     assert_eq!(
-        device_sig["userRsaSignature"].as_array().unwrap().len(),
+        user_sig["userRsaSignature"].as_array().unwrap().len(),
         17,
         "userRsaSignature length (kUser=17)"
     );
@@ -180,7 +180,7 @@ fn split_inputs_reject_wrong_length_app_id() {
 fn split_inputs_share_pk_blind() {
     let (user_cert, user_sig_b64, issuer_cert, serial_hex) = load_rs2048_fixtures();
 
-    let (cert_chain, device_sig) = generate_split_inputs(
+    let (cert_chain, user_sig) = generate_split_inputs(
         &user_cert,
         &issuer_cert,
         &user_sig_b64,
@@ -196,7 +196,7 @@ fn split_inputs_share_pk_blind() {
     .expect("generate_split_inputs failed");
 
     let cc_blind = cert_chain["pkBlind"].as_str().expect("cert_chain pkBlind not a string");
-    let ds_blind = device_sig["pkBlind"].as_str().expect("device_sig pkBlind not a string");
+    let ds_blind = user_sig["pkBlind"].as_str().expect("user_sig pkBlind not a string");
     assert_eq!(
         cc_blind, ds_blind,
         "pkBlind must be identical across cert-chain and device-sig outputs"
@@ -207,7 +207,7 @@ fn split_inputs_share_pk_blind() {
 fn split_inputs_rs4096_have_expected_structure() {
     let (user_cert, user_sig_b64, issuer_cert, serial_hex) = load_rs4096_fixtures();
 
-    let (cert_chain, device_sig) = generate_split_inputs(
+    let (cert_chain, user_sig) = generate_split_inputs(
         &user_cert,
         &issuer_cert,
         &user_sig_b64,
@@ -248,16 +248,16 @@ fn split_inputs_rs4096_have_expected_structure() {
         );
     }
 
-    // device_sig JSON must have all expected keys
+    // user_sig JSON must have all expected keys
     for key in ["tbs", "tbsLength", "userPkLimbs", "userRsaSignature", "pkBlind", "challenge"] {
         assert!(
-            device_sig.get(key).is_some(),
-            "device_sig (RS4096) missing key: {key}"
+            user_sig.get(key).is_some(),
+            "user_sig (RS4096) missing key: {key}"
         );
     }
     assert!(
-        device_sig.get("app_id_bytes").is_none(),
-        "device_sig (RS4096) should no longer expose app_id_bytes"
+        user_sig.get("app_id_bytes").is_none(),
+        "user_sig (RS4096) should no longer expose app_id_bytes"
     );
 
     // Array dimensions — 4096 params: cert padding=1536, k_issuer=34, k_user=17
@@ -287,17 +287,17 @@ fn split_inputs_rs4096_have_expected_structure() {
         "smtSiblings length (smtDepth=128)"
     );
     assert_eq!(
-        device_sig["tbs"].as_array().unwrap().len(),
+        user_sig["tbs"].as_array().unwrap().len(),
         1536,
         "tbs length (maxMessageLength=1536)"
     );
     assert_eq!(
-        device_sig["userPkLimbs"].as_array().unwrap().len(),
+        user_sig["userPkLimbs"].as_array().unwrap().len(),
         17,
         "userPkLimbs length (kUser=17, always RSA-2048)"
     );
     assert_eq!(
-        device_sig["userRsaSignature"].as_array().unwrap().len(),
+        user_sig["userRsaSignature"].as_array().unwrap().len(),
         17,
         "userRsaSignature length (kUser=17)"
     );
@@ -307,7 +307,7 @@ fn split_inputs_rs4096_have_expected_structure() {
 fn split_inputs_rs4096_share_pk_blind() {
     let (user_cert, user_sig_b64, issuer_cert, serial_hex) = load_rs4096_fixtures();
 
-    let (cert_chain, device_sig) = generate_split_inputs(
+    let (cert_chain, user_sig) = generate_split_inputs(
         &user_cert,
         &issuer_cert,
         &user_sig_b64,
@@ -323,7 +323,7 @@ fn split_inputs_rs4096_share_pk_blind() {
     .expect("generate_split_inputs failed for RS4096");
 
     let cc_blind = cert_chain["pkBlind"].as_str().expect("cert_chain pkBlind not a string");
-    let ds_blind = device_sig["pkBlind"].as_str().expect("device_sig pkBlind not a string");
+    let ds_blind = user_sig["pkBlind"].as_str().expect("user_sig pkBlind not a string");
     assert_eq!(
         cc_blind, ds_blind,
         "pkBlind must be identical across cert-chain and device-sig outputs (RS4096)"

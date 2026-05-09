@@ -123,9 +123,9 @@ only and never called here.
 On click, the Worker resolves these URLs (all gzipped on the server):
 
 - `/keys/certChainRS2048_proving.key.gz` (or rs4096 if the cert input is 4096)
-- `/keys/deviceSigRS2048_proving.key.gz`
+- `/keys/userSigRS2048_proving.key.gz`
 - `/keys/certChainRS2048.wasm.gz` (circom witness-gen)
-- `/keys/deviceSigRS2048.wasm.gz`
+- `/keys/userSigRS2048.wasm.gz`
 
 SHA-256 digests for the above are read from the GitHub Release API
 (`https://api.github.com/repos/zkmopro/zkID/releases/tags/latest`) and verified

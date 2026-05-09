@@ -4,7 +4,7 @@ import assert from "assert";
 
 /**
  * Tests for ChunkedPoseidonP256 — the sponge-style hash used to produce
- * `pkCommit` in both CertChainRSA256 (Circuit A) and DeviceSigRSA256
+ * `pkCommit` in both CertChainRSA256 (Circuit A) and UserSigRSA256
  * (Circuit B). These tests exercise the primitive directly; end-to-end
  * linking between Circuit A and Circuit B is covered in Phase 2b once the
  * Rust prover supports the split circuits and RSA fixtures are available.
@@ -93,7 +93,7 @@ describe("ChunkedPoseidonP256", function () {
     it("distinguishes different user_pk (defeats cert-swap attacks)", async () => {
       // Same blind but different pk → commits must differ, so an adversary
       // can't pair a legit CertChainRSA256 proof with an illegit
-      // DeviceSigRSA256 proof from a different keypair.
+      // UserSigRSA256 proof from a different keypair.
       const pk_A = Array.from({ length: 17 }, (_, i) => BigInt(i + 1));
       const pk_B = [99n, ...pk_A.slice(1)];
       const pkBlind = 0xdeadbeefn;

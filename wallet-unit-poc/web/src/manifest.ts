@@ -9,7 +9,7 @@ import type { SmtIssuer } from "./smt-client";
 export type CircuitKind =
   | "certChainRS2048"
   | "certChainRS4096"
-  | "deviceSigRS2048";
+  | "userSigRS2048";
 
 export interface CircuitManifest {
   kind: CircuitKind;
@@ -38,11 +38,11 @@ export const CIRCUITS: Record<CircuitKind, CircuitManifest> = {
     pkUrl: "/keys/certChainRS4096_proving.key.gz",
     witnessWasmUrl: "/keys/certChainRS4096.wasm.gz",
   },
-  deviceSigRS2048: {
-    kind: "deviceSigRS2048",
+  userSigRS2048: {
+    kind: "userSigRS2048",
     numPublic: 2,
-    pkUrl: "/keys/deviceSigRS2048_proving.key.gz",
-    witnessWasmUrl: "/keys/deviceSigRS2048.wasm.gz",
+    pkUrl: "/keys/userSigRS2048_proving.key.gz",
+    witnessWasmUrl: "/keys/userSigRS2048.wasm.gz",
   },
 };
 

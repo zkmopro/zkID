@@ -1,7 +1,7 @@
 # Circom Circuit Security Audit — zkID
 
 **Project:** `wallet-unit-poc/circom/` (zkID — Privacy Stewards of Ethereum)
-**Circuits:** `CertChainRSA256` (rs2048 / rs4096), `DeviceSigRSA256` (rs2048)
+**Circuits:** `CertChainRSA256` (rs2048 / rs4096), `UserSigRSA256` (rs2048)
 **Circom version:** 2.2.3
 **Constraint field:** `secq256r1` (= scalar field of secq256r1 = base field of secp256r1, p ≈ 2²⁵⁶ − 2²²⁴ + 2¹⁹² + 2⁹⁶ − 1)
 **Proving system:** Groth16 (per `circomkit.json`)
@@ -16,7 +16,7 @@ Out of scope: underconstrained‑signal classes detected by external tools (`cir
 | File | Lines | Description |
 |---|---|---|
 | `circuits/cert_chain.circom` | ~120 | Circuit A: cert‑chain RSA verify + DER parsing + SMT non‑membership + `pk_commit` |
-| `circuits/device_sig.circom` | ~72 | Circuit B: device RSA signature + `pk_commit` + nullifier + `app_id_packed` + `challenge` binding |
+| `circuits/user_sig.circom` | ~72 | Circuit B: device RSA signature + `pk_commit` + nullifier + `app_id_packed` + `challenge` binding |
 | `circuits/rs256.circom` | ~70 | `CertRSA256Verify`: SHA‑256 + RSA‑65537 verify glue; `Bits2Limbs` |
 | `circuits/utils/utils.circom` | ~320 | `VerifyTBSinCert`, `VerifySubjectDN`, `VerifySerialNumber`, `ExtractModulus`, `PackBytes`, `PoseidonBytes`, `PoseidonBytesWithField` |
 | `circuits/components/poseidon_p256.circom` | ~87 | Standard Poseidon over secq256r1 (t=3, t=4) |
@@ -25,9 +25,9 @@ Out of scope: underconstrained‑signal classes detected by external tools (`cir
 | `circuits/components/smt_hash_p256.circom` | ~30 | `SMTHash1P256(key,value,1)`, `SMTHash2P256(L,R)` |
 | `circuits/components/smt_verifier_p256.circom` | ~145 | Circomlib SMT verifier ported to P‑256 Poseidon |
 | `circuits/components/smt-nonmembership.circom` | ~27 | Wrapper hard‑coding `enabled=1`, `value=0`, `fnc=1` |
-| `circuits/main/cert_chain_rs2048.circom` | 6 | `CertChainRSA256(1536, 121, 17, 2048, 17, 2048, 128, 128, 20)` |
-| `circuits/main/cert_chain_rs4096.circom` | 6 | `CertChainRSA256(1536, 121, 34, 4096, 17, 2048, 128, 128, 20)` |
-| `circuits/main/device_sig_rs2048.circom` | 6 | `DeviceSigRSA256(1536, 121, 17)` |
+| `circuits/main/certChainRS2048.circom` | 6 | `CertChainRSA256(1536, 121, 17, 2048, 17, 2048, 128, 128, 20)` |
+| `circuits/main/certChainRS4096.circom` | 6 | `CertChainRSA256(1536, 121, 34, 4096, 17, 2048, 128, 128, 20)` |
+| `circuits/main/userSigRS2048.circom` | 6 | `UserSigRSA256(1536, 121, 17)` |
 
 **Total project‑authored Circom:** ~14 files, ~900 lines (excluding constants tables and test wrappers).
 
@@ -134,7 +134,7 @@ All constraints pass:
 - `SMTNonMembershipVerifier` ✓ — `S_attacker` is fresh, not revoked.
 - `pk_commit = ChunkedPoseidonP256(K_attacker_limbs ‖ pk_blind)`.
 
-Then in **Circuit B** (`DeviceSigRSA256`), the adversary uses `K_attacker` (whose private key they hold) to sign any `tbs` of their choosing, producing a `pk_commit` matching Circuit A's. The Go verifier checks `pk_commit_A == pk_commit_B` — passes.
+Then in **Circuit B** (`UserSigRSA256`), the adversary uses `K_attacker` (whose private key they hold) to sign any `tbs` of their choosing, producing a `pk_commit` matching Circuit A's. The Go verifier checks `pk_commit_A == pk_commit_B` — passes.
 
 **Result:** The verifier accepts a proof of "non‑revoked MOICA‑certified key" for an RSA key the adversary fully controls, with a serial they fabricated. The chain‑of‑trust binding from MOICA's signature to the user's public key is severed.
 
@@ -209,10 +209,10 @@ This closes the gap because the only modulus, serial, and DN bytes that can sati
 
 ---
 
-### [HIGH] Sybil bypass on nullifier via unconstrained `tbs` tail in `DeviceSigRSA256` — SPEC_MISMATCH
+### [HIGH] Sybil bypass on nullifier via unconstrained `tbs` tail in `UserSigRSA256` — SPEC_MISMATCH
 
 **Location:**
-`DeviceSigRSA256` in `circuits/device_sig.circom:21–71`. Specifically:
+`UserSigRSA256` in `circuits/user_sig.circom:21–71`. Specifically:
 - Lines 22–23 — `tbs[maxMessageLength]` and `tbs_length` are private inputs.
 - Lines 38–43 — `CertRSA256Verify(tbs, tbs_length, user_pk_limbs, user_rsa_signature)` enforces `tbs[i] === 0` for `i ≥ tbs_length` (via `AssertZeroPadding`) and that `signature^65537 mod modulus == PKCS1v15(SHA256(tbs[0..tbs_length]))`.
 - Lines 48–52 — only `tbs[0..31]` is bound to `app_id_packed` (via `PackBytes(31, …)`). Bytes `tbs[31..tbs_length]` are entirely unconstrained.
@@ -382,7 +382,7 @@ The following patterns did not reach the threshold for a finding but deserve a s
 
 This audit covers business‑logic and mathematical vulnerabilities in the constraints of the three top‑level circuits and their direct dependencies inside this repo. The following are explicitly out of scope:
 
-- Underconstrained‑signal classes that automated tools (Picus, Ecne, `circomspect`) target. **Strongly recommend running `circomspect` on `circuits/cert_chain.circom`, `circuits/device_sig.circom`, and `circuits/utils/utils.circom` as a follow‑up.**
+- Underconstrained‑signal classes that automated tools (Picus, Ecne, `circomspect`) target. **Strongly recommend running `circomspect` on `circuits/cert_chain.circom`, `circuits/user_sig.circom`, and `circuits/utils/utils.circom` as a follow‑up.**
 - The `circomlib` and `@zk-email/circuits` library code, treated as trusted.
 - The Spartan2 prover/verifier (`ecdsa-spartan2/`) and the Go verifier (`go-zkid-verifier`).
 - The Rust input builder (`zkid-input-builder`); however, see "Areas for Further Investigation" §5.
@@ -396,7 +396,7 @@ This audit is a manual analysis and does not constitute a formal verification.
 ---
 benchmark:
   circuit:
-    name: zkID (CertChainRSA256 + DeviceSigRSA256)
+    name: zkID (CertChainRSA256 + UserSigRSA256)
     files: 14
     lines: ~900
     complexity: MEDIUM

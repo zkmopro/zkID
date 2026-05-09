@@ -116,7 +116,7 @@ pub fn generate_split_inputs(
         "pkBlind": pk_blind,
     });
 
-    let device_sig_json = serde_json::json!({
+    let user_sig_json = serde_json::json!({
         "tbs": tbs_padded,
         "tbsLength": tbs_padded_len,
         "userPkLimbs": user_pk_limbs,
@@ -125,5 +125,5 @@ pub fn generate_split_inputs(
         "challenge": challenge,
     });
 
-    Ok((cert_chain_json, device_sig_json))
+    Ok((cert_chain_json, user_sig_json))
 }

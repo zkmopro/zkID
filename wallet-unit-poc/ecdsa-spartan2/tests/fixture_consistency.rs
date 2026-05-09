@@ -97,11 +97,11 @@ fn fixture_rs4096_signature_matches_default_tbs() {
 }
 
 #[test]
-fn fixture_device_sig_input_is_valid_json() {
-    let input_str = std::fs::read_to_string("../circom/inputs/device_sig_rs2048/input.json")
-        .expect("device_sig_rs2048/input.json not found");
+fn fixture_user_sig_input_is_valid_json() {
+    let input_str = std::fs::read_to_string("../circom/inputs/user_sig_rs2048/input.json")
+        .expect("user_sig_rs2048/input.json not found");
     let input: serde_json::Value =
-        serde_json::from_str(&input_str).expect("invalid JSON in device_sig input");
+        serde_json::from_str(&input_str).expect("invalid JSON in user_sig input");
 
     for key in [
         "tbs",
@@ -112,7 +112,7 @@ fn fixture_device_sig_input_is_valid_json() {
     ] {
         assert!(
             input.get(key).is_some(),
-            "device_sig input missing key: {key}"
+            "user_sig input missing key: {key}"
         );
     }
 
@@ -137,8 +137,8 @@ fn fixture_device_sig_input_is_valid_json() {
 fn fixture_pk_blind_matches_across_inputs() {
     let cc_str = std::fs::read_to_string("../circom/inputs/cert_chain_rs2048/input.json")
         .expect("cert_chain_rs2048/input.json not found");
-    let ds_str = std::fs::read_to_string("../circom/inputs/device_sig_rs2048/input.json")
-        .expect("device_sig_rs2048/input.json not found");
+    let ds_str = std::fs::read_to_string("../circom/inputs/user_sig_rs2048/input.json")
+        .expect("user_sig_rs2048/input.json not found");
 
     let cc: serde_json::Value = serde_json::from_str(&cc_str).unwrap();
     let ds: serde_json::Value = serde_json::from_str(&ds_str).unwrap();
@@ -148,10 +148,10 @@ fn fixture_pk_blind_matches_across_inputs() {
         .expect("cert_chain pk_blind not a string");
     let ds_blind = ds["pk_blind"]
         .as_str()
-        .expect("device_sig pk_blind not a string");
+        .expect("user_sig pk_blind not a string");
 
     assert_eq!(
         cc_blind, ds_blind,
-        "pk_blind must match between cert_chain_rs2048 and device_sig_rs2048 fixtures"
+        "pk_blind must match between cert_chain_rs2048 and user_sig_rs2048 fixtures"
     );
 }

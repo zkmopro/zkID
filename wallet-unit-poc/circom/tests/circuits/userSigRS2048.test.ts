@@ -2,7 +2,7 @@ import { WitnessTester } from "circomkit";
 import { circomkit } from "../common";
 import { loadInput } from "../common/fixtures";
 
-describe("DeviceSigRSA256 (rs2048)", function () {
+describe("UserSigRSA256 (rs2048)", function () {
   let circuit: WitnessTester<
     ["tbs", "tbsLength", "userPkLimbs", "userRsaSignature", "pkBlind", "challenge"],
     ["pkCommit", "nullifier", "appIdPacked"]
@@ -11,10 +11,10 @@ describe("DeviceSigRSA256 (rs2048)", function () {
 
   before(async function () {
     this.timeout(900_000);
-    input = loadInput("device_sig_rs2048");
-    circuit = await circomkit.WitnessTester("deviceSigRS2048", {
-      file: "deviceSig",
-      template: "DeviceSigRSA256",
+    input = loadInput("user_sig_rs2048");
+    circuit = await circomkit.WitnessTester("userSigRS2048", {
+      file: "userSig",
+      template: "UserSigRSA256",
       params: [1536, 121, 17],
     });
   });

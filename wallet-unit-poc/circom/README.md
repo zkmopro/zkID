@@ -15,7 +15,7 @@ yarn install
 # Compile a single circuit
 yarn compile:certChainRS2048
 yarn compile:certChainRS4096
-yarn compile:deviceSigRS2048
+yarn compile:userSigRS2048
 
 # Compile all
 yarn compile:all
@@ -40,7 +40,7 @@ memory-heavy.
 - `circuits/main/` — top-level circuit entry points (one file per build target)
 - `circuits/rs256.circom` — RS256 cert verification and shared templates
 - `circuits/certChain.circom` — CertChain circuit (Circuit A: cert chain + revocation + pkCommit)
-- `circuits/deviceSig.circom` — DeviceSig circuit (Circuit B: device signature + pkCommit)
+- `circuits/userSig.circom` — UserSig circuit (Circuit B: device signature + pkCommit)
 - `circuits/components/` — reusable templates: SMT non-membership, Poseidon over P256
 - `circuits/utils/utils.circom` — DER-level cert helpers (TBS / serial extraction, modulus extraction, byte packing, Poseidon-over-bytes)
 
@@ -52,7 +52,7 @@ Witness order (after the implicit constant-1 wire):
 |----------------------|---------|---------------------------------------------------------------------|
 | `certChainRS2048`  | 19      | `[pkCommit, issuerRsaModulus[17], smtRoot]`                         |
 | `certChainRS4096`  | 36      | `[pkCommit, issuerRsaModulus[34], smtRoot]`                         |
-| `deviceSigRS2048`  |  4      | `[pkCommit, nullifier, appIdPacked, challenge]`                     |
+| `userSigRS2048`  |  4      | `[pkCommit, nullifier, appIdPacked, challenge]`                     |
 
 `appIdPacked` is `tbs[0..31]` packed little-endian into one field element;
 the verifier matches it against the configured `APP_ID` after the same

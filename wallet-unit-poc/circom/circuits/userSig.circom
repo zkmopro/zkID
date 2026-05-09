@@ -3,8 +3,8 @@ pragma circom 2.2.3;
 include "rs256.circom";
 include "components/pkCommit.circom";
 
-/// @title DeviceSigRSA256
-/// @notice Circuit B of the CertChain + DeviceSig pair. Verifies an RSA
+/// @title UserSigRSA256
+/// @notice Circuit B of the CertChain + UserSig pair. Verifies an RSA
 ///         signature over the SHA-256-padded `tbs` and emits `pkCommit`,
 ///         `nullifier = ChunkedPoseidonP256(signature)`, and `appIdPacked`
 ///         (`tbs[0..31]` packed into one field element).
@@ -18,7 +18,7 @@ include "components/pkCommit.circom";
 /// @param maxMessageLength  Max byte length of `tbs` (1536)
 /// @param n                 RSA limb bits (e.g. 121)
 /// @param k                 RSA limb count (17 for 2048-bit, 34 for 4096-bit)
-template DeviceSigRSA256(maxMessageLength, n, k) {
+template UserSigRSA256(maxMessageLength, n, k) {
     signal input tbs[maxMessageLength];
     signal input tbsLength;
 

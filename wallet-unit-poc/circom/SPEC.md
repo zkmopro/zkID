@@ -15,7 +15,7 @@ non-revocation against a Sparse Merkle Tree (SMT).
 | -------------------- | ------------------ | ------------------------------------------------------------------------ |
 | `certChainRS2048`  | `CertChainRSA256`  | Circuit A — cert chain + revocation + pkCommit (MOICA-G2)               |
 | `certChainRS4096`  | `CertChainRSA256`  | Circuit A — cert chain + revocation + pkCommit (MOICA-G3)               |
-| `deviceSigRS2048`  | `DeviceSigRSA256`  | Circuit B — device signature + nullifier + appIdPacked + pkCommit       |
+| `userSigRS2048`  | `UserSigRSA256`  | Circuit B — device signature + nullifier + appIdPacked + pkCommit       |
 
 The two-circuit split replaces the former monolithic `FullCertRSA256VerifyWithRevocation`.
 Circuit A and Circuit B are linked via `pkCommit`: the verifier checks
@@ -39,7 +39,7 @@ Circuit A and Circuit B are linked via `pkCommit`: the verifier checks
    `pkCommit_A == pkCommit_B`. See §"Why per-session randomness for `pkBlind`"
    below.
 
-### Circuit B — DeviceSig (`DeviceSigRSA256`)
+### Circuit B — UserSig (`UserSigRSA256`)
 
 1. **App-id binding** — the public output `appIdPacked` is constrained to
    equal `tbs[0..31]` (the SHA-256-padded payload the card signs) packed
@@ -68,7 +68,7 @@ Public-value vector layout (in declaration order, outputs first):
 - RS2048: `[pkCommit, issuerRsaModulus[17], smtRoot]` — 19 elements
 - RS4096: `[pkCommit, issuerRsaModulus[34], smtRoot]` — 36 elements
 
-### Circuit B — DeviceSig
+### Circuit B — UserSig
 
 | Signal         | Visibility    | Notes                                                              |
 | -------------- | ------------- | ------------------------------------------------------------------ |

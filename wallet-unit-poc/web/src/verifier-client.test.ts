@@ -70,7 +70,7 @@ describe("verifier-client", () => {
       expect(body.cert_chain_type).toBe("rs2048");
       // Base64 of [1,2,3,4] = "AQIDBA=="; of [9,9,9,9,9] = "CQkJCQk="
       expect(body.cert_chain_proof).toBe("AQIDBA==");
-      expect(body.device_sig_proof).toBe("CQkJCQk=");
+      expect(body.user_sig_proof).toBe("CQkJCQk=");
       // Server extracts these from the proof's public signals; the client
       // must not include them in the request envelope.
       expect(body).not.toHaveProperty("challenge");
@@ -91,7 +91,7 @@ describe("verifier-client", () => {
     const res = await submitLinkVerify({
       certChainType: "rs2048",
       certChainProofBytes: certProof,
-      deviceSigProofBytes: deviceProof,
+      userSigProofBytes: deviceProof,
     });
     expect(res).toEqual({
       verified: true,
@@ -112,7 +112,7 @@ describe("verifier-client", () => {
             persisted: true,
             public_signals: {
               cert_chain: ["0x1", "0x2"],
-              device_sig: ["0x2", "0x3"],
+              user_sig: ["0x2", "0x3"],
             },
             parsed_inputs: {
               challenge: "0xdead",
@@ -130,7 +130,7 @@ describe("verifier-client", () => {
     const res = await submitLinkVerify({
       certChainType: "rs2048",
       certChainProofBytes: new Uint8Array([1]),
-      deviceSigProofBytes: new Uint8Array([1]),
+      userSigProofBytes: new Uint8Array([1]),
     });
     expect(res.public_signals?.cert_chain).toEqual(["0x1", "0x2"]);
     expect(res.parsed_inputs?.nullifier).toBe("0xabc");
@@ -144,7 +144,7 @@ describe("verifier-client", () => {
     const res = await submitLinkVerify({
       certChainType: "rs2048",
       certChainProofBytes: new Uint8Array([1]),
-      deviceSigProofBytes: new Uint8Array([1]),
+      userSigProofBytes: new Uint8Array([1]),
     });
     expect(res.verified).toBe(false);
   });
@@ -157,7 +157,7 @@ describe("verifier-client", () => {
       submitLinkVerify({
         certChainType: "rs2048",
         certChainProofBytes: new Uint8Array([1]),
-        deviceSigProofBytes: new Uint8Array([1]),
+        userSigProofBytes: new Uint8Array([1]),
       }),
     ).rejects.toThrow(/verified=true response missing string nullifier/);
   });
@@ -171,7 +171,7 @@ describe("verifier-client", () => {
       submitLinkVerify({
         certChainType: "rs2048",
         certChainProofBytes: huge,
-        deviceSigProofBytes: small,
+        userSigProofBytes: small,
       }),
     ).rejects.toThrow(/raw cap/);
   });
@@ -184,7 +184,7 @@ describe("verifier-client", () => {
       submitLinkVerify({
         certChainType: "rs2048",
         certChainProofBytes: new Uint8Array([1]),
-        deviceSigProofBytes: new Uint8Array([1]),
+        userSigProofBytes: new Uint8Array([1]),
       }),
     ).rejects.toThrow(/invalid cert_chain_type/);
   });

@@ -23,7 +23,7 @@ Three proving surfaces share the same circuits, input builder, and proving engin
 Shared crates:
 
 - [`circom/`](./circom) — ZK circuits (`certChainRS2048`,
-  `certChainRS4096`, `deviceSigRS2048`) on the secq256r1 field.
+  `certChainRS4096`, `userSigRS2048`) on the secq256r1 field.
 - [`zkid-input-builder/`](./zkid-input-builder) — shared Rust crate that builds
   byte-identical circuit input JSON for both the native and browser provers.
 - [`openac-sdk/`](./openac-sdk) — TypeScript SDK for credential handling.
@@ -71,7 +71,7 @@ cargo run --release --features certChainRS2048 -- cert-chain verify
 # Setup → prove → verify (device-sig, always RSA-2048).
 cargo run --release -- device-sig setup
 cargo run --release -- device-sig prove \
-  --input ../circom/inputs/deviceSigRS2048/input.json
+  --input ../circom/inputs/userSigRS2048/input.json
 cargo run --release -- device-sig verify
 
 # Cross-proof link-verify (pk_commit equality).
