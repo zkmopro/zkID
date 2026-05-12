@@ -65,7 +65,7 @@ export function markPriorStepsDone(step: Step): void {
 
 function applyWitness(p: WitnessEvent): void {
   if (!p.kind) return;
-  const step: Step = p.kind === "userSigRS2048" ? "prove_device" : "prove_cert";
+  const step: Step = p.kind === "userSigRS2048" ? "prove_user_sig" : "prove_cert";
   if (p.status === "in_progress") {
     markPriorStepsDone(step);
     markInProgress(step, "witness");
@@ -76,7 +76,7 @@ function applyWitness(p: WitnessEvent): void {
 
 function applyProve(p: ProveEvent): void {
   if (!p.kind) return;
-  const step: Step = p.kind === "userSigRS2048" ? "prove_device" : "prove_cert";
+  const step: Step = p.kind === "userSigRS2048" ? "prove_user_sig" : "prove_cert";
   if (p.status === "in_progress") {
     markPriorStepsDone(step);
     markInProgress(step, p.phase === "prep" ? "prep" : "proving");
@@ -147,7 +147,7 @@ export function applyProgress(p: Progress): void {
           certChainType:
             done.certKind === "certChainRS4096" ? "rs4096" : "rs2048",
           certProofBytes: done.certProofBytes,
-          deviceProofBytes: done.deviceProofBytes,
+          userSigProofBytes: done.userSigProofBytes,
           certKind: done.certKind,
           provingMs: done.provingMs,
         },

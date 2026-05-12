@@ -30,7 +30,7 @@ import { calculateWitness } from "./witness";
 
 export interface ProveInput {
   certJson: string;
-  deviceJson: string;
+  userSigJson: string;
   certKind: Kind;
   /** Verifier-issued per-session field element (decimal string). Forwarded
    *  back via `proving_complete` for review-screen display. */
@@ -84,15 +84,15 @@ export type Progress =
   | {
       step: "proving_complete";
       certProofBytes: Uint8Array;
-      deviceProofBytes: Uint8Array;
+      userSigProofBytes: Uint8Array;
       certKind: Kind;
       challenge: string;
       provingMs: number;
       /** Per-circuit timing breakdown for measurement logs. */
       certWitnessMs: number;
       certProveMs: number;
-      deviceWitnessMs: number;
-      deviceProveMs: number;
+      userSigWitnessMs: number;
+      userSigProveMs: number;
       threads: number;
     }
   | {
@@ -424,8 +424,8 @@ async function runProve(inputs: ProveInput): Promise<void> {
 
     const certWgen = witnessCache[certKind];
     if (!certWgen) throw new Error(`warmup did not cache witness-wasm for ${certKind}`);
-    const deviceWgen = witnessCache["userSigRS2048"];
-    if (!deviceWgen)
+    const userSigWgen = witnessCache["userSigRS2048"];
+    if (!userSigWgen)
       throw new Error("warmup did not cache witness-wasm for userSigRS2048");
 
     post({ step: "witness", status: "in_progress", kind: certKind });
@@ -449,13 +449,13 @@ async function runProve(inputs: ProveInput): Promise<void> {
       status: "in_progress",
       kind: "userSigRS2048",
     });
-    const deviceWitnessStart = performance.now();
-    const deviceWtns = await calculateWitness(
+    const userSigWitnessStart = performance.now();
+    const userSigWtns = await calculateWitness(
       "userSigRS2048",
-      inputs.deviceJson,
-      deviceWgen,
+      inputs.userSigJson,
+      userSigWgen,
     );
-    const deviceWitnessMs = performance.now() - deviceWitnessStart;
+    const userSigWitnessMs = performance.now() - userSigWitnessStart;
     if (cancelled) return;
     post({ step: "witness", status: "done", kind: "userSigRS2048" });
 
@@ -465,11 +465,11 @@ async function runProve(inputs: ProveInput): Promise<void> {
       kind: "userSigRS2048",
       phase: "prep",
     });
-    const deviceProveStart = performance.now();
-    const deviceProofOut = prove(KIND_ENUM["userSigRS2048"], deviceWtns) as {
+    const userSigProveStart = performance.now();
+    const userSigProofOut = prove(KIND_ENUM["userSigRS2048"], userSigWtns) as {
       proof: ArrayLike<number>;
     };
-    const deviceProveMs = performance.now() - deviceProveStart;
+    const userSigProveMs = performance.now() - userSigProveStart;
     post({
       step: "prove",
       status: "done",
@@ -479,18 +479,18 @@ async function runProve(inputs: ProveInput): Promise<void> {
     if (cancelled) return;
 
     const certProofBytes = new Uint8Array(certProofOut.proof);
-    const deviceProofBytes = new Uint8Array(deviceProofOut.proof);
+    const userSigProofBytes = new Uint8Array(userSigProofOut.proof);
     post({
       step: "proving_complete",
       certProofBytes,
-      deviceProofBytes,
+      userSigProofBytes,
       certKind,
       challenge: inputs.challenge,
       provingMs: performance.now() - t0,
       certWitnessMs,
       certProveMs,
-      deviceWitnessMs,
-      deviceProveMs,
+      userSigWitnessMs,
+      userSigProveMs,
       threads: activeThreads,
     });
   } catch (err) {
