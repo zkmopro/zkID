@@ -112,12 +112,6 @@ const KIND_ENUM: Record<Kind, CircuitKind> = {
   userSigRS2048: CircuitKind.UserSigRs2048,
 };
 
-const KIND_LABEL: Record<Kind, string> = {
-  certChainRS2048: "certChainRS2048",
-  certChainRS4096: "certChainRS4096",
-  userSigRS2048: "userSigRS2048",
-};
-
 let cancelled = false;
 let warming = false;
 let proving = false;
@@ -340,7 +334,7 @@ async function runWarmup(): Promise<void> {
           step: "warmup",
           status: "in_progress",
           phase: "download",
-          asset: `${KIND_LABEL[job.kind]} ${ROLE_LABEL[job.role]}`,
+          asset: `${job.kind} ${ROLE_LABEL[job.role]}`,
           bytesDone: p.bytesDone,
           bytesTotal: p.bytesTotal,
           kind: job.kind,

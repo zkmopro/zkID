@@ -4,7 +4,6 @@
 // the FSM packages into a ProvingRun for the Review screen.
 
 import { humanBytes } from "./format";
-import type { CircuitKind as Kind } from "./manifest";
 import { $smt, $warmup } from "./setup-state";
 import { dispatch } from "./store";
 import {
@@ -17,12 +16,6 @@ import {
   type Step,
 } from "./ui";
 import type { Progress } from "./worker";
-
-const KIND_LABEL: Record<Kind, string> = {
-  certChainRS2048: "certChainRS2048",
-  certChainRS4096: "certChainRS4096",
-  userSigRS2048: "userSigRS2048",
-};
 
 type WarmupEvent = Extract<Progress, { step: "warmup" }>;
 type WitnessEvent = Extract<Progress, { step: "witness" }>;
@@ -47,7 +40,7 @@ function warmupSublabel(p: WarmupEvent): string {
       return `downloading ${asset}`;
     }
     case "load":
-      return p.kind ? `loading ${KIND_LABEL[p.kind]}` : "loading proving keys";
+      return p.kind ? `loading ${p.kind}` : "loading proving keys";
     default:
       return "";
   }
