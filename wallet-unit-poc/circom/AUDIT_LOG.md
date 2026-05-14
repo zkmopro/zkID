@@ -38,12 +38,13 @@ Methodology: Circom adaptation of
 
 **Advisories:** decoupled `tbsModulusOffset` / `tbsModulusTagOffset` (LOW, not exploitable); redundant `VerifyTBSinCert` + `userCertZeroPadded` after the extraction refactor (LOW cleanup); Poseidon 128-bit security note (INFO).
 
-**Recommended follow-ups:**
+**Resolution status (as of 2026-05-14, branch `fix/audit-v2`):**
 
-1. Pin `tbsLength === 31` (or move the nullifier off the signature) — closes the HIGH.
-2. Bind `tbsSerialNumberOffset` structurally (parse the version `[0]` block in-circuit) or make it a hard-coded constant — closes the CRITICAL.
-3. Remove `userCertZeroPadded` / `VerifyTBSinCert` — eliminates ~1500 dead constraints.
-4. Run `circomspect` (complementary to this manual audit's business-logic focus).
+- **CRITICAL — FIXED.** `tbsSerialNumberOffset` dropped as a prover input. `CertChainRSA256` walks the outer SEQUENCE header + optional `[0] EXPLICIT` version block to derive the canonical serial-INTEGER offset and feeds it to `VerifySerialNumber`. Empirical canary tests for offsets 8 / 10 / 512 (values 2 / 5214 / 65537) all reject post-fix — see `tests/circuits/auditV2Regression.test.ts` § [CRITICAL].
+- **HIGH — FIXED.** `tbsLength` dropped as a prover input and hard-coded to 64. `tbs[31] === 0x80`, `tbs[32..63] === 0`, `tbs[63] === 0xF8` pin the SHA-256-padded payload to the canonical 31-byte-message form, so `σ = sign(SHA256(app_id_bytes))` is fully determined by `(card, app_id)` and `nullifier = Hash(σ)` is per-`(card, app_id)` unique. Canary test verifies a `tbs[31] = 0x42` variant is rejected — see § [HIGH].
+- **LOW (#1) — FIXED.** `tbsModulusOffset` dropped as a prover input. `CertChainRSA256` enforces the canonical DER long-form prefix bytes `[0x82, 0x01, 0x01, 0x00]` at `issuerTbs[tbsModulusTagOffset + {1..4}]` and derives `tbsModulusOffset = tbsModulusTagOffset + 5`. Canary test verifies `tbsModulusTagOffset = 510` (RSA exponent INTEGER tag) is rejected — see § [LOW].
+- **LOW (#2) — FIXED.** Dead `VerifyTBSinCert` + `userCertZeroPadded` + `actualUserCertLength` removed from `CertChainRSA256` and the template definition deleted from `circuits/utils/utils.circom`. ~1,500 R1CS rows freed.
+- **INFO — ACKNOWLEDGED.** One-line annotation added to `circuits/components/poseidonP256Constants.circom` recording the 128-bit security target per Hadeshash §5.3.
 
 ---
 
