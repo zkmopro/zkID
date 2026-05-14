@@ -29,19 +29,19 @@ export const CIRCUITS: Record<CircuitKind, CircuitManifest> = {
   certChainRS2048: {
     kind: "certChainRS2048",
     numPublic: 19,
-    pkUrl: "/keys/certChainRS2048_proving.key.gz",
+    pkUrl: "/keys/cert_chain_rs2048_proving.key.gz",
     witnessWasmUrl: "/keys/certChainRS2048.wasm.gz",
   },
   certChainRS4096: {
     kind: "certChainRS4096",
     numPublic: 36,
-    pkUrl: "/keys/certChainRS4096_proving.key.gz",
+    pkUrl: "/keys/cert_chain_rs4096_proving.key.gz",
     witnessWasmUrl: "/keys/certChainRS4096.wasm.gz",
   },
   userSigRS2048: {
     kind: "userSigRS2048",
     numPublic: 4,
-    pkUrl: "/keys/userSigRS2048_proving.key.gz",
+    pkUrl: "/keys/user_sig_rs2048_proving.key.gz",
     witnessWasmUrl: "/keys/userSigRS2048.wasm.gz",
   },
 };
