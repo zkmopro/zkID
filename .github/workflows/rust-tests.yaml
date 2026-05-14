@@ -161,8 +161,7 @@ jobs:
                     gzip -k "${circuit}/${circuit}_js/${circuit}.r1cs"
                     gzip -k "${circuit}/${circuit}_js/${circuit}.wasm"
                   done
-                  # Witness calculator JS is identical across circuits; ship
-                  # one canonical copy at the build/ root.
+                  # Identical across all three circuits; ship one copy.
                   cp certChainRS2048/certChainRS2048_js/witness_calculator.js witness_calculator.js
                   gzip -k witness_calculator.js
                   cd cpp
