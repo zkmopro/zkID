@@ -73,7 +73,7 @@ fn split_inputs_have_expected_structure() {
     )
     .expect("generate_split_inputs failed");
 
-    // cert_chain JSON must have all expected keys (post audit v2 trim)
+    // cert_chain JSON must have all expected keys
     for key in [
         "tbsModulusTagOffset",
         "issuerTbs",
@@ -213,7 +213,7 @@ fn split_inputs_rs4096_have_expected_structure() {
     )
     .expect("generate_split_inputs failed for RS4096");
 
-    // cert_chain JSON must have all expected keys (post audit v2 trim)
+    // cert_chain JSON must have all expected keys
     for key in [
         "tbsModulusTagOffset",
         "issuerTbs",

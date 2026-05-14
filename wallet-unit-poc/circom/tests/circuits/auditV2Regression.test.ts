@@ -220,9 +220,7 @@ describe("Audit v2 regression suite", function () {
 
     it("REJECTS witness with appended tail (tbs[31] != 0x80 — Sybil attack vector)", async function () {
       this.timeout(900_000);
-      // Sign (appId ‖ 0x42): sha256Pad puts 0x42 at tbs[31] instead of the
-      // canonical 0x80. Pre-fix this produced a fresh nullifier (the canary);
-      // post-fix `tbs[31] === 0x80` rejects.
+      // Signing (appId ‖ 0x42) puts 0x42 at tbs[31]; the constraint expects 0x80.
       const appId = Buffer.from("audit-v2-high-test-app-id-fixed", "utf-8");
       const witnessB = buildWitness(appId, Buffer.from([0x42]));
       assert.notStrictEqual(
@@ -244,9 +242,7 @@ describe("Audit v2 regression suite", function () {
 
     it("REJECTS forged tbsModulusTagOffset pointing at the RSA exponent INTEGER", async function () {
       this.timeout(900_000);
-      // tbs[510] = 0x02 (exponent INTEGER tag) and tbs[511] = 0x03. The DER-
-      // prefix constraint enforces tbs[tbsModulusTagOffset+1] === 0x82, so
-      // 0x03 fails and the witness is rejected.
+      // tbs[510] = 0x02 (exponent tag), tbs[511] = 0x03 — fails the 0x82 prefix check.
       const attackInput = { ...chainInput, tbsModulusTagOffset: 510n };
       await chainCircuit.expectFail(attackInput as any);
     });

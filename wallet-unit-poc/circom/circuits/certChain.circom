@@ -31,8 +31,7 @@ template CertChainRSA256(
     maxSerialNumberLength
 ) {
     // Prover-supplied byte offset of the user modulus's INTEGER tag inside
-    // issuerTbs. The value offset is derived structurally below by pinning
-    // the DER long-form prefix [0x82, 0x01, 0x01, 0x00] at offsets +1..+4.
+    // issuerTbs. The value offset is derived below.
     signal input tbsModulusTagOffset;
 
     // === Issuer (cert chain) — sized to kIssuer ===
@@ -84,8 +83,7 @@ template CertChainRSA256(
 
     // Optional [0] EXPLICIT version block at offset 4 — canonical 5 bytes
     // [0xa0, 0x03, 0x02, 0x01, 0x02]. When present, the serial INTEGER tag
-    // sits at offset 9; otherwise at offset 4. Deriving the offset
-    // structurally is what closes the prover-supplied-offset bypass.
+    // sits at offset 9; otherwise at offset 4.
     component hasVersion = IsEqual();
     hasVersion.in[0] <== issuerTbs[4];
     hasVersion.in[1] <== 0xa0;
@@ -108,12 +106,10 @@ template CertChainRSA256(
         serialNumber
     );
 
-    // The full DER prefix for an unsigned 2048-bit RSA modulus INTEGER is
+    // DER prefix for an unsigned 2048-bit RSA modulus INTEGER:
     //   [0x02, 0x82, 0x01, 0x01, 0x00]
-    // (tag + long-form length-of-length + 2-byte length=257 + sign byte),
-    // so the first modulus value byte sits at tbsModulusTagOffset + 5. Pinning
-    // bytes +1..+4 binds tag-offset, length encoding, sign byte, and the
-    // derived value offset into a single witness.
+    // = tag + long-form length-of-length + 2-byte length=257 + sign byte.
+    // Bytes +1..+4 are pinned here; the +0 tag is checked by ExtractModulus.
     var modPrefixBytes[4] = [0x82, 0x01, 0x01, 0x00];
     component modPrefixCheck[4];
     for (var i = 0; i < 4; i++) {
