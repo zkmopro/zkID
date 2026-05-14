@@ -73,13 +73,9 @@ fn split_inputs_have_expected_structure() {
     )
     .expect("generate_split_inputs failed");
 
-    // cert_chain JSON must have all expected keys
+    // cert_chain JSON must have all expected keys (post audit v2 trim)
     for key in [
-        "userCertZeroPadded",
-        "actualUserCertLength",
-        "tbsModulusOffset",
         "tbsModulusTagOffset",
-        "tbsSerialNumberOffset",
         "issuerTbs",
         "issuerTbsLength",
         "actualIssuerTbsLength",
@@ -101,7 +97,7 @@ fn split_inputs_have_expected_structure() {
 
     // user_sig JSON must have all expected keys; app_id_bytes is gone
     // (recovered in-circuit by packing tbs[0..31]).
-    for key in ["tbs", "tbsLength", "userPkLimbs", "userRsaSignature", "pkBlind", "challenge"] {
+    for key in ["tbs", "userPkLimbs", "userRsaSignature", "pkBlind", "challenge"] {
         assert!(
             user_sig.get(key).is_some(),
             "user_sig missing key: {key}"
@@ -118,11 +114,6 @@ fn split_inputs_have_expected_structure() {
     );
 
     // Array dimensions
-    assert_eq!(
-        cert_chain["userCertZeroPadded"].as_array().unwrap().len(),
-        1536,
-        "userCertZeroPadded length"
-    );
     assert_eq!(
         cert_chain["issuerTbs"].as_array().unwrap().len(),
         1536,
@@ -222,13 +213,9 @@ fn split_inputs_rs4096_have_expected_structure() {
     )
     .expect("generate_split_inputs failed for RS4096");
 
-    // cert_chain JSON must have all expected keys
+    // cert_chain JSON must have all expected keys (post audit v2 trim)
     for key in [
-        "userCertZeroPadded",
-        "actualUserCertLength",
-        "tbsModulusOffset",
         "tbsModulusTagOffset",
-        "tbsSerialNumberOffset",
         "issuerTbs",
         "issuerTbsLength",
         "actualIssuerTbsLength",
@@ -249,7 +236,7 @@ fn split_inputs_rs4096_have_expected_structure() {
     }
 
     // user_sig JSON must have all expected keys
-    for key in ["tbs", "tbsLength", "userPkLimbs", "userRsaSignature", "pkBlind", "challenge"] {
+    for key in ["tbs", "userPkLimbs", "userRsaSignature", "pkBlind", "challenge"] {
         assert!(
             user_sig.get(key).is_some(),
             "user_sig (RS4096) missing key: {key}"
@@ -261,11 +248,6 @@ fn split_inputs_rs4096_have_expected_structure() {
     );
 
     // Array dimensions — 4096 params: cert padding=1536, k_issuer=34, k_user=17
-    assert_eq!(
-        cert_chain["userCertZeroPadded"].as_array().unwrap().len(),
-        1536,
-        "userCertZeroPadded length (MAX_CERT_CHAIN_LENGTH)"
-    );
     assert_eq!(
         cert_chain["issuerTbs"].as_array().unwrap().len(),
         1536,
