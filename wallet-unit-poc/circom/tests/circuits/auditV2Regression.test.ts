@@ -1,15 +1,10 @@
 /**
  * Audit v2 regression suite — see `wallet-unit-poc/circom/audit_report_v2.md`.
  *
- * Each describe block locks in the FIX for one finding. The bypass scenarios
- * the audit describes are recreated at the wrapper level (`CertChainRSA256`,
- * `UserSigRSA256`) and asserted to be REJECTED by the circuit. A test passes
- * when the corresponding issue can no longer be performed; it fails when
- * the underlying constraint regresses.
- *
- * The baselines (each finding's "circuit still accepts the honest witness")
- * are also included so a regression that over-tightens a constraint surfaces
- * here instead of breaking downstream tests silently.
+ * Each describe block locks in the fix for one finding: the bypass scenario
+ * the audit recreates is asserted to be rejected by the wrapper circuit.
+ * A test passes when the corresponding constraint holds; it fails when the
+ * fix regresses. Baselines guard against over-tightening.
  */
 import { WitnessTester } from "circomkit";
 import { circomkit } from "../common";
@@ -59,12 +54,6 @@ type ChainInputs = [
   "pkBlind"
 ];
 
-/**
- * Scan a TBS buffer for every ASN.1 INTEGER tag whose length byte lies in
- * (0, MAX_SERIAL_LEN] — the same local checks `VerifySerialNumber` performs
- * on (cert[offset-2], cert[offset-1]). Returns the (offset, decoded value)
- * pairs the prover could try to claim as "the serial".
- */
 function findAlternateSerialOffsets(
   tbs: readonly bigint[],
   tbsLen: number
@@ -82,52 +71,40 @@ function findAlternateSerialOffsets(
   return out;
 }
 
-/**
- * Walk outer SEQUENCE + optional [0] EXPLICIT version block to find the
- * canonical serial-INTEGER value offset. Mirrors the in-circuit DER walk
- * added to close Finding 1.
- */
 function canonicalSerialOffset(tbs: readonly bigint[]): number {
   const hasVersion = Number(tbs[4]) === 0xa0;
   return 4 + (hasVersion ? 5 : 0) + 2;
 }
 
 describe("Audit v2 regression suite", function () {
-  /**
-   * Finding 1 (CRITICAL) — `tbsSerialNumberOffset` used to be a prover input,
-   * which let a revoked card-holder re-aim it at the version INTEGER (value=2)
-   * or RSA exponent INTEGER (value=65537) inside their TBS and pass the
-   * SMT non-membership check on that forged value.
-   *
-   * The fix dropped the input and walks the DER in-circuit, so the only
-   * remaining prover-supplied value tied to the serial is `serialNumber`.
-   * Submitting a forged `serialNumber` against the real TBS now fails the
-   * `reconSum === target` check inside `VerifySerialNumber` because the
-   * circuit decodes the canonical serial from the structurally-derived offset.
-   */
+  let chainCircuit: WitnessTester<ChainInputs, ["pkCommit"]>;
+  let chainInput: Record<string, any>;
+
+  before(async function () {
+    this.timeout(900_000);
+    chainInput = loadInput("cert_chain_rs2048");
+    chainCircuit = await circomkit.WitnessTester("certChainRS2048", {
+      file: "certChain",
+      template: "CertChainRSA256",
+      params: CHAIN_PARAMS,
+    });
+  });
+
+  // Finding 1 (CRITICAL) — see audit_report_v2.md.
   describe("[CRITICAL] forged serialNumber is rejected by CertChainRSA256", function () {
-    let chainCircuit: WitnessTester<ChainInputs, ["pkCommit"]>;
-    let input: Record<string, any>;
     let alternates: { offset: number; target: bigint }[];
 
-    before(async function () {
-      this.timeout(900_000);
-      input = loadInput("cert_chain_rs2048");
-      chainCircuit = await circomkit.WitnessTester("certChainRS2048", {
-        file: "certChain",
-        template: "CertChainRSA256",
-        params: CHAIN_PARAMS,
-      });
-      const tbsLen = Number(input.actualIssuerTbsLength as bigint);
+    before(function () {
+      const tbsLen = Number(chainInput.actualIssuerTbsLength as bigint);
       alternates = findAlternateSerialOffsets(
-        input.issuerTbs as bigint[],
+        chainInput.issuerTbs as bigint[],
         tbsLen
       );
     });
 
     it("fixture's TBS contains alternate ASN.1 INTEGER offsets the audit warned about", function () {
-      const realSerial = input.serialNumber as bigint;
-      const realOffset = canonicalSerialOffset(input.issuerTbs as bigint[]);
+      const realSerial = chainInput.serialNumber as bigint;
+      const realOffset = canonicalSerialOffset(chainInput.issuerTbs as bigint[]);
       const realHit = alternates.find(
         (a) => a.offset === realOffset && a.target === realSerial
       );
@@ -152,7 +129,7 @@ describe("Audit v2 regression suite", function () {
 
     it("baseline: CertChainRSA256 accepts the honest witness", async function () {
       this.timeout(900_000);
-      const witness = await chainCircuit.calculateWitness(input as any);
+      const witness = await chainCircuit.calculateWitness(chainInput as any);
       await chainCircuit.expectConstraintPass(witness);
     });
 
@@ -168,42 +145,21 @@ describe("Audit v2 regression suite", function () {
     for (const { description, forgedSerial } of forgedSerials) {
       it(`REJECTS forged serialNumber=${forgedSerial} (${description})`, async function () {
         this.timeout(900_000);
-        // Cross-check: the forged value really is a decodable INTEGER in
-        // the bundled TBS, so the only thing keeping the circuit honest is
-        // the structural-offset derivation added by the fix.
         const live = alternates.find((a) => a.target === forgedSerial);
         assert.ok(
           live !== undefined,
           `forged serial ${forgedSerial} no longer present as an alternate INTEGER in the fixture — update if rotated`
         );
-        const attackInput = { ...input, serialNumber: forgedSerial };
+        const attackInput = { ...chainInput, serialNumber: forgedSerial };
         await chainCircuit.expectFail(attackInput as any);
       });
     }
   });
 
-  /**
-   * Finding 2 (HIGH) — pre-fix the prover could ask the card to sign any
-   * `(app_id_bytes ‖ tail)` payload up to 64 bytes, producing distinct
-   * signatures (and therefore distinct nullifiers) for a fixed `(card, app_id)`.
-   *
-   * The fix pins `tbsLength = 64` and enforces canonical SHA-256 padding bytes
-   * (`tbs[31] === 0x80`, `tbs[32..63] === 0`, `tbs[63] === 0xF8`). The
-   * "Witness A" baseline still satisfies the constraints (its `tbs[31..64]`
-   * already matches the canonical padding for a 31-byte message). The
-   * "Witness B" variant — which signs `(app_id ‖ 0x42)` and therefore has
-   * `tbs[31] = 0x42` — is rejected by the new padding constraint.
-   */
+  // Finding 2 (HIGH) — see audit_report_v2.md.
   describe("[HIGH] non-canonical SHA-256 padding is rejected by UserSigRSA256", function () {
     let userSigCircuit: WitnessTester<
-      [
-        "tbs",
-        "tbsLength",
-        "userPkLimbs",
-        "userRsaSignature",
-        "pkBlind",
-        "challenge"
-      ],
+      ["tbs", "userPkLimbs", "userRsaSignature", "pkBlind", "challenge"],
       ["pkCommit", "nullifier", "appIdPacked"]
     >;
     let testRsaPrivKey: KeyObject;
@@ -226,7 +182,7 @@ describe("Audit v2 regression suite", function () {
       );
       assert.ok(
         paddedLen <= 64,
-        `padded length must fit the circuit's tbsLength <= 64 bound; got ${paddedLen}`
+        `padded length must fit the circuit's 64-byte signed window; got ${paddedLen}`
       );
       return {
         tbs: Array.from(padded).map(String),
@@ -264,11 +220,10 @@ describe("Audit v2 regression suite", function () {
 
     it("REJECTS witness with appended tail (tbs[31] != 0x80 — Sybil attack vector)", async function () {
       this.timeout(900_000);
+      // Sign (appId ‖ 0x42): sha256Pad puts 0x42 at tbs[31] instead of the
+      // canonical 0x80. Pre-fix this produced a fresh nullifier (the canary);
+      // post-fix `tbs[31] === 0x80` rejects.
       const appId = Buffer.from("audit-v2-high-test-app-id-fixed", "utf-8");
-      // Witness B: raw = appId ‖ 0x42 (32 bytes). After sha256Pad this puts
-      // 0x42 at tbs[31] (instead of the canonical 0x80). Pre-fix this was
-      // accepted and produced a fresh nullifier — the canary the audit warned
-      // about. Post-fix the `tbs[31] === 0x80` constraint rejects it.
       const witnessB = buildWitness(appId, Buffer.from([0x42]));
       assert.notStrictEqual(
         witnessB.tbs[31],
@@ -279,50 +234,20 @@ describe("Audit v2 regression suite", function () {
     });
   });
 
-  /**
-   * Finding 3 (LOW, advisory) — `ExtractModulus` checks only
-   * `in[modulusTagOffset] == 0x02` while `modulusOffset` is independent. A
-   * prover could aim the tag at the RSA exponent INTEGER while the value
-   * offset still read the real modulus (or vice versa). Not exploitable in
-   * the full composition (Circuit B's RSA verify forces `userPkLimbs` to be
-   * a real key), but a soundness gap at the template level.
-   *
-   * The Phase 3 fix binds `tbsModulusOffset = tbsModulusTagOffset + 5` and
-   * enforces the DER length-prefix bytes `[0x82, 0x01, 0x01, 0x00]` at
-   * `tbsModulusTagOffset + {1..4}`. So aiming the tag offset at the RSA
-   * exponent INTEGER (tag at 510, length=3 at 511) is rejected because
-   * `issuerTbs[511] === 0x82` fails (0x03 ≠ 0x82).
-   *
-   * The companion "real tag + arbitrary modulusOffset" bypass from the audit
-   * is structurally unreachable post-fix because `tbsModulusOffset` is no
-   * longer a prover input — it's derived from `tbsModulusTagOffset`.
-   */
+  // Finding 3 (LOW, advisory) — see audit_report_v2.md.
   describe("[LOW] forged tbsModulusTagOffset is rejected by CertChainRSA256", function () {
-    let chainCircuit: WitnessTester<ChainInputs, ["pkCommit"]>;
-    let input: Record<string, any>;
-
-    before(async function () {
-      this.timeout(900_000);
-      input = loadInput("cert_chain_rs2048");
-      chainCircuit = await circomkit.WitnessTester("certChainRS2048", {
-        file: "certChain",
-        template: "CertChainRSA256",
-        params: CHAIN_PARAMS,
-      });
-    });
-
     it("baseline: real (modulusTagOffset, modulusOffset) extracts the real modulus", async function () {
       this.timeout(900_000);
-      const witness = await chainCircuit.calculateWitness(input as any);
+      const witness = await chainCircuit.calculateWitness(chainInput as any);
       await chainCircuit.expectConstraintPass(witness);
     });
 
     it("REJECTS forged tbsModulusTagOffset pointing at the RSA exponent INTEGER", async function () {
       this.timeout(900_000);
-      // tbs[510] = 0x02 (exponent INTEGER tag) and tbs[511] = 0x03 (length=3).
-      // Post-fix the wrapper enforces tbs[tbsModulusTagOffset+1] === 0x82,
-      // so 0x03 ≠ 0x82 rejects this witness.
-      const attackInput = { ...input, tbsModulusTagOffset: 510n };
+      // tbs[510] = 0x02 (exponent INTEGER tag) and tbs[511] = 0x03. The DER-
+      // prefix constraint enforces tbs[tbsModulusTagOffset+1] === 0x82, so
+      // 0x03 fails and the witness is rejected.
+      const attackInput = { ...chainInput, tbsModulusTagOffset: 510n };
       await chainCircuit.expectFail(attackInput as any);
     });
   });

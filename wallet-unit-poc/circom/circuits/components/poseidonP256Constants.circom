@@ -3,10 +3,8 @@
 // Field: P-256 base field 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
 // Parameters: sbox=x^5, RF=8
 //   t=3: RP=57 (for Poseidon(2))
-// Round counts target 128-bit security per Hadeshash §5.3 (α=5, |F|≈256 bits).
-// See audit_report_v2.md Finding 5.
 //   t=4: RP=56 (for Poseidon(3))
-// RF=8, RP={57,56} targets 128-bit security per the Hadeshash/Poseidon paper.
+// RF=8, RP={57,56} targets 128-bit security per the Hadeshash/Poseidon paper §5.3 (α=5, |F|≈256 bits).
 
 pragma circom 2.2.3;
 

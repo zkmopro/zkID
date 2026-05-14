@@ -34,16 +34,10 @@ template UserSigRSA256(maxMessageLength, n, k) {
     signal output nullifier;
     signal output appIdPacked;
 
-    // Canonical SHA-256 padding for a 31-byte app_id_bytes:
-    //   tbs[31]     = 0x80                    (padding marker)
-    //   tbs[32..63] = 0                       (31 zero bytes filling the gap)
-    //   tbs[63]     = 0xF8                    (LSB of 64-bit length: 31*8 = 248)
-    //   tbs[64..]   = 0                       (forced by AssertZeroPadding in CertRSA256Verify)
-    // Pinning the padded length to 64 and the padding bytes to their canonical
-    // values forces `tbs` to be a deterministic function of tbs[0..31] = app_id,
-    // so σ = sign(SHA256(app_id)) is determined by (card, app_id) and
-    // nullifier = Hash(σ) is per-(card, app_id) unique. Closes audit v2
-    // Finding 2 (Sybil bypass via nullifier malleability).
+    // Pin tbs[31..64] to the canonical SHA-256 padding for the 31-byte app_id
+    // (0x80 marker, zeros, 8-byte big-endian bit length 248 = 0xF8). Together
+    // with the hard-coded messageLength=64 below, this makes σ — and therefore
+    // `nullifier` — a function of (card, app_id) instead of (card, tbs).
     tbs[31] === 0x80;
     for (var i = 32; i < 63; i++) {
         tbs[i] === 0;
