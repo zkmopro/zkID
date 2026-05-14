@@ -10,10 +10,10 @@ Methodology: Circom adaptation of
 
 | # | Date | Report | Circuit commit | Strategy | Confirmed (Crit/High/Med) | Advisory | Overall |
 |---|------|--------|----------------|----------|---------------------------|----------|---------|
-| 1 | 2026-05-13 | [`audit_report.md`](./audit_report.md) | pre-#69 (snake_case) | FOCUSED | 1 / 1 / 0 | 3 (M/L/L) | CRITICAL |
+| 1 | 2026-05-08 | [`audit_report.md`](./audit_report.md) | pre-#69 (snake_case) | FOCUSED | 1 / 1 / 0 | 3 (M/L/L) | CRITICAL |
 | 2 | 2026-05-14 | [`audit_report_v2.md`](./audit_report_v2.md) | post-#71 (`ec9a73d`) | FOCUSED | 1 / 1 / 0 | 3 (L/L/INFO) | CRITICAL |
 
-## Audit 1 — 2026-05-13
+## Audit 1 — 2026-05-08
 
 **Scope:** `cert_chain.circom`, `device_sig.circom`, `rs256.circom`, `utils/utils.circom`, `components/*` (snake_case layout).
 
