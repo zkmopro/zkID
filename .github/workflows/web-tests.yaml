@@ -231,6 +231,12 @@ jobs:
                   cd wallet-unit-poc/spartan2-wasm/pkg
                   gzip -k spartan2_wasm.js
                   gzip -k spartan2_wasm_bg.wasm
+                  gzip -k spartan2_wasm.d.ts
+                  gzip -k spartan2_wasm_bg.wasm.d.ts
+                  # The wasm-bindgen-rayon helper lives under a content-hashed
+                  # subdir referenced by spartan2_wasm.js; tar so the tree
+                  # ships intact.
+                  tar -czf snippets.tar.gz snippets
 
             - name: Upload wasm artifacts to GitHub Release
               uses: softprops/action-gh-release@v2
@@ -239,5 +245,8 @@ jobs:
                   files: |
                       wallet-unit-poc/spartan2-wasm/pkg/spartan2_wasm.js.gz
                       wallet-unit-poc/spartan2-wasm/pkg/spartan2_wasm_bg.wasm.gz
+                      wallet-unit-poc/spartan2-wasm/pkg/spartan2_wasm.d.ts.gz
+                      wallet-unit-poc/spartan2-wasm/pkg/spartan2_wasm_bg.wasm.d.ts.gz
+                      wallet-unit-poc/spartan2-wasm/pkg/snippets.tar.gz
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
