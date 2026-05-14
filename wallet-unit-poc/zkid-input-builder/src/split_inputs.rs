@@ -81,7 +81,6 @@ pub fn generate_split_inputs(
         .iter()
         .map(|b| b.to_string())
         .collect();
-    let tbs_padded_len = sha256_padded_length(app_id_bytes.len());
     let issuer_tbs_padded: Vec<String> =
         sha256_pad(&user_cert_tbs_der, max_cert_length)
             .iter()
@@ -117,7 +116,6 @@ pub fn generate_split_inputs(
 
     let user_sig_json = serde_json::json!({
         "tbs": tbs_padded,
-        "tbsLength": tbs_padded_len,
         "userPkLimbs": user_pk_limbs,
         "userRsaSignature": user_rsa_signature,
         "pkBlind": pk_blind,

@@ -233,7 +233,6 @@ describe("Audit v2 regression suite", function () {
       );
       return {
         tbs: Array.from(padded).map(String),
-        tbsLength: paddedLen.toString(),
         userPkLimbs: testRsaPubLimbs,
         userRsaSignature: signLimbs(message),
         pkBlind: "1",

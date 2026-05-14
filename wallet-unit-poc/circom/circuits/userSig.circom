@@ -20,7 +20,6 @@ include "components/pkCommit.circom";
 /// @param k                 RSA limb count (17 for 2048-bit, 34 for 4096-bit)
 template UserSigRSA256(maxMessageLength, n, k) {
     signal input tbs[maxMessageLength];
-    signal input tbsLength;
 
     signal input userPkLimbs[k];
     signal input userRsaSignature[k];
@@ -35,19 +34,25 @@ template UserSigRSA256(maxMessageLength, n, k) {
     signal output nullifier;
     signal output appIdPacked;
 
-    // Range-check tbsLength to 7 bits before the comparator so a
-    // field-sized input cannot wrap around LessEqThan's internal arithmetic.
-    component tlBits = Num2Bits(7);
-    tlBits.in <== tbsLength;
-
-    component tlBound = LessEqThan(7);
-    tlBound.in[0] <== tbsLength;
-    tlBound.in[1] <== 64;
-    tlBound.out === 1;
+    // Canonical SHA-256 padding for a 31-byte app_id_bytes:
+    //   tbs[31]     = 0x80                    (padding marker)
+    //   tbs[32..63] = 0                       (31 zero bytes filling the gap)
+    //   tbs[63]     = 0xF8                    (LSB of 64-bit length: 31*8 = 248)
+    //   tbs[64..]   = 0                       (forced by AssertZeroPadding in CertRSA256Verify)
+    // Pinning the padded length to 64 and the padding bytes to their canonical
+    // values forces `tbs` to be a deterministic function of tbs[0..31] = app_id,
+    // so σ = sign(SHA256(app_id)) is determined by (card, app_id) and
+    // nullifier = Hash(σ) is per-(card, app_id) unique. Closes audit v2
+    // Finding 2 (Sybil bypass via nullifier malleability).
+    tbs[31] === 0x80;
+    for (var i = 32; i < 63; i++) {
+        tbs[i] === 0;
+    }
+    tbs[63] === 0xF8;
 
     CertRSA256Verify(maxMessageLength, n, k)(
         tbs,
-        tbsLength,
+        64,
         userPkLimbs,
         userRsaSignature
     );
