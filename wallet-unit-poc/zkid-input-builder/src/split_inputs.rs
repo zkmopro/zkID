@@ -1,4 +1,4 @@
-//! Canonical reference implementation for the cert-chain + device-sig circuit
+//! Canonical reference implementation for the cert-chain + user-sig circuit
 //! input JSON. Native (`ecdsa-spartan2`) and in-browser (`spartan2-wasm`)
 //! provers both call through here; `spartan2-wasm/tests/input_builder_drift.rs`
 //! pins the two callers to byte-identical output.
@@ -23,11 +23,11 @@ const MAX_MESSAGE_LENGTH: usize = 1536;
 const SMT_DEPTH: usize = 128;
 pub const APP_ID_LEN: usize = 31;
 
-/// Build the cert-chain + device-sig circuit input JSONs.
+/// Build the cert-chain + user-sig circuit input JSONs.
 ///
 /// `pk_blind` is the per-session linking blind shared between Circuits A and B.
 /// `challenge` is the per-session field element from the verifier's
-/// `/challenge` endpoint, bound into the device-sig proof via a Semaphore-style
+/// `/challenge` endpoint, bound into the user-sig proof via a Semaphore-style
 /// dummy square. Both are decimal field-element strings.
 pub fn generate_split_inputs(
     user_cert: &Certificate,
