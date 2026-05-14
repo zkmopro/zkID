@@ -30,14 +30,10 @@ template CertChainRSA256(
     smtDepth,
     maxSerialNumberLength
 ) {
-    // === User cert (outer DER wrapper — TBS starts at byte 4) ===
-    signal input userCertZeroPadded[maxMessageLength];
-    signal input actualUserCertLength;
-
-    // All offsets are relative to issuerTbs[0] (i.e. user_cert[4]).
-    // The circuit enforces each offset lies within [0, actualIssuerTbsLength)
-    // before use, so the prover cannot point outside the MOICA-signed region.
-    signal input tbsModulusOffset;
+    // tbsModulusTagOffset is the prover-supplied byte offset of the user
+    // modulus's INTEGER tag inside issuerTbs. The wrapper enforces the DER
+    // long-form prefix [0x82, 0x01, 0x01, 0x00] at offsets +1..+4 and derives
+    // tbsModulusOffset = tbsModulusTagOffset + 5 — see Step 6 below.
     signal input tbsModulusTagOffset;
 
     // === Issuer (cert chain) — sized to kIssuer ===
@@ -61,32 +57,15 @@ template CertChainRSA256(
     // === Outputs ===
     signal output pkCommit;
 
-    // ── Step 1: Prove user cert embeds the MOICA-signed TBS ───────────────
-    // After this, issuerTbs[0..actualIssuerTbsLength) is identical to
-    // userCertZeroPadded[4..4+actualIssuerTbsLength).
-    VerifyTBSinCert(maxMessageLength, maxMessageLength)(
-        userCertZeroPadded,
-        issuerTbs,
-        actualIssuerTbsLength
-    );
-
-    // Enforce zero-padding on userCertZeroPadded beyond its actual length,
-    // preventing a prover from stuffing arbitrary bytes in the padding region.
-    AssertZeroPadding(maxMessageLength)(userCertZeroPadded, actualUserCertLength);
-
-    // ── Step 2: Bound actualIssuerTbsLength to 13 bits ─────────────────
+    // ── Step 1: Bound actualIssuerTbsLength to 13 bits ─────────────────
     // AssertSliceInTBS requires this; see its doc in utils/utils.circom.
     component tlRange = Num2Bits(13);
     tlRange.in <== actualIssuerTbsLength;
 
-    // ── Step 2b: Bind issuerTbsLength to actualIssuerTbsLength ──────────
+    // ── Step 2: Bind issuerTbsLength to actualIssuerTbsLength ──────────
     // issuerTbsLength is the SHA-256-padded length; actualIssuerTbsLength
-    // is the raw DER length. Without bounding their difference, the prover
-    // could set issuerTbsLength >> actualIssuerTbsLength and hide arbitrary
-    // bytes in issuerTbs[actual..padded) — bytes the MOICA signature covers
-    // but VerifyTBSinCert does not bind to userCertZeroPadded.
-    // SHA-256 padding adds between 9 and 72 bytes; use 128 as a safe
-    // power-of-two upper bound: actual <= padded <= actual + 128.
+    // is the raw DER length. SHA-256 padding adds 9..72 bytes; use 128 as a
+    // safe power-of-two upper bound: actual <= padded <= actual + 128.
     component tbsLenLB = LessEqThan(13);
     tbsLenLB.in[0] <== actualIssuerTbsLength;
     tbsLenLB.in[1] <== issuerTbsLength;
@@ -99,10 +78,8 @@ template CertChainRSA256(
 
     var modulusBytes = modulusBitsUser \ 8;  // e.g. 2048/8 = 256
 
-    // ── Steps 3–6: Enforce every offset lies inside the signed TBS ────────
-
+    // ── Step 3: Bound the modulus tag offset inside the signed TBS ────────
     AssertSliceInTBS()(tbsModulusTagOffset, 1, actualIssuerTbsLength);
-    AssertSliceInTBS()(tbsModulusOffset, modulusBytes, actualIssuerTbsLength);
 
     // ── Step 7a: Walk DER and derive the canonical serial-INTEGER offset ──
     //
@@ -149,7 +126,39 @@ template CertChainRSA256(
         serialNumber
     );
 
-    // ── Step 8: Extract RSA modulus from issuerTbs ───────────────────────
+    // ── Step 8a: Bind the modulus DER prefix and derive the value offset ──
+    //
+    // For an unsigned 2048-bit RSA modulus the full DER prefix is
+    //   [0x02, 0x82, 0x01, 0x01, 0x00]
+    // (tag + long-form length-of-length + 2-byte length=257 + sign byte),
+    // so the first modulus value byte sits at tbsModulusTagOffset + 5.
+    // Enforcing the four bytes at offsets +1..+4 pins tag-offset, length
+    // bytes, sign byte, and value-offset into a single consistent witness
+    // — closing audit v2 Finding 3 (modulus offset decoupling).
+    component modLenByte0 = ItemAtIndex(maxMessageLength);
+    modLenByte0.in <== issuerTbs;
+    modLenByte0.index <== tbsModulusTagOffset + 1;
+    modLenByte0.out === 0x82;
+
+    component modLenByte1 = ItemAtIndex(maxMessageLength);
+    modLenByte1.in <== issuerTbs;
+    modLenByte1.index <== tbsModulusTagOffset + 2;
+    modLenByte1.out === 0x01;
+
+    component modLenByte2 = ItemAtIndex(maxMessageLength);
+    modLenByte2.in <== issuerTbs;
+    modLenByte2.index <== tbsModulusTagOffset + 3;
+    modLenByte2.out === 0x01;
+
+    component modSignByte = ItemAtIndex(maxMessageLength);
+    modSignByte.in <== issuerTbs;
+    modSignByte.index <== tbsModulusTagOffset + 4;
+    modSignByte.out === 0x00;
+
+    signal tbsModulusOffset <== tbsModulusTagOffset + 5;
+    AssertSliceInTBS()(tbsModulusOffset, modulusBytes, actualIssuerTbsLength);
+
+    // ── Step 8b: Extract RSA modulus from issuerTbs ──────────────────────
     signal userRsaExtractedModulus[kUser];
     ExtractModulus(maxMessageLength, n, kUser, modulusBitsUser)(
         issuerTbs,

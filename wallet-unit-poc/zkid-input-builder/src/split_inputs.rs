@@ -5,7 +5,7 @@
 
 use crate::cert::parse_cert_offsets;
 use crate::encoding::{
-    bigint_to_chunks, sha256_pad, sha256_padded_length, smt_fields_from_option, zero_pad_to_u64,
+    bigint_to_chunks, sha256_pad, sha256_padded_length, smt_fields_from_option,
 };
 use crate::types::SmtCircuitInputs;
 use base64::Engine as _;
@@ -96,9 +96,6 @@ pub fn generate_split_inputs(
         smt_fields_from_option(smt_inputs, serial_decimal, SMT_DEPTH);
 
     let cert_chain_json = serde_json::json!({
-        "userCertZeroPadded": zero_pad_to_u64(&user_cert_der, max_cert_length),
-        "actualUserCertLength": user_cert_der.len(),
-        "tbsModulusOffset": user_offsets.modulus_offset - TBS_OFFSET,
         "tbsModulusTagOffset": user_offsets.modulus_tag_offset - TBS_OFFSET,
         "issuerTbs": issuer_tbs_padded,
         "issuerTbsLength": issuer_tbs_padded_len,

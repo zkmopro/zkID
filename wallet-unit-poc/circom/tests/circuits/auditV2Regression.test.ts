@@ -44,9 +44,6 @@ const CHAIN_PARAMS = [
 ];
 
 type ChainInputs = [
-  "userCertZeroPadded",
-  "actualUserCertLength",
-  "tbsModulusOffset",
   "tbsModulusTagOffset",
   "issuerTbs",
   "issuerTbsLength",
