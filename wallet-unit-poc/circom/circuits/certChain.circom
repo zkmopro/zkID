@@ -40,10 +40,6 @@ template CertChainRSA256(
     signal input tbsModulusOffset;
     signal input tbsModulusTagOffset;
 
-    // === Serial extraction ===
-    // Points to first serial byte in issuerTbs; tag is at offset-2, length at offset-1.
-    signal input tbsSerialNumberOffset;
-
     // === Issuer (cert chain) — sized to kIssuer ===
     signal input issuerTbs[maxMessageLength];
     signal input issuerTbsLength;
@@ -108,19 +104,48 @@ template CertChainRSA256(
     AssertSliceInTBS()(tbsModulusTagOffset, 1, actualIssuerTbsLength);
     AssertSliceInTBS()(tbsModulusOffset, modulusBytes, actualIssuerTbsLength);
 
-    // Serial: VerifySerialNumber reads tag at (offset-2) and len at (offset-1),
-    // so offset must be >= 2 in addition to the upper-bound check.
-    component snLow = GreaterEqThan(13);
-    snLow.in[0] <== tbsSerialNumberOffset;
-    snLow.in[1] <== 2;
-    snLow.out === 1;
+    // ── Step 7a: Walk DER and derive the canonical serial-INTEGER offset ──
+    //
+    // MOICA TBSes are always > 256 bytes, so the outer SEQUENCE header is
+    // always the 4-byte form [0x30, 0x82, len_hi, len_lo]. The two length
+    // bytes are not constrained — they vary per cert.
+    issuerTbs[0] === 0x30;
+    issuerTbs[1] === 0x82;
 
-    AssertSliceInTBS()(tbsSerialNumberOffset, maxSerialNumberLength, actualIssuerTbsLength);
+    // Optional [0] EXPLICIT version block at offset 4.
+    // hasVersion=1 ⇒ canonical 5-byte block [0xa0, 0x03, 0x02, 0x01, 0x02]; serial tag at 9.
+    // hasVersion=0 ⇒ serial INTEGER tag at offset 4 (v1/v2).
+    component hasVersion = IsEqual();
+    hasVersion.in[0] <== issuerTbs[4];
+    hasVersion.in[1] <== 0xa0;
 
-    // ── Step 7: Extract and verify serial number from issuerTbs ─────────
+    component vLen = ForceEqualIfEnabled();
+    vLen.enabled <== hasVersion.out;
+    vLen.in[0] <== issuerTbs[5];
+    vLen.in[1] <== 0x03;
+
+    component vIntTag = ForceEqualIfEnabled();
+    vIntTag.enabled <== hasVersion.out;
+    vIntTag.in[0] <== issuerTbs[6];
+    vIntTag.in[1] <== 0x02;
+
+    component vIntLen = ForceEqualIfEnabled();
+    vIntLen.enabled <== hasVersion.out;
+    vIntLen.in[0] <== issuerTbs[7];
+    vIntLen.in[1] <== 0x01;
+
+    component vIntVal = ForceEqualIfEnabled();
+    vIntVal.enabled <== hasVersion.out;
+    vIntVal.in[0] <== issuerTbs[8];
+    vIntVal.in[1] <== 0x02;
+
+    signal serialTagOff <== 4 + hasVersion.out * 5;
+    signal serialValueOff <== serialTagOff + 2;
+
+    // ── Step 7b: Extract and verify serial number from issuerTbs ─────────
     VerifySerialNumber(maxMessageLength, maxSerialNumberLength)(
         issuerTbs,
-        tbsSerialNumberOffset,
+        serialValueOff,
         serialNumber
     );
 

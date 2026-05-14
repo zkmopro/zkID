@@ -101,7 +101,6 @@ pub fn generate_split_inputs(
         "actualUserCertLength": user_cert_der.len(),
         "tbsModulusOffset": user_offsets.modulus_offset - TBS_OFFSET,
         "tbsModulusTagOffset": user_offsets.modulus_tag_offset - TBS_OFFSET,
-        "tbsSerialNumberOffset": user_offsets.serial_number_offset - TBS_OFFSET,
         "issuerTbs": issuer_tbs_padded,
         "issuerTbsLength": issuer_tbs_padded_len,
         "actualIssuerTbsLength": user_cert_tbs_der.len(),

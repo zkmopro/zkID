@@ -9,7 +9,6 @@ describe("CertChainRSA256 (rs4096)", function () {
       "actualUserCertLength",
       "tbsModulusOffset",
       "tbsModulusTagOffset",
-      "tbsSerialNumberOffset",
       "issuerTbs",
       "issuerTbsLength",
       "actualIssuerTbsLength",
