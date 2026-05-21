@@ -178,15 +178,8 @@ fn lock_pk_mut(
 }
 
 // ── Streaming PK load: one in-flight buffer per CircuitKind ──────────────────
-// `load_pk_begin`'s `low_memory_mode` flag picks the storage shape:
-//   Eager:     one pre-reserved Vec<u8>, deserialized via a slice. Fast.
-//   Streaming: chunks queued separately, deserialized through a draining
-//              Read that drops each chunk after it is fully consumed,
-//              returning capacity to the wasm allocator's freelist while
-//              ProverKey allocations are still in flight.
-// Streaming is for iOS WKWebView clients hitting the WebContent jetsam cap
-// on rs4096 PK loads (PTT-OpenAC-Web issue #28); desktop and every non-web
-// binding caller stays on eager.
+// `Streaming` frees each chunk as the deserializer consumes it, bounding the
+// wasm-side peak; required for iOS WKWebView under the WebContent jetsam cap.
 enum PendingBuf {
     Eager { buf: Vec<u8>, total_size: usize },
     Streaming {
@@ -213,9 +206,8 @@ fn lock_pending(kind: CircuitKind) -> std::sync::MutexGuard<'static, Option<Pend
     pending_slot(kind).lock().unwrap_or_else(|e| e.into_inner())
 }
 
-// Read adapter over a chunked queue. Pops the front Vec<u8> when it is fully
-// consumed so the wasm allocator can reuse that capacity for ProverKey
-// allocations the deserializer is still building.
+// Pops each front chunk once consumed so its capacity is freed for
+// concurrent ProverKey allocations.
 struct ChunkDrainReader {
     chunks: VecDeque<Vec<u8>>,
     front_off: usize,
@@ -227,9 +219,8 @@ impl Read for ChunkDrainReader {
         while written < buf.len() {
             let Some(front) = self.chunks.front() else { break };
             let avail = &front[self.front_off..];
-            // Drops a zero-length front so we keep scanning; the bottom-of-
-            // loop pop handles the common case. Both pops are required by
-            // `chunk_drain_reader_drops_consumed_chunks`.
+            // Drop a zero-length front to avoid an infinite loop; the
+            // bottom-of-loop pop only fires after we consume bytes.
             if avail.is_empty() {
                 self.chunks.pop_front();
                 self.front_off = 0;
@@ -364,20 +355,14 @@ fn load_pk_finish_core(kind: CircuitKind) -> Result<(), String> {
     Ok(())
 }
 
-/// Begin a streaming PK load. Picks one of two storage shapes based on
-/// `low_memory_mode`:
+/// Begin a streaming PK load.
 ///
-/// * `false` (eager): reserves a single `Vec<u8>` of `total_size` capacity
-///   up front; chunks are appended in place; finalize deserializes from the
-///   slice. Fastest per byte; wasm peak is roughly the raw buffer plus the
-///   ProverKey being built.
-/// * `true` (streaming): queues each chunk as its own `Vec<u8>`; finalize
-///   deserializes through a draining `Read` adapter that drops each chunk
-///   once consumed, returning its capacity to the wasm allocator while the
-///   ProverKey is still being built. Slightly slower per byte but cuts the
-///   transient peak. Use for iOS WKWebView under the WebContent jetsam cap
-///   (PTT-OpenAC-Web issue #28); pass `false` from desktop and from every
-///   non-web binding consumer (iOS / Android / Flutter / RN / openac-sdk).
+/// * `low_memory_mode = false`: pre-reserves one `Vec<u8>` of `total_size`
+///   and deserializes from a slice at finalize. Faster per byte.
+/// * `low_memory_mode = true`: queues chunks and deserializes through a
+///   draining `Read` that frees each chunk once consumed, cutting the
+///   transient wasm peak. Required for iOS WKWebView under the WebContent
+///   jetsam cap.
 #[wasm_bindgen]
 pub fn load_pk_begin(
     kind: CircuitKind,
@@ -389,8 +374,7 @@ pub fn load_pk_begin(
 
 /// Append a chunk to the in-flight buffer. The cumulative length is bounded
 /// by the `total_size` announced in `load_pk_begin` so a caller cannot quietly
-/// overshoot (which would force a reallocation in eager mode and a silent
-/// drift between announced and actual bytes in streaming mode).
+/// overshoot.
 #[wasm_bindgen]
 pub fn load_pk_chunk(kind: CircuitKind, chunk: &[u8]) -> Result<(), JsError> {
     load_pk_chunk_core(kind, chunk).map_err(|e| JsError::new(&e))
@@ -475,9 +459,8 @@ pub fn prove_native_for_test(
     prove_core(&pk, kind, wtns_bytes)
 }
 
-/// Load a PK via the streaming triple under `low_memory_mode`, then return
-/// the re-serialized loaded PK. Native-only; lets the cross-mode parity
-/// test confirm both modes round-trip to byte-identical bytes.
+/// Run the streaming triple under `low_memory_mode` and return the
+/// re-serialized loaded PK.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_pk_via_streaming_for_test(
     kind: CircuitKind,
@@ -546,9 +529,7 @@ mod tests {
         load_pk_cancel(kind);
     }
 
-    /// Drain the pending slot to a flat Vec regardless of variant. Used by
-    /// tests that need to compare accumulated bytes against an expected
-    /// input.
+    /// Drain the pending slot to a flat Vec regardless of variant.
     fn drain_pending_to_vec(kind: CircuitKind) -> Vec<u8> {
         let mut guard = lock_pending(kind);
         match guard.take().expect("pending set") {
@@ -657,7 +638,7 @@ mod tests {
 
     /// Regression: chunks must concatenate in call order with no overlap or
     /// gap so finalize sees byte-identical input to the one-shot
-    /// `load_pk(kind, &bytes)` path. Run under both modes.
+    /// `load_pk(kind, &bytes)` path.
     #[test]
     fn streaming_chunks_accumulate_bytes_in_order_eager() {
         check_chunks_accumulate_bytes_in_order(false);
@@ -718,9 +699,8 @@ mod tests {
     #[test]
     fn load_pk_begin_low_memory_mode_skips_reservation() {
         reset_streaming(CircuitKind::CertChainRs4096);
-        // 256 GB would fail Vec::try_reserve_exact even on a 64-bit host
-        // with plenty of RAM (the test allocator caps things). Streaming
-        // mode never calls try_reserve_exact so begin succeeds.
+        // 256 GB exceeds what Vec::try_reserve_exact can satisfy; streaming
+        // mode skips that call so begin must still succeed.
         let huge = 256usize * 1024 * 1024 * 1024;
         assert!(
             load_pk_begin_core(CircuitKind::CertChainRs4096, huge, true).is_ok(),
