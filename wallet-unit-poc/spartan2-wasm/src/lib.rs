@@ -14,6 +14,8 @@ use spartan2::{
     },
     zk_spartan::R1CSSNARK,
 };
+use std::collections::VecDeque;
+use std::io::Read;
 use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
@@ -176,10 +178,25 @@ fn lock_pk_mut(
 }
 
 // ── Streaming PK load: one in-flight buffer per CircuitKind ──────────────────
-// Holds partially-assembled PK bytes between `load_pk_begin` and
-// `load_pk_finish`. Separate from `PK_CERT_*` so a finalize failure leaves
-// a previously loaded PK intact.
-type PendingCell = Mutex<Option<Vec<u8>>>;
+// `load_pk_begin`'s `low_memory_mode` flag picks the storage shape:
+//   Eager:     one pre-reserved Vec<u8>, deserialized via a slice. Fast.
+//   Streaming: chunks queued separately, deserialized through a draining
+//              Read that drops each chunk after it is fully consumed,
+//              returning capacity to the wasm allocator's freelist while
+//              ProverKey allocations are still in flight.
+// Streaming is for iOS WKWebView clients hitting the WebContent jetsam cap
+// on rs4096 PK loads (PTT-OpenAC-Web issue #28); desktop and every non-web
+// binding caller stays on eager.
+enum PendingBuf {
+    Eager { buf: Vec<u8>, total_size: usize },
+    Streaming {
+        chunks: VecDeque<Vec<u8>>,
+        total_size: usize,
+        len: usize,
+    },
+}
+
+type PendingCell = Mutex<Option<PendingBuf>>;
 static PENDING_CERT_2048: PendingCell = Mutex::new(None);
 static PENDING_CERT_4096: PendingCell = Mutex::new(None);
 static PENDING_USER_SIG_2048: PendingCell = Mutex::new(None);
@@ -192,8 +209,43 @@ fn pending_slot(kind: CircuitKind) -> &'static PendingCell {
     }
 }
 
-fn lock_pending(kind: CircuitKind) -> std::sync::MutexGuard<'static, Option<Vec<u8>>> {
+fn lock_pending(kind: CircuitKind) -> std::sync::MutexGuard<'static, Option<PendingBuf>> {
     pending_slot(kind).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+// Read adapter over a chunked queue. Pops the front Vec<u8> when it is fully
+// consumed so the wasm allocator can reuse that capacity for ProverKey
+// allocations the deserializer is still building.
+struct ChunkDrainReader {
+    chunks: VecDeque<Vec<u8>>,
+    front_off: usize,
+}
+
+impl Read for ChunkDrainReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut written = 0;
+        while written < buf.len() {
+            let Some(front) = self.chunks.front() else { break };
+            let avail = &front[self.front_off..];
+            // Drops a zero-length front so we keep scanning; the bottom-of-
+            // loop pop handles the common case. Both pops are required by
+            // `chunk_drain_reader_drops_consumed_chunks`.
+            if avail.is_empty() {
+                self.chunks.pop_front();
+                self.front_off = 0;
+                continue;
+            }
+            let n = avail.len().min(buf.len() - written);
+            buf[written..written + n].copy_from_slice(&avail[..n]);
+            self.front_off += n;
+            written += n;
+            if self.front_off >= front.len() {
+                self.chunks.pop_front();
+                self.front_off = 0;
+            }
+        }
+        Ok(written)
+    }
 }
 
 // Core prove path shared by wasm_bindgen and native test entry points.
@@ -241,58 +293,104 @@ pub fn load_pk(kind: CircuitKind, pk_bytes: &[u8]) -> Result<(), JsError> {
 // Native-callable cores for the streaming PK load. The `#[wasm_bindgen]`
 // entry points below wrap these with `String -> JsError`. Mirrors
 // `prove_core` so unit tests can target the cores directly.
-fn load_pk_begin_core(kind: CircuitKind, total_size: usize) -> Result<(), String> {
-    let mut buf = Vec::new();
-    buf.try_reserve_exact(total_size)
-        .map_err(|e| format!("reserve {total_size} bytes for {kind:?}: {e}"))?;
-    *lock_pending(kind) = Some(buf);
+fn load_pk_begin_core(
+    kind: CircuitKind,
+    total_size: usize,
+    low_memory_mode: bool,
+) -> Result<(), String> {
+    let pending = if low_memory_mode {
+        PendingBuf::Streaming {
+            chunks: VecDeque::new(),
+            total_size,
+            len: 0,
+        }
+    } else {
+        let mut buf = Vec::new();
+        buf.try_reserve_exact(total_size)
+            .map_err(|e| format!("reserve {total_size} bytes for {kind:?}: {e}"))?;
+        PendingBuf::Eager { buf, total_size }
+    };
+    *lock_pending(kind) = Some(pending);
     Ok(())
 }
 
 fn load_pk_chunk_core(kind: CircuitKind, chunk: &[u8]) -> Result<(), String> {
     let mut guard = lock_pending(kind);
-    let buf = guard
+    let pending = guard
         .as_mut()
         .ok_or_else(|| format!("load_pk_chunk before load_pk_begin for {kind:?}"))?;
-    let next_len = buf.len().saturating_add(chunk.len());
-    if next_len > buf.capacity() {
-        return Err(format!(
-            "chunk exceeds reserved capacity for {kind:?}: would be {}, capacity {}",
-            next_len,
-            buf.capacity(),
-        ));
+    match pending {
+        PendingBuf::Eager { buf, total_size } => {
+            let next_len = buf.len().saturating_add(chunk.len());
+            if next_len > *total_size {
+                return Err(format!(
+                    "chunk exceeds announced total for {kind:?}: would be {next_len}, total {total_size}",
+                ));
+            }
+            buf.extend_from_slice(chunk);
+        }
+        PendingBuf::Streaming {
+            chunks,
+            total_size,
+            len,
+        } => {
+            let next_len = len.saturating_add(chunk.len());
+            if next_len > *total_size {
+                return Err(format!(
+                    "chunk exceeds announced total for {kind:?}: would be {next_len}, total {total_size}",
+                ));
+            }
+            chunks.push_back(chunk.to_vec());
+            *len = next_len;
+        }
     }
-    buf.extend_from_slice(chunk);
     Ok(())
 }
 
 fn load_pk_finish_core(kind: CircuitKind) -> Result<(), String> {
-    let bytes = lock_pending(kind)
+    let pending = lock_pending(kind)
         .take()
         .ok_or_else(|| format!("load_pk_finish before load_pk_begin for {kind:?}"))?;
-    let pk = bincode::deserialize(&bytes)
-        .map_err(|e| format!("PK deserialize ({kind:?}): {e}"))?;
+    let pk = match pending {
+        PendingBuf::Eager { buf, .. } => bincode::deserialize(&buf)
+            .map_err(|e| format!("PK deserialize ({kind:?}): {e}"))?,
+        PendingBuf::Streaming { chunks, .. } => {
+            let reader = ChunkDrainReader { chunks, front_off: 0 };
+            bincode::deserialize_from(reader)
+                .map_err(|e| format!("PK deserialize streaming ({kind:?}): {e}"))?
+        }
+    };
     *lock_pk_mut(kind) = Some(pk);
     Ok(())
 }
 
-/// Begin a streaming PK load. Reserves a `Vec<u8>` with exactly
-/// `total_size` capacity so subsequent `load_pk_chunk` calls append in
-/// place. Use this triple instead of `load_pk(bytes)` when the caller
-/// can't afford the JS-side allocation: the one-shot variant requires
-/// a JS `Uint8Array` for the whole PK alongside the wasm-side copy,
-/// while the streaming triple keeps the JS heap empty (chunks flow
-/// straight into wasm). The wasm-side deserialize peak is the same on
-/// both paths. See PTT-OpenAC-Web issue #28 for the rs4096 jetsam
-/// trace on iOS WKWebView.
+/// Begin a streaming PK load. Picks one of two storage shapes based on
+/// `low_memory_mode`:
+///
+/// * `false` (eager): reserves a single `Vec<u8>` of `total_size` capacity
+///   up front; chunks are appended in place; finalize deserializes from the
+///   slice. Fastest per byte; wasm peak is roughly the raw buffer plus the
+///   ProverKey being built.
+/// * `true` (streaming): queues each chunk as its own `Vec<u8>`; finalize
+///   deserializes through a draining `Read` adapter that drops each chunk
+///   once consumed, returning its capacity to the wasm allocator while the
+///   ProverKey is still being built. Slightly slower per byte but cuts the
+///   transient peak. Use for iOS WKWebView under the WebContent jetsam cap
+///   (PTT-OpenAC-Web issue #28); pass `false` from desktop and from every
+///   non-web binding consumer (iOS / Android / Flutter / RN / openac-sdk).
 #[wasm_bindgen]
-pub fn load_pk_begin(kind: CircuitKind, total_size: usize) -> Result<(), JsError> {
-    load_pk_begin_core(kind, total_size).map_err(|e| JsError::new(&e))
+pub fn load_pk_begin(
+    kind: CircuitKind,
+    total_size: usize,
+    low_memory_mode: bool,
+) -> Result<(), JsError> {
+    load_pk_begin_core(kind, total_size, low_memory_mode).map_err(|e| JsError::new(&e))
 }
 
 /// Append a chunk to the in-flight buffer. The cumulative length is bounded
-/// by the capacity reserved in `load_pk_begin` so a caller cannot quietly
-/// exceed the reservation and force a reallocation.
+/// by the `total_size` announced in `load_pk_begin` so a caller cannot quietly
+/// overshoot (which would force a reallocation in eager mode and a silent
+/// drift between announced and actual bytes in streaming mode).
 #[wasm_bindgen]
 pub fn load_pk_chunk(kind: CircuitKind, chunk: &[u8]) -> Result<(), JsError> {
     load_pk_chunk_core(kind, chunk).map_err(|e| JsError::new(&e))
@@ -377,6 +475,30 @@ pub fn prove_native_for_test(
     prove_core(&pk, kind, wtns_bytes)
 }
 
+/// Load a PK via the streaming triple under `low_memory_mode`, then return
+/// the re-serialized loaded PK. Native-only; lets the cross-mode parity
+/// test confirm both modes round-trip to byte-identical bytes.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_pk_via_streaming_for_test(
+    kind: CircuitKind,
+    pk_bytes: &[u8],
+    chunk_size: usize,
+    low_memory_mode: bool,
+) -> Result<Vec<u8>, String> {
+    load_pk_cancel(kind);
+    drop_pk(kind);
+    load_pk_begin_core(kind, pk_bytes.len(), low_memory_mode)?;
+    for chunk in pk_bytes.chunks(chunk_size) {
+        load_pk_chunk_core(kind, chunk)?;
+    }
+    load_pk_finish_core(kind)?;
+    let guard = lock_pk_mut(kind);
+    let pk = guard
+        .as_ref()
+        .ok_or_else(|| format!("pk slot empty after load_pk_finish for {kind:?}"))?;
+    bincode::serialize(pk).map_err(|e| format!("re-serialize: {e}"))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn verify_roundtrip(
     proof_bytes: &[u8], vk_bytes: &[u8],
@@ -424,6 +546,22 @@ mod tests {
         load_pk_cancel(kind);
     }
 
+    /// Drain the pending slot to a flat Vec regardless of variant. Used by
+    /// tests that need to compare accumulated bytes against an expected
+    /// input.
+    fn drain_pending_to_vec(kind: CircuitKind) -> Vec<u8> {
+        let mut guard = lock_pending(kind);
+        match guard.take().expect("pending set") {
+            PendingBuf::Eager { buf, .. } => buf,
+            PendingBuf::Streaming { chunks, .. } => {
+                let mut reader = ChunkDrainReader { chunks, front_off: 0 };
+                let mut out = Vec::new();
+                reader.read_to_end(&mut out).expect("drain reader");
+                out
+            }
+        }
+    }
+
     #[test]
     fn load_pk_chunk_before_begin_errors() {
         reset_streaming(CircuitKind::UserSigRs2048);
@@ -436,58 +574,158 @@ mod tests {
         assert!(load_pk_finish_core(CircuitKind::CertChainRs2048).is_err());
     }
 
-    #[test]
-    fn load_pk_chunk_capacity_overflow_errors() {
+    fn check_chunk_capacity_overflow_errors(low_memory_mode: bool) {
         reset_streaming(CircuitKind::CertChainRs4096);
-        load_pk_begin_core(CircuitKind::CertChainRs4096, 4).unwrap();
+        load_pk_begin_core(CircuitKind::CertChainRs4096, 4, low_memory_mode).unwrap();
         load_pk_chunk_core(CircuitKind::CertChainRs4096, &[1, 2, 3]).unwrap();
-        // Next chunk would push len to 6 over capacity 4; must reject.
-        assert!(load_pk_chunk_core(CircuitKind::CertChainRs4096, &[4, 5, 6]).is_err());
+        // Next chunk would push len to 6 over total 4; must reject.
+        assert!(
+            load_pk_chunk_core(CircuitKind::CertChainRs4096, &[4, 5, 6]).is_err(),
+            "low_memory_mode={low_memory_mode}",
+        );
         reset_streaming(CircuitKind::CertChainRs4096);
     }
 
     #[test]
-    fn load_pk_cancel_clears_pending() {
+    fn load_pk_chunk_capacity_overflow_errors_eager() {
+        check_chunk_capacity_overflow_errors(false);
+    }
+
+    #[test]
+    fn load_pk_chunk_capacity_overflow_errors_streaming() {
+        check_chunk_capacity_overflow_errors(true);
+    }
+
+    fn check_cancel_clears_pending(low_memory_mode: bool) {
         reset_streaming(CircuitKind::UserSigRs2048);
-        load_pk_begin_core(CircuitKind::UserSigRs2048, 8).unwrap();
+        load_pk_begin_core(CircuitKind::UserSigRs2048, 8, low_memory_mode).unwrap();
         load_pk_chunk_core(CircuitKind::UserSigRs2048, &[1, 2, 3, 4]).unwrap();
         load_pk_cancel(CircuitKind::UserSigRs2048);
-        // After cancel, finish must fail because there's nothing pending.
         assert!(load_pk_finish_core(CircuitKind::UserSigRs2048).is_err());
-        // Chunk-after-cancel must also fail (no in-flight buffer).
         assert!(load_pk_chunk_core(CircuitKind::UserSigRs2048, &[5]).is_err());
     }
 
     #[test]
-    fn load_pk_begin_resets_previous_buffer() {
+    fn load_pk_cancel_clears_pending_eager() {
+        check_cancel_clears_pending(false);
+    }
+
+    #[test]
+    fn load_pk_cancel_clears_pending_streaming() {
+        check_cancel_clears_pending(true);
+    }
+
+    fn check_begin_resets_previous_buffer(first_mode: bool, second_mode: bool) {
         reset_streaming(CircuitKind::CertChainRs2048);
-        load_pk_begin_core(CircuitKind::CertChainRs2048, 16).unwrap();
+        load_pk_begin_core(CircuitKind::CertChainRs2048, 16, first_mode).unwrap();
         load_pk_chunk_core(CircuitKind::CertChainRs2048, &[0; 8]).unwrap();
-        // A second begin throws away the partially-filled buffer; the
-        // following chunk fits the new capacity rather than the old offset.
-        load_pk_begin_core(CircuitKind::CertChainRs2048, 4).unwrap();
+        // A second begin throws away the partially-filled state; the
+        // following chunk fits the new total rather than the old offset.
+        load_pk_begin_core(CircuitKind::CertChainRs2048, 4, second_mode).unwrap();
         load_pk_chunk_core(CircuitKind::CertChainRs2048, &[1, 2, 3, 4]).unwrap();
         assert!(load_pk_chunk_core(CircuitKind::CertChainRs2048, &[5]).is_err());
         reset_streaming(CircuitKind::CertChainRs2048);
     }
 
-    /// Regression: chunks must concatenate in call order with no overlap
-    /// or gap so finalize sees byte-identical input to the one-shot
-    /// `load_pk(kind, &bytes)` path.
     #[test]
-    fn streaming_chunks_accumulate_bytes_in_order() {
+    fn load_pk_begin_resets_previous_buffer_eager() {
+        check_begin_resets_previous_buffer(false, false);
+    }
+
+    #[test]
+    fn load_pk_begin_resets_previous_buffer_streaming() {
+        check_begin_resets_previous_buffer(true, true);
+    }
+
+    #[test]
+    fn load_pk_begin_resets_previous_buffer_mode_switch() {
+        check_begin_resets_previous_buffer(false, true);
+        check_begin_resets_previous_buffer(true, false);
+    }
+
+    fn check_chunks_accumulate_bytes_in_order(low_memory_mode: bool) {
         reset_streaming(CircuitKind::CertChainRs4096);
         let original: Vec<u8> = (0u8..=255).cycle().take(1000).collect();
-        load_pk_begin_core(CircuitKind::CertChainRs4096, original.len()).unwrap();
+        load_pk_begin_core(CircuitKind::CertChainRs4096, original.len(), low_memory_mode)
+            .unwrap();
         for chunk in original.chunks(37) {
             load_pk_chunk_core(CircuitKind::CertChainRs4096, chunk).unwrap();
         }
-        let pending = lock_pending(CircuitKind::CertChainRs4096);
-        assert_eq!(
-            pending.as_ref().expect("pending buffer set").as_slice(),
-            original.as_slice(),
+        assert_eq!(drain_pending_to_vec(CircuitKind::CertChainRs4096), original);
+        reset_streaming(CircuitKind::CertChainRs4096);
+    }
+
+    /// Regression: chunks must concatenate in call order with no overlap or
+    /// gap so finalize sees byte-identical input to the one-shot
+    /// `load_pk(kind, &bytes)` path. Run under both modes.
+    #[test]
+    fn streaming_chunks_accumulate_bytes_in_order_eager() {
+        check_chunks_accumulate_bytes_in_order(false);
+    }
+
+    #[test]
+    fn streaming_chunks_accumulate_bytes_in_order_streaming() {
+        check_chunks_accumulate_bytes_in_order(true);
+    }
+
+    #[test]
+    fn chunk_drain_reader_yields_bytes_in_order_across_chunks() {
+        let mut chunks = VecDeque::new();
+        chunks.push_back(vec![1u8, 2, 3]);
+        chunks.push_back(vec![4u8, 5]);
+        chunks.push_back(vec![6u8]);
+        let mut reader = ChunkDrainReader { chunks, front_off: 0 };
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).unwrap();
+        assert_eq!(out, vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn chunk_drain_reader_short_reads_then_long_read() {
+        let mut chunks = VecDeque::new();
+        chunks.push_back(vec![1u8, 2, 3]);
+        chunks.push_back((10u8..=109).collect::<Vec<u8>>());
+        let mut reader = ChunkDrainReader { chunks, front_off: 0 };
+        let mut buf = [0u8; 1];
+        assert_eq!(reader.read(&mut buf).unwrap(), 1);
+        assert_eq!(buf, [1]);
+        let mut big = vec![0u8; 100];
+        let n = reader.read(&mut big).unwrap();
+        assert_eq!(n, 100);
+        assert_eq!(&big[..2], &[2, 3]);
+        assert_eq!(big[2], 10);
+        assert_eq!(big[99], 107);
+        let mut tail = Vec::new();
+        reader.read_to_end(&mut tail).unwrap();
+        assert_eq!(tail, vec![108, 109]);
+    }
+
+    #[test]
+    fn chunk_drain_reader_drops_consumed_chunks() {
+        let mut chunks = VecDeque::new();
+        chunks.push_back(vec![1u8, 2, 3]);
+        chunks.push_back(vec![4u8, 5, 6]);
+        chunks.push_back(vec![7u8, 8, 9]);
+        let mut reader = ChunkDrainReader { chunks, front_off: 0 };
+        // Read 4 bytes: consumes chunk 0 entirely and 1 byte from chunk 1.
+        let mut buf = vec![0u8; 4];
+        reader.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, vec![1, 2, 3, 4]);
+        assert_eq!(reader.chunks.len(), 2, "chunk 0 must be dropped");
+        assert_eq!(reader.front_off, 1, "1 byte consumed from new front");
+    }
+
+    #[test]
+    fn load_pk_begin_low_memory_mode_skips_reservation() {
+        reset_streaming(CircuitKind::CertChainRs4096);
+        // 256 GB would fail Vec::try_reserve_exact even on a 64-bit host
+        // with plenty of RAM (the test allocator caps things). Streaming
+        // mode never calls try_reserve_exact so begin succeeds.
+        let huge = 256usize * 1024 * 1024 * 1024;
+        assert!(
+            load_pk_begin_core(CircuitKind::CertChainRs4096, huge, true).is_ok(),
+            "streaming mode must not pre-reserve",
         );
-        drop(pending);
         reset_streaming(CircuitKind::CertChainRs4096);
     }
 }
