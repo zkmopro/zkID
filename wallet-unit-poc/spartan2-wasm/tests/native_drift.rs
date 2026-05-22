@@ -105,9 +105,9 @@ fn streaming_load_pk_parity_user_sig_rs2048() {
     );
     let pk_bytes = bincode::serialize(&pk).unwrap();
 
-    // 4 MiB matches the web worker's `PK_LOAD_CHUNK_BYTES`. Also exercise
-    // a small chunk size to stress chunk-boundary handling in the Read
-    // adapter where chunks are smaller than typical bincode reads.
+    // 4 MiB matches the web worker's `PK_LOAD_CHUNK_BYTES`; the small
+    // size stresses chunk-boundary handling when chunks are smaller than
+    // typical bincode reads.
     for &chunk_size in &[4 * 1024 * 1024usize, 137usize] {
         let eager_round_trip = load_pk_via_streaming_for_test(
             CircuitKind::UserSigRs2048,
