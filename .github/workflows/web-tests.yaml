@@ -26,9 +26,9 @@ on:
 env:
     NODE_VERSION: "20"
     PNPM_VERSION: "10"
-    # Must match the `wasm-bindgen` version resolved in
-    # wallet-unit-poc/spartan2-wasm/Cargo.lock. Bump both together.
-    WASM_BINDGEN_CLI_VERSION: "0.2.118"
+    # Must match the `wasm-bindgen` version resolved in the workspace
+    # Cargo.lock. Bump both together.
+    WASM_BINDGEN_CLI_VERSION: "0.2.122"
 
 jobs:
     compile-circuits:
@@ -81,7 +81,7 @@ jobs:
                   path: |
                       ~/.cargo/registry
                       ~/.cargo/git
-                  key: web-tests-cargo-${{ hashFiles('wallet-unit-poc/spartan2-wasm/Cargo.lock') }}
+                  key: web-tests-cargo-${{ hashFiles('Cargo.lock') }}
                   restore-keys: |
                       web-tests-cargo-
 
@@ -171,7 +171,7 @@ jobs:
                   path: |
                       ~/.cargo/registry
                       ~/.cargo/git
-                  key: web-tests-cargo-${{ hashFiles('wallet-unit-poc/spartan2-wasm/Cargo.lock') }}
+                  key: web-tests-cargo-${{ hashFiles('Cargo.lock') }}
                   restore-keys: |
                       web-tests-cargo-
 
