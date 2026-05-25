@@ -91,9 +91,10 @@ jobs:
                   tool: wasm-bindgen-cli@${{ env.WASM_BINDGEN_CLI_VERSION }}
 
             - name: Run spartan2-wasm native unit tests
+              # Serialize: streaming load_pk tests share PK_*/PENDING_* statics.
               run: |
                   cd wallet-unit-poc/spartan2-wasm
-                  cargo test --release --lib
+                  cargo test --release --lib -- --test-threads=1
 
             - name: Run spartan2-wasm input_builder_drift guard
               # Pins the wasm and native input builders to byte-identical JSON
