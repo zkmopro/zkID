@@ -28,7 +28,7 @@ cargo +nightly build --target wasm32-unknown-unknown --release \
 #   cargo install wasm-bindgen-cli --version <matching-version>
 #
 wasm-bindgen --target web --out-dir pkg \
-  target/wasm32-unknown-unknown/release/spartan2_wasm.wasm
+  ../../target/wasm32-unknown-unknown/release/spartan2_wasm.wasm
 
 # Native drift test (slow — setup + prove across two circuits)
 cargo test --test native_drift --release
