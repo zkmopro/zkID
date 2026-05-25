@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "wallet-unit-poc/ecdsa-spartan2",
+    "wallet-unit-poc/zkid-input-builder",
+    "wallet-unit-poc/spartan2-wasm",
+    "wallet-unit-poc/mobile",
+    "wallet-unit-poc/openac-sdk/wasm",
+]
+exclude = [
+    "wallet-unit-poc/mobile/mopro_flutter_bindings/rust",
+]
+resolver = "2"
