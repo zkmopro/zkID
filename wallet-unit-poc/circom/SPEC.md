@@ -28,9 +28,15 @@ Circuit A and Circuit B are linked via `pkCommit`: the verifier checks
 1. **Cert chain verify** — `issuerRsaModulus` (MOICA) verifies
    `issuerRsaSignature` over `issuerTbs` (the TBS portion of the user's
    cert). Proves that MOICA certified the user's public key.
-2. **DER parsing** — `VerifyTBSinCert`, `VerifySerialNumber`
-   check that the user cert contains the claimed TBS and serial number at the
-   prover-supplied offsets.
+2. **DER parsing** — `CertChainRSA256` walks the outer SEQUENCE header +
+   optional `[0] EXPLICIT` version block to derive the canonical
+   serial-INTEGER offset; the prover does **not** supply
+   `tbsSerialNumberOffset`. `VerifySerialNumber` then checks the ASN.1
+   INTEGER tag/length at the derived offset. The DER long-form prefix
+   `[0x82, 0x01, 0x01, 0x00]` is pinned at
+   `issuerTbs[tbsModulusTagOffset + {1..4}]`, so `tbsModulusOffset` is
+   derived as `tbsModulusTagOffset + 5`. (See `audit_report_v2.md` CRITICAL
+   and LOW #1 for the canonicalisation rationale.)
 3. **Revocation** — `SMTNonMembershipVerifier` proves `serialNumber` is **not**
    in the revocation tree rooted at `smtRoot`.
 4. **Linking** — `pkCommit = ChunkedPoseidonP256(userRsaExtractedModulus ‖ pkBlind)`,
@@ -45,14 +51,25 @@ Circuit A and Circuit B are linked via `pkCommit`: the verifier checks
    equal `tbs[0..31]` (the SHA-256-padded payload the card signs) packed
    little-endian into one field element. The verifier unpacks and byte-compares
    against the issued challenge's `app_id`.
-2. **Device signature verify** — `userPkLimbs` verifies `userRsaSignature`
+2. **SHA-256 padding pinning** — `tbs[31] === 0x80`, `tbs[32..62] === 0`,
+   `tbs[63] === 0xF8`, with `messageLength` hard-coded to 64. This pins the
+   SHA-256-padded payload to the canonical 31-byte-message form, so the
+   signature `σ = sign(SHA256(app_id_bytes))` is fully determined by
+   `(card, app_id)` — the precondition that makes the nullifier in item 5
+   unique per `(card, app_id)`. (See `audit_report_v2.md` HIGH for the
+   malleability that this constraint closes.)
+3. **Device signature verify** — `userPkLimbs` verifies `userRsaSignature`
    over `tbs`. Proves the holder of the user's private key signed the app-id bytes.
-3. **Linking** — same `pkCommit` formula as Circuit A, using the same
+4. **Linking** — same `pkCommit` formula as Circuit A, using the same
    `pkBlind` value.
-4. **Nullifier** — `nullifier = ChunkedPoseidonP256(userRsaSignature)`
+5. **Nullifier** — `nullifier = ChunkedPoseidonP256(userRsaSignature)`
    (public output). PKCS#1 v1.5 signing is deterministic and the signature
    never leaves the card, so the nullifier is deterministic per
    `(card, app_id)` and unforgeable without the card's private key.
+6. **Challenge binding** — `challengeSquared <== challenge * challenge`
+   (Semaphore-style dummy square) binds the prover to the verifier-issued
+   per-session nonce without affecting other constraints, preventing proof
+   replay across sessions.
 
 ## Public inputs / outputs
 
@@ -110,8 +127,9 @@ whose secrecy rests on the RSA private key never leaving the card.
 ## See also
 
 - [`../ecdsa-spartan2/README.md`](../ecdsa-spartan2/README.md) — Rust prover CLI
+- [`AUDIT_LOG.md`](./AUDIT_LOG.md) — internal security review history (latest: [`audit_report_v3.md`](./audit_report_v3.md))
 - `circuits/components/smtNonmembership.circom` — SMT non-membership verification
 - `circuits/components/smtVerifierP256.circom` — SMT verifier with Poseidon-P256 hash
 - `circuits/components/poseidonP256.circom` — Poseidon hash over secq256r1
 - `circuits/components/pkCommit.circom` — `ChunkedPoseidonP256` for `pkCommit`
-- `circuits/utils/utils.circom` — cert parsing helpers (`VerifyTBSinCert`, `VerifySerialNumber`, `ExtractModulus`, `PackBytes`, `PoseidonBytes`)
+- `circuits/utils/utils.circom` — cert parsing helpers (`AssertSliceInTBS`, `VerifySerialNumber`, `ExtractModulus`, `PackBytes`; the file also contains `VerifySubjectDN`, `PoseidonBytes`, `PoseidonBytesWithField`, flagged for removal by audit v3)

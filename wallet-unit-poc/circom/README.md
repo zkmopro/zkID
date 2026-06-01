@@ -42,7 +42,7 @@ memory-heavy.
 - `circuits/certChain.circom` — CertChain circuit (Circuit A: cert chain + revocation + pkCommit)
 - `circuits/userSig.circom` — UserSig circuit (Circuit B: device signature + pkCommit)
 - `circuits/components/` — reusable templates: SMT non-membership, Poseidon over P256
-- `circuits/utils/utils.circom` — DER-level cert helpers (TBS / serial extraction, modulus extraction, byte packing, Poseidon-over-bytes)
+- `circuits/utils/utils.circom` — DER-level cert helpers (TBS slice assertion, serial extraction, modulus extraction, byte packing)
 
 ## Public-output layout (verifier-side parsing)
 
@@ -63,3 +63,4 @@ via a Semaphore-style dummy square (`challengeSquared <== challenge * challenge`
 
 - [SPEC.md](./SPEC.md) — circuit specification (inputs, outputs, what's proven)
 - [`../ecdsa-spartan2/README.md`](../ecdsa-spartan2/README.md) — Rust prover CLI usage
+- [`AUDIT_LOG.md`](./AUDIT_LOG.md) — internal security review history (latest: [`audit_report_v3.md`](./audit_report_v3.md))
